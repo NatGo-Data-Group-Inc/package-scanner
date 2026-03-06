@@ -1,0 +1,12 @@
+{
+  "job_id": "sj_20260303_182201_ab12cd",
+  "platform": "linux-amd64",
+  "package_name": "urllib3",
+  "vulnerability_id": "CVE-2026-12345",
+  "reason": "No fixed version available in approved mirror",
+  "compensating_controls": "egress restricted, runtime container isolation",
+  "expires_at": "2026-06-30",
+  "owner": "secops@company.com",
+  "ticket_id": "RISK-919"
+}
+

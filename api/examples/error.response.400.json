@@ -1,0 +1,5 @@
+{
+  "error_code": "invalid_request",
+  "message": "platform contains unsupported value: linux-ppc64le"
+}
+

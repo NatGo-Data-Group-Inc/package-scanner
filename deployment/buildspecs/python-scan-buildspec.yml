@@ -1,0 +1,47 @@
+version: 0.2
+
+env:
+  shell: bash
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.11
+    commands:
+      - set -euo pipefail
+      - mkdir -p /tmp/scan-input /tmp/scan-out
+      - pip install --no-cache-dir --upgrade pip
+      - pip install --no-cache-dir safety cyclonedx-bom
+      - curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+      - curl -sfL https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xvj -C /tmp bin/micromamba
+      - export MAMBA_EXE=/tmp/bin/micromamba
+      - export MAMBA_ROOT_PREFIX=/tmp/mamba
+      - /tmp/bin/micromamba create -y -n scanner python=3.11
+      - echo "Install phase complete."
+
+  build:
+    commands:
+      - set -euo pipefail
+      - export TS="$(date -u +%Y%m%dT%H%M%SZ)"
+      - export RUN_DIR="/tmp/scan-out/${TS}"
+      - mkdir -p "${RUN_DIR}"
+      - aws s3 cp "s3://${INPUT_BUCKET}/${INPUT_OBJECT_KEY}" /tmp/scan-input/environment.yml
+      - cp /tmp/scan-input/environment.yml "${RUN_DIR}/environment.yml"
+      - /tmp/bin/micromamba env create -f /tmp/scan-input/environment.yml -n target || /tmp/bin/micromamba env update -f /tmp/scan-input/environment.yml -n target
+      - /tmp/bin/micromamba run -n target python -m pip freeze > "${RUN_DIR}/requirements.lock.txt" || true
+      - /tmp/bin/micromamba run -n target python -m cyclonedx_py requirements "${RUN_DIR}/requirements.lock.txt" -o "${RUN_DIR}/python-packages.cdx.json" || true
+      - trivy sbom --format json --output "${RUN_DIR}/trivy-sbom-report.json" "${RUN_DIR}/python-packages.cdx.json" || true
+      - safety scan --file "${RUN_DIR}/requirements.lock.txt" --output json > "${RUN_DIR}/safety-report.json" || true
+      - if [ "${ENABLE_FORTIFY:-false}" = "true" ] && [ -n "${FORTIFY_COMMAND:-}" ]; then eval "${FORTIFY_COMMAND}" > "${RUN_DIR}/fortify-report.txt" 2>&1 || true; fi
+      - cat > "${RUN_DIR}/run-metadata.json" <<EOF
+        {
+          "timestamp_utc": "${TS}",
+          "input_bucket": "${INPUT_BUCKET}",
+          "input_object_key": "${INPUT_OBJECT_KEY}",
+          "results_prefix": "${RESULTS_PREFIX}",
+          "enable_fortify": "${ENABLE_FORTIFY:-false}"
+        }
+        EOF
+      - aws s3 cp "${RUN_DIR}/" "s3://${RESULTS_BUCKET}/${RESULTS_PREFIX}/${TS}/" --recursive
+      - echo "Scan run uploaded to s3://${RESULTS_BUCKET}/${RESULTS_PREFIX}/${TS}/"
+

@@ -1,0 +1,10 @@
+{
+  "job_id": "sj_20260303_182201_ab12cd",
+  "status": "completed",
+  "gate_status": "fail",
+  "gate_reason": "high_or_critical_found",
+  "created_at": "2026-03-03T18:22:01Z",
+  "started_at": "2026-03-03T18:22:22Z",
+  "finished_at": "2026-03-03T18:31:08Z"
+}
+

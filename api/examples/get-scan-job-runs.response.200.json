@@ -1,0 +1,21 @@
+{
+  "job_id": "sj_20260303_182201_ab12cd",
+  "runs": [
+    {
+      "platform": "linux-amd64",
+      "build_id": "cyber-scanner-dev-python-scan-linux-amd64:4c5f1b0a-5335-4f9b-80b2-6832f4a455eb",
+      "status": "SUCCEEDED"
+    },
+    {
+      "platform": "linux-arm64",
+      "build_id": "cyber-scanner-dev-python-scan-linux-arm64:f23d2e1a-f1ad-4dd9-9f26-62ff2f64b08f",
+      "status": "FAILED"
+    },
+    {
+      "platform": "windows-amd64",
+      "build_id": "cyber-scanner-dev-python-scan-windows-amd64:1a64b6cf-ae2b-4d44-a644-417d2f4dc69a",
+      "status": "SUCCEEDED"
+    }
+  ]
+}
+

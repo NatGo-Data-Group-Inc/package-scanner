@@ -1,0 +1,420 @@
+openapi: 3.0.3
+info:
+  title: cyber_scanner Control Plane API
+  version: 1.0.0
+  description: API contract for submitting package scan jobs, retrieving run status/artifacts, and managing remediation exceptions.
+servers:
+  - url: https://api.example.com
+tags:
+  - name: ScanJobs
+  - name: Exceptions
+paths:
+  /v1/scan-jobs:
+    post:
+      tags: [ScanJobs]
+      summary: Create a scan job
+      operationId: createScanJob
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateScanJobRequest'
+      responses:
+        '201':
+          description: Job created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateScanJobResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /v1/scan-jobs/{job_id}:
+    get:
+      tags: [ScanJobs]
+      summary: Get scan job status
+      operationId: getScanJob
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Job status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanJobStatusResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /v1/scan-jobs/{job_id}/runs:
+    get:
+      tags: [ScanJobs]
+      summary: Get per-platform run status
+      operationId: getScanJobRuns
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Per-platform run status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanRunsResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /v1/scan-jobs/{job_id}/artifacts:
+    get:
+      tags: [ScanJobs]
+      summary: Get artifact pointers for a job
+      operationId: getScanJobArtifacts
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Artifact locations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanArtifactsResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /v1/exceptions:
+    post:
+      tags: [Exceptions]
+      summary: Create remediation exception
+      operationId: createException
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateExceptionRequest'
+      responses:
+        '201':
+          description: Exception created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateExceptionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /v1/exceptions/{exception_id}:
+    get:
+      tags: [Exceptions]
+      summary: Get remediation exception details
+      operationId: getException
+      parameters:
+        - $ref: '#/components/parameters/ExceptionId'
+      responses:
+        '200':
+          description: Exception record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExceptionDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  parameters:
+    JobId:
+      in: path
+      name: job_id
+      required: true
+      schema:
+        type: string
+    ExceptionId:
+      in: path
+      name: exception_id
+      required: true
+      schema:
+        type: string
+  responses:
+    BadRequest:
+      description: Invalid request payload
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    CreateScanJobRequest:
+      type: object
+      required:
+        - request_id
+        - ecosystem
+        - mode
+        - base_environment_ref
+        - platforms
+      properties:
+        request_id:
+          type: string
+          description: Idempotency key
+        ecosystem:
+          $ref: '#/components/schemas/Ecosystem'
+        mode:
+          type: string
+          enum: [extend_existing, replace_in_existing, new_environment]
+        base_environment_ref:
+          type: string
+          description: S3 URI to base environment manifest
+          example: s3://input-bucket/inputs/python/environment.yml
+        package_changes:
+          $ref: '#/components/schemas/PackageChanges'
+        platforms:
+          type: array
+          items:
+            $ref: '#/components/schemas/Platform'
+          minItems: 1
+        policy:
+          $ref: '#/components/schemas/ScanPolicy'
+        fortify:
+          $ref: '#/components/schemas/FortifyConfig'
+        metadata:
+          $ref: '#/components/schemas/RequestMetadata'
+    CreateScanJobResponse:
+      type: object
+      required: [job_id, status, created_at]
+      properties:
+        job_id:
+          type: string
+        status:
+          $ref: '#/components/schemas/JobStatus'
+        created_at:
+          type: string
+          format: date-time
+    ScanJobStatusResponse:
+      type: object
+      required: [job_id, status, gate_status, created_at]
+      properties:
+        job_id:
+          type: string
+        status:
+          $ref: '#/components/schemas/JobStatus'
+        gate_status:
+          $ref: '#/components/schemas/GateStatus'
+        gate_reason:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+    ScanRunsResponse:
+      type: object
+      required: [job_id, runs]
+      properties:
+        job_id:
+          type: string
+        runs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScanRun'
+    ScanRun:
+      type: object
+      required: [platform, build_id, status]
+      properties:
+        platform:
+          $ref: '#/components/schemas/Platform'
+        build_id:
+          type: string
+        status:
+          type: string
+          enum: [IN_PROGRESS, SUCCEEDED, FAILED, FAULT, TIMED_OUT, STOPPED]
+    ScanArtifactsResponse:
+      type: object
+      required: [job_id, artifacts]
+      properties:
+        job_id:
+          type: string
+        artifacts:
+          $ref: '#/components/schemas/ArtifactPointers'
+    ArtifactPointers:
+      type: object
+      properties:
+        requirements_csv:
+          type: string
+          description: approval-candidate-packages.csv
+        lockfile:
+          type: string
+          description: Environment lock/manifest used for scan (environment.yml or renv.lock)
+        sbom_json:
+          type: string
+          description: CycloneDX SBOM generated for scan input
+        findings_csv:
+          type: string
+          description: vulnerability-findings.csv
+        remediation_required_csv:
+          type: string
+        remediation_exceptions_csv:
+          type: string
+        remediation_spreadsheet_csv:
+          type: string
+        governance_summary_json:
+          type: string
+        run_metadata_json:
+          type: string
+    CreateExceptionRequest:
+      type: object
+      required:
+        - job_id
+        - platform
+        - package_name
+        - vulnerability_id
+        - reason
+        - expires_at
+        - owner
+      properties:
+        job_id:
+          type: string
+        platform:
+          $ref: '#/components/schemas/Platform'
+        package_name:
+          type: string
+        vulnerability_id:
+          type: string
+        reason:
+          type: string
+        compensating_controls:
+          type: string
+        expires_at:
+          type: string
+          format: date
+        owner:
+          type: string
+        ticket_id:
+          type: string
+    CreateExceptionResponse:
+      type: object
+      required: [exception_id, status, created_at]
+      properties:
+        exception_id:
+          type: string
+        status:
+          type: string
+          enum: [pending_approval, approved, rejected, expired]
+        created_at:
+          type: string
+          format: date-time
+    ExceptionDetail:
+      type: object
+      required:
+        - exception_id
+        - job_id
+        - platform
+        - package_name
+        - vulnerability_id
+        - status
+      properties:
+        exception_id:
+          type: string
+        job_id:
+          type: string
+        platform:
+          $ref: '#/components/schemas/Platform'
+        package_name:
+          type: string
+        vulnerability_id:
+          type: string
+        reason:
+          type: string
+        compensating_controls:
+          type: string
+        expires_at:
+          type: string
+          format: date
+        owner:
+          type: string
+        ticket_id:
+          type: string
+        status:
+          type: string
+          enum: [pending_approval, approved, rejected, expired]
+        approval_id:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    PackageChanges:
+      type: object
+      properties:
+        add:
+          type: array
+          items:
+            type: string
+        remove:
+          type: array
+          items:
+            type: string
+        replace:
+          type: array
+          items:
+            $ref: '#/components/schemas/PackageReplacement'
+    PackageReplacement:
+      type: object
+      required: [from, to]
+      properties:
+        from:
+          type: string
+        to:
+          type: string
+    ScanPolicy:
+      type: object
+      properties:
+        remediate_medium:
+          type: boolean
+          default: true
+        fail_on_medium:
+          type: boolean
+          default: false
+    FortifyConfig:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          default: false
+        command:
+          type: string
+          default: ""
+    RequestMetadata:
+      type: object
+      properties:
+        requested_by:
+          type: string
+        ticket_id:
+          type: string
+    Platform:
+      type: string
+      enum: [linux-amd64, linux-arm64, windows-amd64]
+    Ecosystem:
+      type: string
+      enum: [python, r]
+    JobStatus:
+      type: string
+      enum: [queued, running, completed, failed, blocked]
+    GateStatus:
+      type: string
+      enum: [pass, fail, pending]
+    ErrorResponse:
+      type: object
+      required: [error_code, message]
+      properties:
+        error_code:
+          type: string
+        message:
+          type: string

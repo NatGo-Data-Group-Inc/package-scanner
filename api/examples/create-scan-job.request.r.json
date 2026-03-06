@@ -1,0 +1,16 @@
+{
+  "request_id": "8bf0a764-271f-4f4a-a047-4c395e99f6dd",
+  "ecosystem": "r",
+  "mode": "extend_existing",
+  "base_environment_ref": "s3://cyber-scanner-input-dev/inputs/r/renv.lock",
+  "platforms": ["windows-amd64"],
+  "policy": {
+    "remediate_medium": true,
+    "fail_on_medium": false
+  },
+  "metadata": {
+    "requested_by": "data-platform@company.com",
+    "ticket_id": "SEC-3988"
+  }
+}
+

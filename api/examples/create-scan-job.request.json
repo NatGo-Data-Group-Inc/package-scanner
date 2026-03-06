@@ -1,0 +1,27 @@
+{
+  "request_id": "d8c5b0fe-8f2b-4da6-a74c-7ec27d7a6cd7",
+  "ecosystem": "python",
+  "mode": "extend_existing",
+  "base_environment_ref": "s3://cyber-scanner-input-dev/inputs/python/environment.yml",
+  "package_changes": {
+    "add": ["numpy==2.0.2", "pandas==2.2.2"],
+    "remove": ["legacy-lib"],
+    "replace": [
+      {"from": "pyyaml", "to": "ruamel.yaml"}
+    ]
+  },
+  "platforms": ["linux-amd64", "linux-arm64", "windows-amd64"],
+  "policy": {
+    "remediate_medium": true,
+    "fail_on_medium": false
+  },
+  "fortify": {
+    "enabled": false,
+    "command": ""
+  },
+  "metadata": {
+    "requested_by": "ml-platform@company.com",
+    "ticket_id": "SEC-3421"
+  }
+}
+
