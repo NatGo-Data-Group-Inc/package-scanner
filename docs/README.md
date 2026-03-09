@@ -1,10 +1,10 @@
-# cyber_scanner Documentation
+# package_scanner Documentation
 
-This folder is the operator guide for `cyber_scanner`.
+This folder is the operator guide for `package_scanner`.
 
 ## Purpose
 
-`cyber_scanner` provides a redeployable AWS control/data plane for package vulnerability scanning and governance evidence generation.
+`package_scanner` provides a redeployable AWS control/data plane for package vulnerability scanning and governance evidence generation.
 
 - Control plane: submit and track scan jobs (contract in `api/openapi.yaml`).
 - Data plane: execute scans in CodeBuild across platform variants, write evidence/governance artifacts to S3.

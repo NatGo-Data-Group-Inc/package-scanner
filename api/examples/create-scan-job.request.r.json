@@ -2,7 +2,9 @@
   "request_id": "8bf0a764-271f-4f4a-a047-4c395e99f6dd",
   "ecosystem": "r",
   "mode": "extend_existing",
-  "base_environment_ref": "s3://cyber-scanner-input-dev/inputs/r/renv.lock",
+  "base_environment_ref": "s3://package-scanner-input-dev/inputs/r/renv.lock",
+  "base_environment_sha256": "3bfadee36ba661f8b19bc50d4c5bc29fed7f6eb1ecb4d8a8e2507913d66d6827",
+  "base_environment_contents": "{\n  \"R\": {\n    \"Version\": \"4.3.2\"\n  },\n  \"Packages\": {\n    \"tidyverse\": {\n      \"Package\": \"tidyverse\",\n      \"Version\": \"2.0.0\"\n    }\n  }\n}\n",
   "platforms": ["windows-amd64"],
   "policy": {
     "remediate_medium": true,

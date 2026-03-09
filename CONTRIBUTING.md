@@ -2,7 +2,7 @@
 
 ## Scope
 
-Contributions should preserve `cyber_scanner` goals:
+Contributions should preserve `package_scanner` goals:
 
 - accurate, fail-closed scan/report generation
 - clear environment guardrails

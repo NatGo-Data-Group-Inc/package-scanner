@@ -1,15 +1,17 @@
 {
   "job_id": "sj_20260303_182201_ab12cd",
   "artifacts": {
-    "requirements_csv": "s3://cyber-scanner-evidence-dev/evidence/requirements/python/linux-amd64/20260303T182408Z/approval-candidate-packages.csv",
-    "lockfile": "s3://cyber-scanner-evidence-dev/evidence/requirements/python/linux-amd64/20260303T182408Z/environment.yml",
-    "sbom_json": "s3://cyber-scanner-evidence-dev/evidence/env-artifacts/python/linux-amd64/20260303T182408Z/python-packages.cdx.json",
-    "findings_csv": "s3://cyber-scanner-evidence-dev/evidence/governance/python/linux-amd64/20260303T182408Z/vulnerability-findings.csv",
-    "remediation_required_csv": "s3://cyber-scanner-evidence-dev/evidence/governance/python/linux-amd64/20260303T182408Z/remediation-required.csv",
-    "remediation_exceptions_csv": "s3://cyber-scanner-evidence-dev/evidence/governance/python/linux-amd64/20260303T182408Z/remediation-exceptions.csv",
-    "remediation_spreadsheet_csv": "s3://cyber-scanner-evidence-dev/evidence/governance/python/linux-amd64/20260303T182408Z/remediation-spreadsheet.csv",
-    "governance_summary_json": "s3://cyber-scanner-evidence-dev/evidence/traceability/python/linux-amd64/20260303T182408Z/governance-summary.json",
-    "run_metadata_json": "s3://cyber-scanner-evidence-dev/evidence/traceability/python/linux-amd64/20260303T182408Z/run-metadata.json"
+    "requirements_csv": "s3://package-scanner-evidence-dev/evidence/requirements/python/linux-amd64/20260303T182408Z/approval-candidate-packages.csv",
+    "lockfile": "s3://package-scanner-evidence-dev/evidence/requirements/python/linux-amd64/20260303T182408Z/environment.yml",
+    "lockfile_sha256": "b26f0e5d5e97114003d81583d394df73a1c5eedad97f075aca8f00fbf3c2ec99",
+    "lockfile_contents": "name: target\nchannels:\n  - conda-forge\ndependencies:\n  - python=3.11\n  - numpy=1.26.4\n  - pip\n",
+    "sbom_json": "s3://package-scanner-evidence-dev/evidence/env-artifacts/python/linux-amd64/20260303T182408Z/python-packages.cdx.json",
+    "findings_csv": "s3://package-scanner-evidence-dev/evidence/governance/python/linux-amd64/20260303T182408Z/vulnerability-findings.csv",
+    "remediation_required_csv": "s3://package-scanner-evidence-dev/evidence/governance/python/linux-amd64/20260303T182408Z/remediation-required.csv",
+    "remediation_exceptions_csv": "s3://package-scanner-evidence-dev/evidence/governance/python/linux-amd64/20260303T182408Z/remediation-exceptions.csv",
+    "remediation_spreadsheet_csv": "s3://package-scanner-evidence-dev/evidence/governance/python/linux-amd64/20260303T182408Z/remediation-spreadsheet.csv",
+    "governance_summary_json": "s3://package-scanner-evidence-dev/evidence/traceability/python/linux-amd64/20260303T182408Z/governance-summary.json",
+    "run_metadata_json": "s3://package-scanner-evidence-dev/evidence/traceability/python/linux-amd64/20260303T182408Z/run-metadata.json"
   }
 }
 

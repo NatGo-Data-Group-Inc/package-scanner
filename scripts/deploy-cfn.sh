@@ -5,8 +5,8 @@ REGION="us-east-1"
 PROFILE=""
 ALLOW_DEFAULT_PROFILE="false"
 EXPECTED_ACCOUNT_ID=""
-STACK_NAME="cyber-scanner-dev"
-ENVIRONMENT_NAME="cyber-scanner-dev"
+STACK_NAME="package-scanner-dev"
+ENVIRONMENT_NAME="package-scanner-dev"
 DEPLOYMENT_LOCK_TOKEN=""
 EXISTING_INPUT_BUCKET_NAME=""
 EXISTING_EVIDENCE_BUCKET_NAME=""
@@ -17,6 +17,7 @@ LINUX_ARM_COMPUTE_TYPE="BUILD_GENERAL1_LARGE"
 WINDOWS_COMPUTE_TYPE="BUILD_GENERAL1_LARGE"
 TRIVY_VERSION="0.69.3"
 TRIVY_RELEASE_BASE_URL="https://github.com/aquasecurity/trivy/releases/download"
+TEMPLATE_S3_BUCKET=""
 
 usage() {
   cat <<'EOF'
@@ -39,6 +40,7 @@ Options:
   --windows-compute-type <type>
   --trivy-version <version>
   --trivy-release-base-url <url>
+  --s3-bucket <bucket>                       # optional: bucket for large templates
 EOF
 }
 
@@ -60,6 +62,7 @@ while [[ $# -gt 0 ]]; do
     --windows-compute-type) WINDOWS_COMPUTE_TYPE="$2"; shift 2 ;;
     --trivy-version) TRIVY_VERSION="$2"; shift 2 ;;
     --trivy-release-base-url) TRIVY_RELEASE_BASE_URL="$2"; shift 2 ;;
+    --s3-bucket) TEMPLATE_S3_BUCKET="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
   esac
@@ -146,6 +149,11 @@ if [[ -n "${STACK_LOCK_TOKEN}" && "${STACK_LOCK_TOKEN}" != "None" && "${STACK_LO
   exit 1
 fi
 
+EXTRA_DEPLOY_ARGS=()
+if [[ -n "${TEMPLATE_S3_BUCKET}" ]]; then
+  EXTRA_DEPLOY_ARGS+=(--s3-bucket "${TEMPLATE_S3_BUCKET}")
+fi
+
 echo "Deploying stack ${STACK_NAME} in ${REGION} ..."
 aws cloudformation deploy \
   --stack-name "${STACK_NAME}" \
@@ -154,10 +162,11 @@ aws cloudformation deploy \
   --tags \
     "DeploymentLockToken=${DEPLOYMENT_LOCK_TOKEN}" \
     "EnvironmentName=${ENVIRONMENT_NAME}" \
-    "Project=cyber_scanner" \
+    "Project=package_scanner" \
     "Purpose=cyber-package-scanning-control-and-data-plane" \
     "ManagedBy=cloudformation" \
   --parameter-overrides "${PARAM_OVERRIDES[@]}" \
+  "${EXTRA_DEPLOY_ARGS[@]}" \
   "${AWS_ARGS[@]}"
 
 echo "Fetching outputs ..."

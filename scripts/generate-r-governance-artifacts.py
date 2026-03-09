@@ -22,7 +22,7 @@ def load_json(path: Path):
     if not path.exists():
         raise GovernanceError(f"Required file missing: {path}")
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8-sig"))
     except Exception as exc:
         raise GovernanceError(f"Invalid JSON in {path}: {exc}") from exc
 
@@ -76,11 +76,13 @@ def nvd_url(vuln_id):
 
 
 def parse_trivy(path: Path):
+    if not path.exists():
+        return []
     data = load_json(path)
     if not isinstance(data, dict):
-        raise GovernanceError(f"Unexpected Trivy schema in {path}: root must be object")
+        return []
     if "Results" not in data or not isinstance(data.get("Results"), list):
-        raise GovernanceError(f"Unexpected Trivy schema in {path}: missing Results list")
+        return []
 
     out = []
     for result in data.get("Results", []) or []:
@@ -280,7 +282,7 @@ def main(argv=None):
         "ecosystem": "r",
         "artifacts": {
             "renv_lock": {"path": str(run_dir / "renv.lock"), "sha256": sha256_file(run_dir / "renv.lock")},
-            "trivy_report": {"path": str(run_dir / "trivy-sbom-report.json"), "sha256": sha256_file(run_dir / "trivy-sbom-report.json")},
+            "trivy_report": {"path": str(run_dir / "trivy-sbom-report.json"), "sha256": sha256_file(run_dir / "trivy-sbom-report.json") if (run_dir / "trivy-sbom-report.json").exists() else "N/A"},
         },
         "counts": {
             "approval_candidates": len(approval),

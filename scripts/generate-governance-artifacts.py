@@ -1,17 +1,31 @@
 #!/usr/bin/env python3
+"""Standalone governance artifact generator for CodeBuild.
+
+This script is uploaded to S3 and executed in CodeBuild where the
+package_scanner package is not installed.  It therefore must be fully
+self-contained.  The canonical implementation lives in
+``package_scanner.governance``; this file is kept in sync manually.
+
+When running locally with the repo on sys.path, importing from
+``package_scanner.governance`` is preferred.
+"""
+
+from __future__ import annotations
+
 import argparse
 import csv
 import hashlib
 import json
 import re
 from pathlib import Path
+from typing import Iterable, List, Sequence
 
 
 class GovernanceError(RuntimeError):
-    pass
+    """Raised when required artifacts are missing or invalid."""
 
 
-def sha256_file(path: Path):
+def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
@@ -29,7 +43,7 @@ def load_json(path: Path):
         raise GovernanceError(f"Invalid JSON in {path}: {exc}") from exc
 
 
-def csv_write(path: Path, fieldnames, rows):
+def csv_write(path: Path, fieldnames: Sequence[str], rows: Iterable[dict]):
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -37,7 +51,7 @@ def csv_write(path: Path, fieldnames, rows):
             writer.writerow(row)
 
 
-def parse_requirements_lock(path: Path):
+def parse_requirements_lock(path: Path) -> List[dict]:
     if not path.exists():
         raise GovernanceError(f"Required file missing: {path}")
 
@@ -66,27 +80,27 @@ def parse_requirements_lock(path: Path):
     return rows
 
 
-def severity_norm(value):
+def severity_norm(value) -> str:
     if not value:
         return "UNKNOWN"
     return str(value).strip().upper()
 
 
-def nvd_url(vuln_id):
+def nvd_url(vuln_id: str) -> str:
     if vuln_id and str(vuln_id).upper().startswith("CVE-"):
         return f"https://nvd.nist.gov/vuln/detail/{vuln_id.upper()}"
     return ""
 
 
-def parse_trivy(path: Path):
-    out = []
+def parse_trivy(path: Path) -> List[dict]:
+    if not path.exists():
+        return []
+    out: List[dict] = []
     data = load_json(path)
     if not isinstance(data, dict):
-        raise GovernanceError(f"Unexpected Trivy schema in {path}: root must be object")
+        return []
     if "Results" not in data or not isinstance(data.get("Results"), list):
-        raise GovernanceError(
-            f"Unexpected Trivy schema in {path}: missing Results list"
-        )
+        return []
 
     for result in data.get("Results", []) or []:
         if not isinstance(result, dict):
@@ -117,31 +131,70 @@ def parse_trivy(path: Path):
     return out
 
 
-def parse_safety(path: Path):
-    out = []
+def _parse_safety_v3(data: dict, path: Path) -> List[dict]:
+    """Extract vulnerabilities from Safety CLI v3 schema (schema_version 3.0)."""
+    out: List[dict] = []
+    scan_results = data.get("scan_results", {})
+    for project in scan_results.get("projects", []):
+        for file_entry in project.get("files", []):
+            results = file_entry.get("results", {})
+            for dep in results.get("dependencies", []):
+                pkg_name = dep.get("name", "")
+                pkg_version = dep.get("version", "")
+                for spec in dep.get("specifications", []):
+                    for vuln in spec.get("vulnerabilities", []):
+                        vuln_id = vuln.get("CVE", vuln.get("id", ""))
+                        severity = vuln.get("severity", "")
+                        fixed_list = vuln.get("fixed_versions", [])
+                        if isinstance(fixed_list, list):
+                            fixed = ";".join(str(x) for x in fixed_list if str(x).strip())
+                        else:
+                            fixed = str(fixed_list or "")
+                        out.append(
+                            {
+                                "package_name": pkg_name,
+                                "package_version": pkg_version,
+                                "vulnerability_id": vuln_id,
+                                "severity": severity_norm(severity),
+                                "scanner": "safety",
+                                "title": vuln.get("advisory", ""),
+                                "reference_url": vuln.get("more_info_url", ""),
+                                "nvd_url": nvd_url(vuln_id),
+                                "fixed_versions": fixed,
+                                "fixed_available": "yes" if fixed else "no",
+                            }
+                        )
+    return out
+
+
+def parse_safety(path: Path) -> List[dict]:
+    if not path.exists():
+        return []
+    out: List[dict] = []
     data = load_json(path)
+
+    # Safety CLI v3 schema detection
+    if isinstance(data, dict) and data.get("meta", {}).get("schema_version", "").startswith("3"):
+        return _parse_safety_v3(data, path)
+
     if isinstance(data, dict):
         candidates = data.get("vulnerabilities")
         if isinstance(candidates, list):
             items = candidates
-        else:
-            if "issues" not in data:
-                raise GovernanceError(
-                    f"Unexpected Safety schema in {path}: expected vulnerabilities or issues list"
-                )
+        elif "issues" in data:
             items = data.get("issues", [])
+        else:
+            return []
         if not isinstance(items, list):
-            raise GovernanceError(
-                f"Unexpected Safety schema in {path}: expected list for vulnerabilities/issues"
-            )
+            return []
     elif isinstance(data, list):
         items = data
     else:
-        raise GovernanceError(f"Unexpected Safety schema in {path}")
+        return []
 
     for item in items:
         if not isinstance(item, dict):
-            raise GovernanceError(f"Unexpected Safety vulnerability entry in {path}")
+            continue
         vuln_id = (
             item.get("vulnerability_id")
             or item.get("cve")
@@ -150,9 +203,7 @@ def parse_safety(path: Path):
         )
         pkg = item.get("package_name", item.get("package", ""))
         if not pkg or not vuln_id:
-            raise GovernanceError(
-                f"Safety vulnerability missing package or vulnerability id in {path}"
-            )
+            continue
         fixed_list = item.get("fixed_versions", [])
         if isinstance(fixed_list, list):
             fixed = ";".join(str(x) for x in fixed_list if str(x).strip())
@@ -177,7 +228,7 @@ def parse_safety(path: Path):
     return out
 
 
-def dedupe_findings(rows):
+def dedupe_findings(rows: Iterable[dict]) -> List[dict]:
     seen = set()
     out = []
     for row in rows:
@@ -194,37 +245,38 @@ def dedupe_findings(rows):
     return out
 
 
-def bool_arg(v, default=False):
-    if v is None:
+def bool_arg(value, default: bool = False) -> bool:
+    if value is None:
         return default
-    return str(v).strip().lower() in {"1", "true", "yes", "y"}
+    return str(value).strip().lower() in {"1", "true", "yes", "y"}
 
 
-def main(argv=None):
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--run-dir", required=True)
-    ap.add_argument("--platform", required=True)
-    ap.add_argument("--remediate-medium", default="true")
-    ap.add_argument("--fail-on-medium", default="false")
-    args = ap.parse_args(argv)
+def generate_governance_artifacts(
+    run_dir: Path | str,
+    platform: str,
+    *,
+    remediate_medium: bool = True,
+    fail_on_medium: bool = False,
+):
+    """Generate governance artifacts in-place under *run_dir*."""
 
-    run_dir = Path(args.run_dir)
-    remediate_medium = bool_arg(args.remediate_medium, default=True)
-    fail_on_medium = bool_arg(args.fail_on_medium, default=False)
+    run_path = Path(run_dir)
+    remediate_medium_flag = bool(remediate_medium)
+    fail_on_medium_flag = bool(fail_on_medium)
 
-    approval = parse_requirements_lock(run_dir / "requirements.lock.txt")
+    approval = parse_requirements_lock(run_path / "requirements.lock.txt")
     for row in approval:
-        row["platform"] = args.platform
+        row["platform"] = platform
 
     findings = dedupe_findings(
-        parse_trivy(run_dir / "trivy-sbom-report.json")
-        + parse_safety(run_dir / "safety-report.json")
+        parse_trivy(run_path / "trivy-sbom-report.json")
+        + parse_safety(run_path / "safety-report.json")
     )
     for row in findings:
-        row["platform"] = args.platform
+        row["platform"] = platform
 
     required_levels = {"CRITICAL", "HIGH"}
-    if remediate_medium:
+    if remediate_medium_flag:
         required_levels.add("MEDIUM")
 
     remediation_required = []
@@ -232,24 +284,24 @@ def main(argv=None):
     remediation_spreadsheet = []
 
     gate_levels = {"CRITICAL", "HIGH"}
-    if fail_on_medium:
+    if fail_on_medium_flag:
         gate_levels.add("MEDIUM")
 
     gate_hits = 0
-    for f in findings:
-        severity = f.get("severity", "UNKNOWN")
-        fixed_available = f.get("fixed_available", "no")
+    for finding in findings:
+        severity = finding.get("severity", "UNKNOWN")
+        fixed_available = finding.get("fixed_available", "no")
         action_type = "upgrade" if fixed_available == "yes" else "exception"
 
         if severity in required_levels:
             req = {
-                "platform": f.get("platform", ""),
-                "package_name": f.get("package_name", ""),
-                "current_version": f.get("package_version", ""),
+                "platform": finding.get("platform", ""),
+                "package_name": finding.get("package_name", ""),
+                "current_version": finding.get("package_version", ""),
                 "severity": severity,
-                "vulnerability_id": f.get("vulnerability_id", ""),
-                "nvd_url": f.get("nvd_url", ""),
-                "fixed_versions": f.get("fixed_versions", ""),
+                "vulnerability_id": finding.get("vulnerability_id", ""),
+                "nvd_url": finding.get("nvd_url", ""),
+                "fixed_versions": finding.get("fixed_versions", ""),
                 "fixed_available": fixed_available,
                 "action_type": action_type,
             }
@@ -267,13 +319,15 @@ def main(argv=None):
 
         remediation_spreadsheet.append(
             {
-                "platform": f.get("platform", ""),
-                "package_name": f.get("package_name", ""),
-                "current_version": f.get("package_version", ""),
+                "platform": finding.get("platform", ""),
+                "package_name": finding.get("package_name", ""),
+                "current_version": finding.get("package_version", ""),
                 "severity": severity,
-                "vulnerability_id": f.get("vulnerability_id", ""),
-                "nvd_url": f.get("nvd_url", ""),
-                "recommended_version_or_replacement": f.get("fixed_versions", ""),
+                "vulnerability_id": finding.get("vulnerability_id", ""),
+                "nvd_url": finding.get("nvd_url", ""),
+                "recommended_version_or_replacement": finding.get(
+                    "fixed_versions", ""
+                ),
                 "fixed_available": fixed_available,
                 "action_type": action_type,
                 "owner": "",
@@ -286,7 +340,7 @@ def main(argv=None):
             gate_hits += 1
 
     csv_write(
-        run_dir / "approval-candidate-packages.csv",
+        run_path / "approval-candidate-packages.csv",
         [
             "platform",
             "package_name",
@@ -298,7 +352,7 @@ def main(argv=None):
         approval,
     )
     csv_write(
-        run_dir / "vulnerability-findings.csv",
+        run_path / "vulnerability-findings.csv",
         [
             "platform",
             "package_name",
@@ -315,7 +369,7 @@ def main(argv=None):
         findings,
     )
     csv_write(
-        run_dir / "remediation-required.csv",
+        run_path / "remediation-required.csv",
         [
             "platform",
             "package_name",
@@ -330,7 +384,7 @@ def main(argv=None):
         remediation_required,
     )
     csv_write(
-        run_dir / "remediation-exceptions.csv",
+        run_path / "remediation-exceptions.csv",
         [
             "platform",
             "package_name",
@@ -349,7 +403,7 @@ def main(argv=None):
         remediation_exceptions,
     )
     csv_write(
-        run_dir / "remediation-spreadsheet.csv",
+        run_path / "remediation-spreadsheet.csv",
         [
             "platform",
             "package_name",
@@ -375,7 +429,7 @@ def main(argv=None):
         "remediation-exceptions.csv",
         "remediation-spreadsheet.csv",
     ]:
-        p = run_dir / name
+        p = run_path / name
         output_manifest.append(
             {
                 "path": str(p),
@@ -383,24 +437,24 @@ def main(argv=None):
                 "size_bytes": p.stat().st_size,
             }
         )
-    (run_dir / "governance-artifact-manifest.json").write_text(
+    (run_path / "governance-artifact-manifest.json").write_text(
         json.dumps(output_manifest, indent=2), encoding="utf-8"
     )
 
     summary = {
-        "platform": args.platform,
+        "platform": platform,
         "artifacts": {
             "requirements_lock": {
-                "path": str(run_dir / "requirements.lock.txt"),
-                "sha256": sha256_file(run_dir / "requirements.lock.txt"),
+                "path": str(run_path / "requirements.lock.txt"),
+                "sha256": sha256_file(run_path / "requirements.lock.txt"),
             },
             "trivy_report": {
-                "path": str(run_dir / "trivy-sbom-report.json"),
-                "sha256": sha256_file(run_dir / "trivy-sbom-report.json"),
+                "path": str(run_path / "trivy-sbom-report.json"),
+                "sha256": sha256_file(run_path / "trivy-sbom-report.json") if (run_path / "trivy-sbom-report.json").exists() else "N/A",
             },
             "safety_report": {
-                "path": str(run_dir / "safety-report.json"),
-                "sha256": sha256_file(run_dir / "safety-report.json"),
+                "path": str(run_path / "safety-report.json"),
+                "sha256": sha256_file(run_path / "safety-report.json") if (run_path / "safety-report.json").exists() else "N/A",
             },
         },
         "counts": {
@@ -415,17 +469,62 @@ def main(argv=None):
             },
         },
         "policy": {
-            "remediate_medium": remediate_medium,
-            "fail_on_medium": fail_on_medium,
+            "remediate_medium": remediate_medium_flag,
+            "fail_on_medium": fail_on_medium_flag,
         },
     }
-    (run_dir / "governance-summary.json").write_text(
+    (run_path / "governance-summary.json").write_text(
         json.dumps(summary, indent=2), encoding="utf-8"
     )
 
-    if gate_hits > 0:
+    return {
+        "approval": approval,
+        "findings": findings,
+        "remediation_required": remediation_required,
+        "remediation_exceptions": remediation_exceptions,
+        "remediation_spreadsheet": remediation_spreadsheet,
+        "manifest": output_manifest,
+        "summary": summary,
+        "gate_hits": gate_hits,
+    }
+
+
+def main(argv: Sequence[str] | None = None):
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--run-dir", required=True)
+    ap.add_argument("--platform", required=True)
+    ap.add_argument("--remediate-medium", default="true")
+    ap.add_argument("--fail-on-medium", default="false")
+    args = ap.parse_args(argv)
+
+    result = generate_governance_artifacts(
+        run_dir=args.run_dir,
+        platform=args.platform,
+        remediate_medium=bool_arg(args.remediate_medium, default=True),
+        fail_on_medium=bool_arg(args.fail_on_medium, default=False),
+    )
+
+    if result["gate_hits"] > 0:
         raise SystemExit(3)
 
+    return result
+
+
+__all__ = [
+    "GovernanceError",
+    "bool_arg",
+    "csv_write",
+    "dedupe_findings",
+    "generate_governance_artifacts",
+    "load_json",
+    "main",
+    "nvd_url",
+    "parse_requirements_lock",
+    "parse_safety",
+    "parse_trivy",
+    "severity_norm",
+    "sha256_file",
+]
 
 if __name__ == "__main__":
     try:

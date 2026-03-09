@@ -2,7 +2,7 @@
 
 ## Overview
 
-`cyber_scanner` uses a split control-plane/data-plane model.
+`package_scanner` uses a split control-plane/data-plane model.
 
 - Control plane:
   - API contract for scan submission/status/artifacts (`api/openapi.yaml`)
@@ -44,7 +44,7 @@ Template: `deployment/cfn/python-scan-stack.yaml`
 
 All major resources are tagged for governance/ownership:
 
-- `Project=cyber_scanner`
+- `Project=package_scanner`
 - `Purpose=<resource-specific-purpose>`
 - `ManagedBy=cloudformation`
 - `Environment=<EnvironmentName>`

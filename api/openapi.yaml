@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: cyber_scanner Control Plane API
+  title: package_scanner Control Plane API
   version: 1.0.0
   description: API contract for submitting package scan jobs, retrieving run status/artifacts, and managing remediation exceptions.
 servers:
@@ -176,6 +176,19 @@ components:
           $ref: '#/components/schemas/FortifyConfig'
         metadata:
           $ref: '#/components/schemas/RequestMetadata'
+        base_environment_sha256:
+          type: string
+          pattern: '^[A-Fa-f0-9]{64}$'
+          description: Optional SHA-256 digest of the base environment manifest for tamper detection.
+        base_environment_contents:
+          type: string
+          description: |
+            Optional inline copy of the environment manifest (UTF-8). Provide when
+            callers want the control plane to capture the exact file contents used
+            for the scan, even if the original S3 object later changes.
+        safety_api_key:
+          type: string
+          description: Optional Safety API key for authenticated vulnerability scans.
     CreateScanJobResponse:
       type: object
       required: [job_id, status, created_at]
@@ -249,6 +262,12 @@ components:
         lockfile:
           type: string
           description: Environment lock/manifest used for scan (environment.yml or renv.lock)
+        lockfile_sha256:
+          type: string
+          description: SHA-256 digest of the lockfile/environment manifest captured at submission time.
+        lockfile_contents:
+          type: string
+          description: Inline copy of the environment manifest captured for the job (UTF-8, may be truncated for large files).
         sbom_json:
           type: string
           description: CycloneDX SBOM generated for scan input

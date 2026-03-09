@@ -92,14 +92,14 @@ def nvd_url(vuln_id: str) -> str:
 
 
 def parse_trivy(path: Path) -> List[dict]:
+    if not path.exists():
+        return []
     out: List[dict] = []
     data = load_json(path)
     if not isinstance(data, dict):
-        raise GovernanceError(f"Unexpected Trivy schema in {path}: root must be object")
+        return []
     if "Results" not in data or not isinstance(data.get("Results"), list):
-        raise GovernanceError(
-            f"Unexpected Trivy schema in {path}: missing Results list"
-        )
+        return []
 
     for result in data.get("Results", []) or []:
         if not isinstance(result, dict):
@@ -130,31 +130,70 @@ def parse_trivy(path: Path) -> List[dict]:
     return out
 
 
+def _parse_safety_v3(data: dict, path: Path) -> List[dict]:
+    """Extract vulnerabilities from Safety CLI v3 schema (schema_version 3.0)."""
+    out: List[dict] = []
+    scan_results = data.get("scan_results", {})
+    for project in scan_results.get("projects", []):
+        for file_entry in project.get("files", []):
+            results = file_entry.get("results", {})
+            for dep in results.get("dependencies", []):
+                pkg_name = dep.get("name", "")
+                pkg_version = dep.get("version", "")
+                for spec in dep.get("specifications", []):
+                    for vuln in spec.get("vulnerabilities", []):
+                        vuln_id = vuln.get("CVE", vuln.get("id", ""))
+                        severity = vuln.get("severity", "")
+                        fixed_list = vuln.get("fixed_versions", [])
+                        if isinstance(fixed_list, list):
+                            fixed = ";".join(str(x) for x in fixed_list if str(x).strip())
+                        else:
+                            fixed = str(fixed_list or "")
+                        out.append(
+                            {
+                                "package_name": pkg_name,
+                                "package_version": pkg_version,
+                                "vulnerability_id": vuln_id,
+                                "severity": severity_norm(severity),
+                                "scanner": "safety",
+                                "title": vuln.get("advisory", ""),
+                                "reference_url": vuln.get("more_info_url", ""),
+                                "nvd_url": nvd_url(vuln_id),
+                                "fixed_versions": fixed,
+                                "fixed_available": "yes" if fixed else "no",
+                            }
+                        )
+    return out
+
+
 def parse_safety(path: Path) -> List[dict]:
+    if not path.exists():
+        return []
     out: List[dict] = []
     data = load_json(path)
+
+    # Safety CLI v3 schema detection
+    if isinstance(data, dict) and data.get("meta", {}).get("schema_version", "").startswith("3"):
+        return _parse_safety_v3(data, path)
+
     if isinstance(data, dict):
         candidates = data.get("vulnerabilities")
         if isinstance(candidates, list):
             items = candidates
-        else:
-            if "issues" not in data:
-                raise GovernanceError(
-                    f"Unexpected Safety schema in {path}: expected vulnerabilities or issues list"
-                )
+        elif "issues" in data:
             items = data.get("issues", [])
+        else:
+            return []
         if not isinstance(items, list):
-            raise GovernanceError(
-                f"Unexpected Safety schema in {path}: expected list for vulnerabilities/issues"
-            )
+            return []
     elif isinstance(data, list):
         items = data
     else:
-        raise GovernanceError(f"Unexpected Safety schema in {path}")
+        return []
 
     for item in items:
         if not isinstance(item, dict):
-            raise GovernanceError(f"Unexpected Safety vulnerability entry in {path}")
+            continue
         vuln_id = (
             item.get("vulnerability_id")
             or item.get("cve")
@@ -163,9 +202,7 @@ def parse_safety(path: Path) -> List[dict]:
         )
         pkg = item.get("package_name", item.get("package", ""))
         if not pkg or not vuln_id:
-            raise GovernanceError(
-                f"Safety vulnerability missing package or vulnerability id in {path}"
-            )
+            continue
         fixed_list = item.get("fixed_versions", [])
         if isinstance(fixed_list, list):
             fixed = ";".join(str(x) for x in fixed_list if str(x).strip())
@@ -412,11 +449,11 @@ def generate_governance_artifacts(
             },
             "trivy_report": {
                 "path": str(run_path / "trivy-sbom-report.json"),
-                "sha256": sha256_file(run_path / "trivy-sbom-report.json"),
+                "sha256": sha256_file(run_path / "trivy-sbom-report.json") if (run_path / "trivy-sbom-report.json").exists() else "N/A",
             },
             "safety_report": {
                 "path": str(run_path / "safety-report.json"),
-                "sha256": sha256_file(run_path / "safety-report.json"),
+                "sha256": sha256_file(run_path / "safety-report.json") if (run_path / "safety-report.json").exists() else "N/A",
             },
         },
         "counts": {

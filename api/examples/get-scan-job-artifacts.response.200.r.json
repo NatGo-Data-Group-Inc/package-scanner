@@ -1,15 +1,17 @@
 {
   "job_id": "sj_20260305_212201_r77xy1",
   "artifacts": {
-    "requirements_csv": "s3://cyber-scanner-evidence-dev/evidence/requirements/r/windows-amd64/20260305T212408Z/approval-candidate-packages.csv",
-    "lockfile": "s3://cyber-scanner-evidence-dev/evidence/requirements/r/windows-amd64/20260305T212408Z/renv.lock",
-    "sbom_json": "s3://cyber-scanner-evidence-dev/evidence/env-artifacts/r/windows-amd64/20260305T212408Z/r-packages.cdx.json",
-    "findings_csv": "s3://cyber-scanner-evidence-dev/evidence/governance/r/windows-amd64/20260305T212408Z/vulnerability-findings.csv",
-    "remediation_required_csv": "s3://cyber-scanner-evidence-dev/evidence/governance/r/windows-amd64/20260305T212408Z/remediation-required.csv",
-    "remediation_exceptions_csv": "s3://cyber-scanner-evidence-dev/evidence/governance/r/windows-amd64/20260305T212408Z/remediation-exceptions.csv",
-    "remediation_spreadsheet_csv": "s3://cyber-scanner-evidence-dev/evidence/governance/r/windows-amd64/20260305T212408Z/remediation-spreadsheet.csv",
-    "governance_summary_json": "s3://cyber-scanner-evidence-dev/evidence/traceability/r/windows-amd64/20260305T212408Z/governance-summary.json",
-    "run_metadata_json": "s3://cyber-scanner-evidence-dev/evidence/traceability/r/windows-amd64/20260305T212408Z/run-metadata.json"
+    "requirements_csv": "s3://package-scanner-evidence-dev/evidence/requirements/r/windows-amd64/20260305T212408Z/approval-candidate-packages.csv",
+    "lockfile": "s3://package-scanner-evidence-dev/evidence/requirements/r/windows-amd64/20260305T212408Z/renv.lock",
+    "lockfile_sha256": "6a6be1f9677380b5c60e13e376c280d9b221c6b62f534e6c0aba13f6cfc0b414",
+    "lockfile_contents": "{\\n  \\\"R\\\": {\\n    \\\"Version\\\": \\\"4.3.2\\\"\\n  },\\n  \\\"Packages\\\": {\\n    \\\"tidyverse\\\": {\\n      \\\"Package\\\": \\\"tidyverse\\\",\\n      \\\"Version\\\": \\\"2.0.0\\\"\\n    }\\n  }\\n}\\n",
+    "sbom_json": "s3://package-scanner-evidence-dev/evidence/env-artifacts/r/windows-amd64/20260305T212408Z/r-packages.cdx.json",
+    "findings_csv": "s3://package-scanner-evidence-dev/evidence/governance/r/windows-amd64/20260305T212408Z/vulnerability-findings.csv",
+    "remediation_required_csv": "s3://package-scanner-evidence-dev/evidence/governance/r/windows-amd64/20260305T212408Z/remediation-required.csv",
+    "remediation_exceptions_csv": "s3://package-scanner-evidence-dev/evidence/governance/r/windows-amd64/20260305T212408Z/remediation-exceptions.csv",
+    "remediation_spreadsheet_csv": "s3://package-scanner-evidence-dev/evidence/governance/r/windows-amd64/20260305T212408Z/remediation-spreadsheet.csv",
+    "governance_summary_json": "s3://package-scanner-evidence-dev/evidence/traceability/r/windows-amd64/20260305T212408Z/governance-summary.json",
+    "run_metadata_json": "s3://package-scanner-evidence-dev/evidence/traceability/r/windows-amd64/20260305T212408Z/run-metadata.json"
   }
 }
 

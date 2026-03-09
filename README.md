@@ -1,4 +1,4 @@
-# cyber_scanner
+# package_scanner
 
 Redeployable AWS infrastructure for package scanning, starting with Python/Conda and designed for a multi-platform build matrix.
 
@@ -99,8 +99,8 @@ Project policies:
   --profile <aws-profile> \
   --expected-account-id <12-digit-account-id> \
   --deployment-lock-token <env-lock-token> \
-  --stack-name cyber-scanner-dev \
-  --environment-name cyber-scanner-dev
+  --stack-name package-scanner-dev \
+  --environment-name package-scanner-dev
 ```
 
 This step also uploads `scripts/generate-governance-artifacts.py` to:
@@ -117,7 +117,7 @@ aws s3 cp .\environment.yml s3://<input-bucket>/inputs/python/environment.yml --
 
 ```bash
 ./scripts/start-python-scan.sh \
-  --stack-name cyber-scanner-dev \
+  --stack-name package-scanner-dev \
   --input-bucket <input-bucket> \
   --input-object-key inputs/python/environment.yml \
   --safety-api-key <safety-api-key-placeholder> \
@@ -180,7 +180,7 @@ Use scan-time overrides:
 
 ```bash
 ./scripts/start-python-scan.sh \
-  --stack-name cyber-scanner-dev \
+  --stack-name package-scanner-dev \
   --input-bucket <input-bucket> \
   --evidence-bucket <evidence-bucket> \
   --ephemeral-bucket <ephemeral-bucket> \
@@ -202,7 +202,7 @@ aws s3 cp .\renv.lock s3://<input-bucket>/inputs/r/renv.lock --region us-east-1 
 
 ```bash
 ./scripts/start-r-scan.sh \
-  --stack-name cyber-scanner-dev \
+  --stack-name package-scanner-dev \
   --input-bucket <input-bucket> \
   --region us-east-1 \
   --profile <aws-profile> \

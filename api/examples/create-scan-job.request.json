@@ -2,7 +2,9 @@
   "request_id": "d8c5b0fe-8f2b-4da6-a74c-7ec27d7a6cd7",
   "ecosystem": "python",
   "mode": "extend_existing",
-  "base_environment_ref": "s3://cyber-scanner-input-dev/inputs/python/environment.yml",
+  "base_environment_ref": "s3://package-scanner-input-dev/inputs/python/environment.yml",
+  "base_environment_sha256": "8d2fa3b7ad5bce472fc38b5dc6a2e38b0aeef0b7e65b3a986725d3180ae4026e",
+  "base_environment_contents": "name: target\nchannels:\n  - conda-forge\ndependencies:\n  - python=3.11\n  - numpy=1.26.4\n  - pandas=2.2.2\n  - pip\n",
   "package_changes": {
     "add": ["numpy==2.0.2", "pandas==2.2.2"],
     "remove": ["legacy-lib"],
@@ -22,6 +24,6 @@
   "metadata": {
     "requested_by": "ml-platform@company.com",
     "ticket_id": "SEC-3421"
-  }
+  },
+  "safety_api_key": "safety_live_example_key_123"
 }
-

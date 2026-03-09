@@ -12,10 +12,10 @@ param(
   [string]$ExpectedAccountId = "",
 
   [Parameter(Mandatory = $false)]
-  [string]$StackName = "cyber-scanner-dev",
+  [string]$StackName = "package-scanner-dev",
 
   [Parameter(Mandatory = $false)]
-  [string]$EnvironmentName = "cyber-scanner-dev",
+  [string]$EnvironmentName = "package-scanner-dev",
 
   [Parameter(Mandatory = $true)]
   [string]$DeploymentLockToken,

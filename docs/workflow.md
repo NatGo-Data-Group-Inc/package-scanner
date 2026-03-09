@@ -2,7 +2,7 @@
 
 ## 1) What This Project Does
 
-`cyber_scanner` deploys AWS infrastructure that runs package scans and produces governance artifacts used for cyber approval decisions.
+`package_scanner` deploys AWS infrastructure that runs package scans and produces governance artifacts used for cyber approval decisions.
 
 Core outputs per run include:
 
@@ -64,8 +64,8 @@ Guardrails:
   --profile <aws-profile> \
   --expected-account-id <12-digit-account-id> \
   --deployment-lock-token <env-lock-token> \
-  --stack-name cyber-scanner-dev \
-  --environment-name cyber-scanner-dev
+  --stack-name package-scanner-dev \
+  --environment-name package-scanner-dev
 ```
 
 What this does:
@@ -103,7 +103,7 @@ aws s3 cp ./environment.yml \
 
 ```bash
 ./scripts/start-python-scan.sh \
-  --stack-name cyber-scanner-dev \
+  --stack-name package-scanner-dev \
   --input-bucket <input-bucket> \
   --input-object-key inputs/python/environment.yml \
   --region us-east-1 \
@@ -149,7 +149,7 @@ aws s3 cp ./renv.lock \
 
 ```bash
 ./scripts/start-r-scan.sh \
-  --stack-name cyber-scanner-dev \
+  --stack-name package-scanner-dev \
   --input-bucket <input-bucket> \
   --input-object-key inputs/r/renv.lock \
   --region us-east-1 \

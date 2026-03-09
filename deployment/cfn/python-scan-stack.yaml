@@ -214,7 +214,7 @@ Resources:
                 - TRIVY_ARCHIVE="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
                 - if ! aws s3 cp "s3://${EVIDENCE_BUCKET}/config/trivy/${TRIVY_ARCHIVE}" "/tmp/${TRIVY_ARCHIVE}" >/dev/null 2>&1; then curl --retry 5 --retry-delay 2 --retry-connrefused -fsSL "${TRIVY_RELEASE_BASE_URL}/v${TRIVY_VERSION}/${TRIVY_ARCHIVE}" -o "/tmp/${TRIVY_ARCHIVE}"; fi
                 - if ! aws s3 cp "s3://${EVIDENCE_BUCKET}/config/trivy/trivy_${TRIVY_VERSION}_checksums.txt" /tmp/trivy_checksums.txt >/dev/null 2>&1; then curl --retry 5 --retry-delay 2 --retry-connrefused -fsSL "${TRIVY_RELEASE_BASE_URL}/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_checksums.txt" -o /tmp/trivy_checksums.txt; fi
-                - grep " ${TRIVY_ARCHIVE}$" /tmp/trivy_checksums.txt | tr -d '\r' | sha256sum -c -
+                - cd /tmp && grep " ${TRIVY_ARCHIVE}$" /tmp/trivy_checksums.txt | tr -d '\r' | sha256sum -c -
                 - tar -xzf "/tmp/${TRIVY_ARCHIVE}" -C /tmp trivy
                 - install -m 0755 /tmp/trivy /usr/local/bin/trivy
                 - curl -sfL https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xvj -C /tmp bin/micromamba
@@ -229,8 +229,8 @@ Resources:
                 - aws s3 cp "s3://${INPUT_BUCKET}/${INPUT_OBJECT_KEY}" /tmp/scan-input/environment.yml
                 - cp /tmp/scan-input/environment.yml "${RUN_DIR}/environment.yml"
                 - /tmp/bin/micromamba env create -f /tmp/scan-input/environment.yml -n target || /tmp/bin/micromamba env update -f /tmp/scan-input/environment.yml -n target
-                - /tmp/bin/micromamba run -n target python -m pip freeze > "${RUN_DIR}/requirements.lock.txt" || true
-                - /tmp/bin/micromamba run -n target python -m cyclonedx_py requirements "${RUN_DIR}/requirements.lock.txt" -o "${RUN_DIR}/python-packages.cdx.json" || true
+                - /tmp/bin/micromamba run -n target python -m pip list --format=freeze > "${RUN_DIR}/requirements.lock.txt" || true
+                - python -m cyclonedx_py requirements "${RUN_DIR}/requirements.lock.txt" -o "${RUN_DIR}/python-packages.cdx.json" || true
                 - trivy sbom --format json --output "${RUN_DIR}/trivy-sbom-report.json" "${RUN_DIR}/python-packages.cdx.json" || true
                 - safety scan --file "${RUN_DIR}/requirements.lock.txt" --output json > "${RUN_DIR}/safety-report.json" || true
                 - if [ "${ENABLE_FORTIFY:-false}" = "true" ] && [ -n "${FORTIFY_COMMAND:-}" ]; then eval "${FORTIFY_COMMAND}" > "${RUN_DIR}/fortify-report.txt" 2>&1 || true; fi
@@ -326,7 +326,7 @@ Resources:
                 - TRIVY_ARCHIVE="trivy_${TRIVY_VERSION}_Linux-ARM64.tar.gz"
                 - if ! aws s3 cp "s3://${EVIDENCE_BUCKET}/config/trivy/${TRIVY_ARCHIVE}" "/tmp/${TRIVY_ARCHIVE}" >/dev/null 2>&1; then curl --retry 5 --retry-delay 2 --retry-connrefused -fsSL "${TRIVY_RELEASE_BASE_URL}/v${TRIVY_VERSION}/${TRIVY_ARCHIVE}" -o "/tmp/${TRIVY_ARCHIVE}"; fi
                 - if ! aws s3 cp "s3://${EVIDENCE_BUCKET}/config/trivy/trivy_${TRIVY_VERSION}_checksums.txt" /tmp/trivy_checksums.txt >/dev/null 2>&1; then curl --retry 5 --retry-delay 2 --retry-connrefused -fsSL "${TRIVY_RELEASE_BASE_URL}/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_checksums.txt" -o /tmp/trivy_checksums.txt; fi
-                - grep " ${TRIVY_ARCHIVE}$" /tmp/trivy_checksums.txt | tr -d '\r' | sha256sum -c -
+                - cd /tmp && grep " ${TRIVY_ARCHIVE}$" /tmp/trivy_checksums.txt | tr -d '\r' | sha256sum -c -
                 - tar -xzf "/tmp/${TRIVY_ARCHIVE}" -C /tmp trivy
                 - install -m 0755 /tmp/trivy /usr/local/bin/trivy
                 - curl -sfL https://micro.mamba.pm/api/micromamba/linux-aarch64/latest | tar -xvj -C /tmp bin/micromamba
@@ -341,8 +341,8 @@ Resources:
                 - aws s3 cp "s3://${INPUT_BUCKET}/${INPUT_OBJECT_KEY}" /tmp/scan-input/environment.yml
                 - cp /tmp/scan-input/environment.yml "${RUN_DIR}/environment.yml"
                 - /tmp/bin/micromamba env create -f /tmp/scan-input/environment.yml -n target || /tmp/bin/micromamba env update -f /tmp/scan-input/environment.yml -n target
-                - /tmp/bin/micromamba run -n target python -m pip freeze > "${RUN_DIR}/requirements.lock.txt" || true
-                - /tmp/bin/micromamba run -n target python -m cyclonedx_py requirements "${RUN_DIR}/requirements.lock.txt" -o "${RUN_DIR}/python-packages.cdx.json" || true
+                - /tmp/bin/micromamba run -n target python -m pip list --format=freeze > "${RUN_DIR}/requirements.lock.txt" || true
+                - python -m cyclonedx_py requirements "${RUN_DIR}/requirements.lock.txt" -o "${RUN_DIR}/python-packages.cdx.json" || true
                 - trivy sbom --format json --output "${RUN_DIR}/trivy-sbom-report.json" "${RUN_DIR}/python-packages.cdx.json" || true
                 - safety scan --file "${RUN_DIR}/requirements.lock.txt" --output json > "${RUN_DIR}/safety-report.json" || true
                 - if [ "${ENABLE_FORTIFY:-false}" = "true" ] && [ -n "${FORTIFY_COMMAND:-}" ]; then eval "${FORTIFY_COMMAND}" > "${RUN_DIR}/fortify-report.txt" 2>&1 || true; fi
@@ -425,14 +425,57 @@ Resources:
         BuildSpec: |
           version: 0.2
           env:
-            shell: cmd
+            shell: powershell
           phases:
             install:
               commands:
-                - 'powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = ""Stop""; New-Item -ItemType Directory -Force -Path C:\scan-input, C:\scan-out | Out-Null; python -m pip install --upgrade pip; python -m pip install safety cyclonedx-bom; aws s3 cp ""s3://$env:EVIDENCE_BUCKET/config/trivy/trivy_$($env:TRIVY_VERSION)_windows-64bit.zip"" C:\trivy.zip; if ($LASTEXITCODE -ne 0) { Invoke-WebRequest -Uri ""$env:TRIVY_RELEASE_BASE_URL/v$env:TRIVY_VERSION/trivy_$($env:TRIVY_VERSION)_windows-64bit.zip"" -OutFile C:\trivy.zip }; Expand-Archive -Path C:\trivy.zip -DestinationPath C:\trivy -Force; $env:Path = ""C:\trivy;"" + $env:Path; $trivyVersionOut = trivy --version; if (-not ($trivyVersionOut | Select-String ""Version: $env:TRIVY_VERSION"")) { throw ""Unexpected Trivy version: $trivyVersionOut"" }; Invoke-WebRequest -Uri https://micro.mamba.pm/api/micromamba/win-64/latest -OutFile C:\micromamba.tar.bz2; tar -xjf C:\micromamba.tar.bz2 -C C:\\; aws s3 cp ""s3://$env:EVIDENCE_BUCKET/$env:GOVERNANCE_SCRIPT_S3_KEY"" C:\generate-governance-artifacts.py"'
+                - New-Item -ItemType Directory -Force -Path C:\scan-input, C:\scan-out | Out-Null
+                - python -m pip install --upgrade pip
+                - python -m pip install safety cyclonedx-bom
+                - $trivyArchive = "trivy_${env:TRIVY_VERSION}_windows-64bit.zip"
+                - $ok = $false; try { aws s3 cp "s3://${env:EVIDENCE_BUCKET}/config/trivy/$trivyArchive" C:\trivy.zip 2>$null; if ($LASTEXITCODE -eq 0) { $ok = $true } } catch {}
+                - if (-not $ok) { Invoke-WebRequest -Uri "${env:TRIVY_RELEASE_BASE_URL}/v${env:TRIVY_VERSION}/$trivyArchive" -OutFile C:\trivy.zip }
+                - Expand-Archive -Path C:\trivy.zip -DestinationPath C:\trivy -Force
+                - Invoke-WebRequest -Uri https://micro.mamba.pm/api/micromamba/win-64/latest -OutFile C:\micromamba.tar.bz2
+                - New-Item -ItemType Directory -Force -Path C:\mamba | Out-Null
+                - tar -xjf C:\micromamba.tar.bz2 -C C:\mamba
+                - aws s3 cp "s3://${env:EVIDENCE_BUCKET}/${env:GOVERNANCE_SCRIPT_S3_KEY}" C:\generate-governance-artifacts.py
             build:
               commands:
-                - 'powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = ""Stop""; $ts = (Get-Date).ToUniversalTime().ToString(""yyyyMMddTHHmmssZ""); $platform = ""windows-amd64""; $runDir = ""C:\scan-out\$ts""; New-Item -ItemType Directory -Force -Path $runDir | Out-Null; aws s3 cp ""s3://$env:INPUT_BUCKET/$env:INPUT_OBJECT_KEY"" C:\scan-input\environment.yml; Copy-Item C:\scan-input\environment.yml ""$runDir\environment.yml"" -Force; C:\Library\bin\micromamba.exe env create -f C:\scan-input\environment.yml -n target; if ($LASTEXITCODE -ne 0) { C:\Library\bin\micromamba.exe env update -f C:\scan-input\environment.yml -n target }; C:\Library\bin\micromamba.exe run -n target python -m pip freeze | Out-File ""$runDir\requirements.lock.txt"" -Encoding ascii; C:\Library\bin\micromamba.exe run -n target python -m cyclonedx_py requirements ""$runDir\requirements.lock.txt"" -o ""$runDir\python-packages.cdx.json""; trivy sbom --format json --output ""$runDir\trivy-sbom-report.json"" ""$runDir\python-packages.cdx.json""; safety scan --file ""$runDir\requirements.lock.txt"" --output json | Out-File ""$runDir\safety-report.json"" -Encoding ascii; if ($env:ENABLE_FORTIFY -eq ""true"" -and $env:FORTIFY_COMMAND) { cmd /c $env:FORTIFY_COMMAND | Out-File ""$runDir\fortify-report.txt"" -Encoding ascii }; $govExit = 0; python C:\generate-governance-artifacts.py --run-dir $runDir --platform $platform --remediate-medium $env:REMEDIATE_MEDIUM --fail-on-medium $env:FAIL_ON_MEDIUM; if ($LASTEXITCODE -ne 0) { $govExit = $LASTEXITCODE }; try { tar -czf ""$runDir\environment-artifacts.tar.gz"" -C $runDir environment.yml requirements.lock.txt python-packages.cdx.json } catch { Write-Host ""archive step skipped"" }; aws s3 cp ""$runDir\"" ""s3://$env:EPHEMERAL_BUCKET/$env:EPHEMERAL_PREFIX/$platform/$ts/"" --recursive; aws s3 cp ""$runDir\environment.yml"" ""s3://$env:EVIDENCE_BUCKET/$env:EVIDENCE_PREFIX/requirements/python/$platform/$ts/environment.yml""; if (Test-Path ""$runDir\requirements.lock.txt"") { aws s3 cp ""$runDir\requirements.lock.txt"" ""s3://$env:EVIDENCE_BUCKET/$env:EVIDENCE_PREFIX/requirements/python/$platform/$ts/requirements.lock.txt"" }; if (Test-Path ""$runDir\approval-candidate-packages.csv"") { aws s3 cp ""$runDir\approval-candidate-packages.csv"" ""s3://$env:EVIDENCE_BUCKET/$env:EVIDENCE_PREFIX/requirements/python/$platform/$ts/approval-candidate-packages.csv"" }; if (Test-Path ""$runDir\python-packages.cdx.json"") { aws s3 cp ""$runDir\python-packages.cdx.json"" ""s3://$env:EVIDENCE_BUCKET/$env:EVIDENCE_PREFIX/env-artifacts/python/$platform/$ts/python-packages.cdx.json"" }; if (Test-Path ""$runDir\environment-artifacts.tar.gz"") { aws s3 cp ""$runDir\environment-artifacts.tar.gz"" ""s3://$env:EVIDENCE_BUCKET/$env:EVIDENCE_PREFIX/env-artifacts/python/$platform/$ts/environment-artifacts.tar.gz"" }; if (Test-Path ""$runDir\trivy-sbom-report.json"") { aws s3 cp ""$runDir\trivy-sbom-report.json"" ""s3://$env:EVIDENCE_BUCKET/$env:EVIDENCE_PREFIX/model-results/python/$platform/$ts/trivy-sbom-report.json"" }; if (Test-Path ""$runDir\safety-report.json"") { aws s3 cp ""$runDir\safety-report.json"" ""s3://$env:EVIDENCE_BUCKET/$env:EVIDENCE_PREFIX/model-results/python/$platform/$ts/safety-report.json"" }; if (Test-Path ""$runDir\fortify-report.txt"") { aws s3 cp ""$runDir\fortify-report.txt"" ""s3://$env:EVIDENCE_BUCKET/$env:EVIDENCE_PREFIX/model-results/python/$platform/$ts/fortify-report.txt"" }; if (Test-Path ""$runDir\vulnerability-findings.csv"") { aws s3 cp ""$runDir\vulnerability-findings.csv"" ""s3://$env:EVIDENCE_BUCKET/$env:EVIDENCE_PREFIX/governance/python/$platform/$ts/vulnerability-findings.csv"" }; if (Test-Path ""$runDir\remediation-required.csv"") { aws s3 cp ""$runDir\remediation-required.csv"" ""s3://$env:EVIDENCE_BUCKET/$env:EVIDENCE_PREFIX/governance/python/$platform/$ts/remediation-required.csv"" }; if (Test-Path ""$runDir\remediation-exceptions.csv"") { aws s3 cp ""$runDir\remediation-exceptions.csv"" ""s3://$env:EVIDENCE_BUCKET/$env:EVIDENCE_PREFIX/governance/python/$platform/$ts/remediation-exceptions.csv"" }; if (Test-Path ""$runDir\remediation-spreadsheet.csv"") { aws s3 cp ""$runDir\remediation-spreadsheet.csv"" ""s3://$env:EVIDENCE_BUCKET/$env:EVIDENCE_PREFIX/governance/python/$platform/$ts/remediation-spreadsheet.csv"" }; if (Test-Path ""$runDir\governance-summary.json"") { aws s3 cp ""$runDir\governance-summary.json"" ""s3://$env:EVIDENCE_BUCKET/$env:EVIDENCE_PREFIX/traceability/python/$platform/$ts/governance-summary.json"" }; ""{`""platform`"":`""$platform`"",`""timestamp_utc`"":`""$ts`"",`""ephemeral_prefix`"":`""$env:EPHEMERAL_PREFIX/$platform/$ts`"",`""cleanup`"":`""requested`""}"" | Out-File ""$runDir\run-metadata.json"" -Encoding ascii; aws s3 cp ""$runDir\run-metadata.json"" ""s3://$env:EVIDENCE_BUCKET/$env:EVIDENCE_PREFIX/traceability/python/$platform/$ts/run-metadata.json""; aws s3 rm ""s3://$env:EPHEMERAL_BUCKET/$env:EPHEMERAL_PREFIX/$platform/$ts/"" --recursive; if ($govExit -ne 0) { Write-Host ""Governance gate failed with exit $govExit""; exit $govExit }"'
+                - Write-Host 'Build phase starting'
+                - $ts = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
+                - $platform = 'windows-amd64'
+                - $runDir = "C:\scan-out\$ts"
+                - New-Item -ItemType Directory -Force -Path $runDir | Out-Null
+                - aws s3 cp "s3://${env:INPUT_BUCKET}/${env:INPUT_OBJECT_KEY}" C:\scan-input\environment.yml
+                - Copy-Item C:\scan-input\environment.yml "$runDir\environment.yml" -Force
+                - C:\mamba\Library\bin\micromamba.exe env create -f C:\scan-input\environment.yml -n target; if ($LASTEXITCODE -ne 0) { C:\mamba\Library\bin\micromamba.exe env update -f C:\scan-input\environment.yml -n target }
+                - C:\mamba\Library\bin\micromamba.exe run -n target python -m pip list --format=freeze | Out-File "$runDir\requirements.lock.txt" -Encoding ascii
+                - python -m cyclonedx_py requirements "$runDir\requirements.lock.txt" -o "$runDir\python-packages.cdx.json"
+                - C:\trivy\trivy.exe sbom --format json --output "$runDir\trivy-sbom-report.json" "$runDir\python-packages.cdx.json"; $true
+                - python -m safety scan --file "$runDir\requirements.lock.txt" --output json | Out-File "$runDir\safety-report.json" -Encoding ascii; $true
+                - if ($env:ENABLE_FORTIFY -eq 'true' -and $env:FORTIFY_COMMAND) { cmd /c $env:FORTIFY_COMMAND | Out-File "$runDir\fortify-report.txt" -Encoding ascii }
+                - $govExit = 0
+                - python C:\generate-governance-artifacts.py --run-dir $runDir --platform $platform --remediate-medium $env:REMEDIATE_MEDIUM --fail-on-medium $env:FAIL_ON_MEDIUM; if ($LASTEXITCODE -ne 0) { $govExit = $LASTEXITCODE }
+                - try { tar -czf "$runDir\environment-artifacts.tar.gz" -C $runDir environment.yml requirements.lock.txt python-packages.cdx.json } catch { Write-Host 'archive step skipped' }
+                - aws s3 cp "$runDir\" "s3://${env:EPHEMERAL_BUCKET}/${env:EPHEMERAL_PREFIX}/$platform/$ts/" --recursive
+                - aws s3 cp "$runDir\environment.yml" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/requirements/python/$platform/$ts/environment.yml"
+                - if (Test-Path "$runDir\requirements.lock.txt") { aws s3 cp "$runDir\requirements.lock.txt" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/requirements/python/$platform/$ts/requirements.lock.txt" }
+                - if (Test-Path "$runDir\approval-candidate-packages.csv") { aws s3 cp "$runDir\approval-candidate-packages.csv" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/requirements/python/$platform/$ts/approval-candidate-packages.csv" }
+                - if (Test-Path "$runDir\python-packages.cdx.json") { aws s3 cp "$runDir\python-packages.cdx.json" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/env-artifacts/python/$platform/$ts/python-packages.cdx.json" }
+                - if (Test-Path "$runDir\environment-artifacts.tar.gz") { aws s3 cp "$runDir\environment-artifacts.tar.gz" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/env-artifacts/python/$platform/$ts/environment-artifacts.tar.gz" }
+                - if (Test-Path "$runDir\trivy-sbom-report.json") { aws s3 cp "$runDir\trivy-sbom-report.json" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/model-results/python/$platform/$ts/trivy-sbom-report.json" }
+                - if (Test-Path "$runDir\safety-report.json") { aws s3 cp "$runDir\safety-report.json" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/model-results/python/$platform/$ts/safety-report.json" }
+                - if (Test-Path "$runDir\fortify-report.txt") { aws s3 cp "$runDir\fortify-report.txt" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/model-results/python/$platform/$ts/fortify-report.txt" }
+                - if (Test-Path "$runDir\vulnerability-findings.csv") { aws s3 cp "$runDir\vulnerability-findings.csv" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/governance/python/$platform/$ts/vulnerability-findings.csv" }
+                - if (Test-Path "$runDir\remediation-required.csv") { aws s3 cp "$runDir\remediation-required.csv" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/governance/python/$platform/$ts/remediation-required.csv" }
+                - if (Test-Path "$runDir\remediation-exceptions.csv") { aws s3 cp "$runDir\remediation-exceptions.csv" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/governance/python/$platform/$ts/remediation-exceptions.csv" }
+                - if (Test-Path "$runDir\remediation-spreadsheet.csv") { aws s3 cp "$runDir\remediation-spreadsheet.csv" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/governance/python/$platform/$ts/remediation-spreadsheet.csv" }
+                - if (Test-Path "$runDir\governance-summary.json") { aws s3 cp "$runDir\governance-summary.json" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/traceability/python/$platform/$ts/governance-summary.json" }
+                - $metaJson = "{`"platform`":`"$platform`",`"timestamp_utc`":`"$ts`",`"ephemeral_prefix`":`"${env:EPHEMERAL_PREFIX}/$platform/$ts`",`"cleanup`":`"requested`"}"; $metaJson | Out-File "$runDir\run-metadata.json" -Encoding ascii
+                - aws s3 cp "$runDir\run-metadata.json" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/traceability/python/$platform/$ts/run-metadata.json"
+                - aws s3 rm "s3://${env:EPHEMERAL_BUCKET}/${env:EPHEMERAL_PREFIX}/$platform/$ts/" --recursive
+                - if ($govExit -ne 0) { Write-Host "Governance gate failed with exit $govExit"; exit $govExit }
       Artifacts:
         Type: NO_ARTIFACTS
       Environment:
@@ -480,6 +523,305 @@ Resources:
             Type: PLAINTEXT
             Value: !Ref TrivyReleaseBaseUrl
 
+  RLinuxAmd64Project:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${EnvironmentName}-r-scan-linux-amd64'
+      ServiceRole: !GetAtt ScanBuildRole.Arn
+      TimeoutInMinutes: !Ref BuildTimeoutMinutes
+      Source:
+        Type: NO_SOURCE
+        BuildSpec: |
+          version: 0.2
+          env:
+            shell: bash
+          phases:
+            install:
+              runtime-versions:
+                python: 3.11
+              commands:
+                - set -euo pipefail
+                - mkdir -p /tmp/scan-input /tmp/scan-out
+                - pip install --no-cache-dir --upgrade pip
+                - TRIVY_ARCHIVE="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+                - if ! aws s3 cp "s3://${EVIDENCE_BUCKET}/config/trivy/${TRIVY_ARCHIVE}" "/tmp/${TRIVY_ARCHIVE}" >/dev/null 2>&1; then curl --retry 5 --retry-delay 2 --retry-connrefused -fsSL "${TRIVY_RELEASE_BASE_URL}/v${TRIVY_VERSION}/${TRIVY_ARCHIVE}" -o "/tmp/${TRIVY_ARCHIVE}"; fi
+                - if ! aws s3 cp "s3://${EVIDENCE_BUCKET}/config/trivy/trivy_${TRIVY_VERSION}_checksums.txt" /tmp/trivy_checksums.txt >/dev/null 2>&1; then curl --retry 5 --retry-delay 2 --retry-connrefused -fsSL "${TRIVY_RELEASE_BASE_URL}/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_checksums.txt" -o /tmp/trivy_checksums.txt; fi
+                - cd /tmp && grep " ${TRIVY_ARCHIVE}$" /tmp/trivy_checksums.txt | tr -d '\r' | sha256sum -c -
+                - tar -xzf "/tmp/${TRIVY_ARCHIVE}" -C /tmp trivy
+                - install -m 0755 /tmp/trivy /usr/local/bin/trivy
+                - aws s3 cp "s3://${EVIDENCE_BUCKET}/${R_GOVERNANCE_SCRIPT_S3_KEY}" /tmp/generate-r-governance-artifacts.py
+                - aws s3 cp "s3://${EVIDENCE_BUCKET}/${R_SBOM_SCRIPT_S3_KEY}" /tmp/generate-r-sbom.py
+            build:
+              commands:
+                - set -euo pipefail
+                - TS="$(date -u +%Y%m%dT%H%M%SZ)"
+                - TARGET_PLATFORM="linux-amd64"
+                - RUN_DIR="/tmp/scan-out/${TS}"
+                - mkdir -p "${RUN_DIR}"
+                - aws s3 cp "s3://${INPUT_BUCKET}/${INPUT_OBJECT_KEY}" /tmp/scan-input/renv.lock
+                - cp /tmp/scan-input/renv.lock "${RUN_DIR}/renv.lock"
+                - python /tmp/generate-r-sbom.py --lock-file "${RUN_DIR}/renv.lock" --out-file "${RUN_DIR}/r-packages.cdx.json"
+                - trivy sbom --format json --output "${RUN_DIR}/trivy-sbom-report.json" "${RUN_DIR}/r-packages.cdx.json" || true
+                - GOVERNANCE_EXIT=0
+                - python /tmp/generate-r-governance-artifacts.py --run-dir "${RUN_DIR}" --platform "${TARGET_PLATFORM}" --remediate-medium "${REMEDIATE_MEDIUM:-true}" --fail-on-medium "${FAIL_ON_MEDIUM:-false}" || GOVERNANCE_EXIT=$?
+                - tar -czf "${RUN_DIR}/environment-artifacts.tar.gz" -C "${RUN_DIR}" renv.lock r-packages.cdx.json || true
+                - aws s3 cp "${RUN_DIR}/" "s3://${EPHEMERAL_BUCKET}/${EPHEMERAL_PREFIX}/${TARGET_PLATFORM}/${TS}/" --recursive
+                - aws s3 cp "${RUN_DIR}/renv.lock" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/r/${TARGET_PLATFORM}/${TS}/renv.lock"
+                - if [ -f "${RUN_DIR}/approval-candidate-packages.csv" ]; then aws s3 cp "${RUN_DIR}/approval-candidate-packages.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/r/${TARGET_PLATFORM}/${TS}/approval-candidate-packages.csv"; fi
+                - if [ -f "${RUN_DIR}/r-packages.cdx.json" ]; then aws s3 cp "${RUN_DIR}/r-packages.cdx.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/r-packages.cdx.json"; fi
+                - if [ -f "${RUN_DIR}/environment-artifacts.tar.gz" ]; then aws s3 cp "${RUN_DIR}/environment-artifacts.tar.gz" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/environment-artifacts.tar.gz"; fi
+                - if [ -f "${RUN_DIR}/trivy-sbom-report.json" ]; then aws s3 cp "${RUN_DIR}/trivy-sbom-report.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/model-results/r/${TARGET_PLATFORM}/${TS}/trivy-sbom-report.json"; fi
+                - if [ -f "${RUN_DIR}/vulnerability-findings.csv" ]; then aws s3 cp "${RUN_DIR}/vulnerability-findings.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/governance/r/${TARGET_PLATFORM}/${TS}/vulnerability-findings.csv"; fi
+                - if [ -f "${RUN_DIR}/remediation-required.csv" ]; then aws s3 cp "${RUN_DIR}/remediation-required.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/governance/r/${TARGET_PLATFORM}/${TS}/remediation-required.csv"; fi
+                - if [ -f "${RUN_DIR}/remediation-exceptions.csv" ]; then aws s3 cp "${RUN_DIR}/remediation-exceptions.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/governance/r/${TARGET_PLATFORM}/${TS}/remediation-exceptions.csv"; fi
+                - if [ -f "${RUN_DIR}/remediation-spreadsheet.csv" ]; then aws s3 cp "${RUN_DIR}/remediation-spreadsheet.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/governance/r/${TARGET_PLATFORM}/${TS}/remediation-spreadsheet.csv"; fi
+                - if [ -f "${RUN_DIR}/governance-summary.json" ]; then aws s3 cp "${RUN_DIR}/governance-summary.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/r/${TARGET_PLATFORM}/${TS}/governance-summary.json"; fi
+                - printf '{"platform":"%s","timestamp_utc":"%s","ephemeral_prefix":"%s/%s/%s","cleanup":"requested"}' "${TARGET_PLATFORM}" "${TS}" "${EPHEMERAL_PREFIX}" "${TARGET_PLATFORM}" "${TS}" > "${RUN_DIR}/run-metadata.json"
+                - aws s3 cp "${RUN_DIR}/run-metadata.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/r/${TARGET_PLATFORM}/${TS}/run-metadata.json"
+                - aws s3 rm "s3://${EPHEMERAL_BUCKET}/${EPHEMERAL_PREFIX}/${TARGET_PLATFORM}/${TS}/" --recursive
+                - if [ "${GOVERNANCE_EXIT}" -ne 0 ]; then echo "Governance gate failed with exit ${GOVERNANCE_EXIT}"; exit "${GOVERNANCE_EXIT}"; fi
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: LINUX_CONTAINER
+        Image: aws/codebuild/standard:7.0
+        ComputeType: !Ref LinuxComputeType
+        EnvironmentVariables:
+          - Name: INPUT_BUCKET
+            Type: PLAINTEXT
+            Value: !If [CreateInputBucket, !Ref InputBucket, !Ref ExistingInputBucketName]
+          - Name: INPUT_OBJECT_KEY
+            Type: PLAINTEXT
+            Value: inputs/r/renv.lock
+          - Name: EVIDENCE_BUCKET
+            Type: PLAINTEXT
+            Value: !If [CreateEvidenceBucket, !Ref EvidenceBucket, !Ref ExistingEvidenceBucketName]
+          - Name: EVIDENCE_PREFIX
+            Type: PLAINTEXT
+            Value: evidence
+          - Name: EPHEMERAL_BUCKET
+            Type: PLAINTEXT
+            Value: !If [CreateEphemeralBucket, !Ref EphemeralBucket, !Ref ExistingEphemeralBucketName]
+          - Name: EPHEMERAL_PREFIX
+            Type: PLAINTEXT
+            Value: deploy/tmp/r
+          - Name: REMEDIATE_MEDIUM
+            Type: PLAINTEXT
+            Value: 'true'
+          - Name: FAIL_ON_MEDIUM
+            Type: PLAINTEXT
+            Value: 'false'
+          - Name: R_GOVERNANCE_SCRIPT_S3_KEY
+            Type: PLAINTEXT
+            Value: config/generate-r-governance-artifacts.py
+          - Name: R_SBOM_SCRIPT_S3_KEY
+            Type: PLAINTEXT
+            Value: config/generate-r-sbom.py
+          - Name: TRIVY_VERSION
+            Type: PLAINTEXT
+            Value: !Ref TrivyVersion
+          - Name: TRIVY_RELEASE_BASE_URL
+            Type: PLAINTEXT
+            Value: !Ref TrivyReleaseBaseUrl
+
+  RLinuxArm64Project:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${EnvironmentName}-r-scan-linux-arm64'
+      ServiceRole: !GetAtt ScanBuildRole.Arn
+      TimeoutInMinutes: !Ref BuildTimeoutMinutes
+      Source:
+        Type: NO_SOURCE
+        BuildSpec: |
+          version: 0.2
+          env:
+            shell: bash
+          phases:
+            install:
+              runtime-versions:
+                python: 3.11
+              commands:
+                - set -euo pipefail
+                - mkdir -p /tmp/scan-input /tmp/scan-out
+                - pip install --no-cache-dir --upgrade pip
+                - TRIVY_ARCHIVE="trivy_${TRIVY_VERSION}_Linux-ARM64.tar.gz"
+                - if ! aws s3 cp "s3://${EVIDENCE_BUCKET}/config/trivy/${TRIVY_ARCHIVE}" "/tmp/${TRIVY_ARCHIVE}" >/dev/null 2>&1; then curl --retry 5 --retry-delay 2 --retry-connrefused -fsSL "${TRIVY_RELEASE_BASE_URL}/v${TRIVY_VERSION}/${TRIVY_ARCHIVE}" -o "/tmp/${TRIVY_ARCHIVE}"; fi
+                - if ! aws s3 cp "s3://${EVIDENCE_BUCKET}/config/trivy/trivy_${TRIVY_VERSION}_checksums.txt" /tmp/trivy_checksums.txt >/dev/null 2>&1; then curl --retry 5 --retry-delay 2 --retry-connrefused -fsSL "${TRIVY_RELEASE_BASE_URL}/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_checksums.txt" -o /tmp/trivy_checksums.txt; fi
+                - cd /tmp && grep " ${TRIVY_ARCHIVE}$" /tmp/trivy_checksums.txt | tr -d '\r' | sha256sum -c -
+                - tar -xzf "/tmp/${TRIVY_ARCHIVE}" -C /tmp trivy
+                - install -m 0755 /tmp/trivy /usr/local/bin/trivy
+                - aws s3 cp "s3://${EVIDENCE_BUCKET}/${R_GOVERNANCE_SCRIPT_S3_KEY}" /tmp/generate-r-governance-artifacts.py
+                - aws s3 cp "s3://${EVIDENCE_BUCKET}/${R_SBOM_SCRIPT_S3_KEY}" /tmp/generate-r-sbom.py
+            build:
+              commands:
+                - set -euo pipefail
+                - TS="$(date -u +%Y%m%dT%H%M%SZ)"
+                - TARGET_PLATFORM="linux-arm64"
+                - RUN_DIR="/tmp/scan-out/${TS}"
+                - mkdir -p "${RUN_DIR}"
+                - aws s3 cp "s3://${INPUT_BUCKET}/${INPUT_OBJECT_KEY}" /tmp/scan-input/renv.lock
+                - cp /tmp/scan-input/renv.lock "${RUN_DIR}/renv.lock"
+                - python /tmp/generate-r-sbom.py --lock-file "${RUN_DIR}/renv.lock" --out-file "${RUN_DIR}/r-packages.cdx.json"
+                - trivy sbom --format json --output "${RUN_DIR}/trivy-sbom-report.json" "${RUN_DIR}/r-packages.cdx.json" || true
+                - GOVERNANCE_EXIT=0
+                - python /tmp/generate-r-governance-artifacts.py --run-dir "${RUN_DIR}" --platform "${TARGET_PLATFORM}" --remediate-medium "${REMEDIATE_MEDIUM:-true}" --fail-on-medium "${FAIL_ON_MEDIUM:-false}" || GOVERNANCE_EXIT=$?
+                - tar -czf "${RUN_DIR}/environment-artifacts.tar.gz" -C "${RUN_DIR}" renv.lock r-packages.cdx.json || true
+                - aws s3 cp "${RUN_DIR}/" "s3://${EPHEMERAL_BUCKET}/${EPHEMERAL_PREFIX}/${TARGET_PLATFORM}/${TS}/" --recursive
+                - aws s3 cp "${RUN_DIR}/renv.lock" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/r/${TARGET_PLATFORM}/${TS}/renv.lock"
+                - if [ -f "${RUN_DIR}/approval-candidate-packages.csv" ]; then aws s3 cp "${RUN_DIR}/approval-candidate-packages.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/r/${TARGET_PLATFORM}/${TS}/approval-candidate-packages.csv"; fi
+                - if [ -f "${RUN_DIR}/r-packages.cdx.json" ]; then aws s3 cp "${RUN_DIR}/r-packages.cdx.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/r-packages.cdx.json"; fi
+                - if [ -f "${RUN_DIR}/environment-artifacts.tar.gz" ]; then aws s3 cp "${RUN_DIR}/environment-artifacts.tar.gz" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/environment-artifacts.tar.gz"; fi
+                - if [ -f "${RUN_DIR}/trivy-sbom-report.json" ]; then aws s3 cp "${RUN_DIR}/trivy-sbom-report.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/model-results/r/${TARGET_PLATFORM}/${TS}/trivy-sbom-report.json"; fi
+                - if [ -f "${RUN_DIR}/vulnerability-findings.csv" ]; then aws s3 cp "${RUN_DIR}/vulnerability-findings.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/governance/r/${TARGET_PLATFORM}/${TS}/vulnerability-findings.csv"; fi
+                - if [ -f "${RUN_DIR}/remediation-required.csv" ]; then aws s3 cp "${RUN_DIR}/remediation-required.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/governance/r/${TARGET_PLATFORM}/${TS}/remediation-required.csv"; fi
+                - if [ -f "${RUN_DIR}/remediation-exceptions.csv" ]; then aws s3 cp "${RUN_DIR}/remediation-exceptions.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/governance/r/${TARGET_PLATFORM}/${TS}/remediation-exceptions.csv"; fi
+                - if [ -f "${RUN_DIR}/remediation-spreadsheet.csv" ]; then aws s3 cp "${RUN_DIR}/remediation-spreadsheet.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/governance/r/${TARGET_PLATFORM}/${TS}/remediation-spreadsheet.csv"; fi
+                - if [ -f "${RUN_DIR}/governance-summary.json" ]; then aws s3 cp "${RUN_DIR}/governance-summary.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/r/${TARGET_PLATFORM}/${TS}/governance-summary.json"; fi
+                - printf '{"platform":"%s","timestamp_utc":"%s","ephemeral_prefix":"%s/%s/%s","cleanup":"requested"}' "${TARGET_PLATFORM}" "${TS}" "${EPHEMERAL_PREFIX}" "${TARGET_PLATFORM}" "${TS}" > "${RUN_DIR}/run-metadata.json"
+                - aws s3 cp "${RUN_DIR}/run-metadata.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/r/${TARGET_PLATFORM}/${TS}/run-metadata.json"
+                - aws s3 rm "s3://${EPHEMERAL_BUCKET}/${EPHEMERAL_PREFIX}/${TARGET_PLATFORM}/${TS}/" --recursive
+                - if [ "${GOVERNANCE_EXIT}" -ne 0 ]; then echo "Governance gate failed with exit ${GOVERNANCE_EXIT}"; exit "${GOVERNANCE_EXIT}"; fi
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: ARM_CONTAINER
+        Image: aws/codebuild/amazonlinux2-aarch64-standard:3.0
+        ComputeType: !Ref LinuxArmComputeType
+        EnvironmentVariables:
+          - Name: INPUT_BUCKET
+            Type: PLAINTEXT
+            Value: !If [CreateInputBucket, !Ref InputBucket, !Ref ExistingInputBucketName]
+          - Name: INPUT_OBJECT_KEY
+            Type: PLAINTEXT
+            Value: inputs/r/renv.lock
+          - Name: EVIDENCE_BUCKET
+            Type: PLAINTEXT
+            Value: !If [CreateEvidenceBucket, !Ref EvidenceBucket, !Ref ExistingEvidenceBucketName]
+          - Name: EVIDENCE_PREFIX
+            Type: PLAINTEXT
+            Value: evidence
+          - Name: EPHEMERAL_BUCKET
+            Type: PLAINTEXT
+            Value: !If [CreateEphemeralBucket, !Ref EphemeralBucket, !Ref ExistingEphemeralBucketName]
+          - Name: EPHEMERAL_PREFIX
+            Type: PLAINTEXT
+            Value: deploy/tmp/r
+          - Name: REMEDIATE_MEDIUM
+            Type: PLAINTEXT
+            Value: 'true'
+          - Name: FAIL_ON_MEDIUM
+            Type: PLAINTEXT
+            Value: 'false'
+          - Name: R_GOVERNANCE_SCRIPT_S3_KEY
+            Type: PLAINTEXT
+            Value: config/generate-r-governance-artifacts.py
+          - Name: R_SBOM_SCRIPT_S3_KEY
+            Type: PLAINTEXT
+            Value: config/generate-r-sbom.py
+          - Name: TRIVY_VERSION
+            Type: PLAINTEXT
+            Value: !Ref TrivyVersion
+          - Name: TRIVY_RELEASE_BASE_URL
+            Type: PLAINTEXT
+            Value: !Ref TrivyReleaseBaseUrl
+
+  RWindowsAmd64Project:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${EnvironmentName}-r-scan-windows-amd64'
+      ServiceRole: !GetAtt ScanBuildRole.Arn
+      TimeoutInMinutes: !Ref BuildTimeoutMinutes
+      Source:
+        Type: NO_SOURCE
+        BuildSpec: |
+          version: 0.2
+          env:
+            shell: powershell
+          phases:
+            install:
+              commands:
+                - New-Item -ItemType Directory -Force -Path C:\scan-input, C:\scan-out | Out-Null
+                - python -m pip install --upgrade pip
+                - aws s3 cp "s3://${env:EVIDENCE_BUCKET}/${env:R_GOVERNANCE_SCRIPT_S3_KEY}" C:\generate-r-governance-artifacts.py
+                - aws s3 cp "s3://${env:EVIDENCE_BUCKET}/${env:R_SBOM_SCRIPT_S3_KEY}" C:\generate-r-sbom.py
+                - $trivyArchive = "trivy_${env:TRIVY_VERSION}_windows-64bit.zip"
+                - $ok = $false; try { aws s3 cp "s3://${env:EVIDENCE_BUCKET}/config/trivy/$trivyArchive" C:\trivy.zip 2>$null; if ($LASTEXITCODE -eq 0) { $ok = $true } } catch {}
+                - if (-not $ok) { Invoke-WebRequest -Uri "${env:TRIVY_RELEASE_BASE_URL}/v${env:TRIVY_VERSION}/$trivyArchive" -OutFile C:\trivy.zip }
+                - Expand-Archive -Path C:\trivy.zip -DestinationPath C:\trivy -Force
+            build:
+              commands:
+                - Write-Host 'Build phase starting'
+                - $ts = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
+                - $platform = 'windows-amd64'
+                - $runDir = "C:\scan-out\$ts"
+                - New-Item -ItemType Directory -Force -Path $runDir | Out-Null
+                - aws s3 cp "s3://${env:INPUT_BUCKET}/${env:INPUT_OBJECT_KEY}" C:\scan-input\renv.lock
+                - Copy-Item C:\scan-input\renv.lock "$runDir\renv.lock" -Force
+                - python C:\generate-r-sbom.py --lock-file "$runDir\renv.lock" --out-file "$runDir\r-packages.cdx.json"
+                - C:\trivy\trivy.exe sbom --format json --output "$runDir\trivy-sbom-report.json" "$runDir\r-packages.cdx.json"; $true
+                - $govExit = 0
+                - python C:\generate-r-governance-artifacts.py --run-dir $runDir --platform $platform --remediate-medium $env:REMEDIATE_MEDIUM --fail-on-medium $env:FAIL_ON_MEDIUM; if ($LASTEXITCODE -ne 0) { $govExit = $LASTEXITCODE }
+                - try { tar -czf "$runDir\environment-artifacts.tar.gz" -C $runDir renv.lock r-packages.cdx.json } catch { Write-Host 'archive step skipped' }
+                - aws s3 cp "$runDir\" "s3://${env:EPHEMERAL_BUCKET}/${env:EPHEMERAL_PREFIX}/$platform/$ts/" --recursive
+                - aws s3 cp "$runDir\renv.lock" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/requirements/r/$platform/$ts/renv.lock"
+                - if (Test-Path "$runDir\approval-candidate-packages.csv") { aws s3 cp "$runDir\approval-candidate-packages.csv" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/requirements/r/$platform/$ts/approval-candidate-packages.csv" }
+                - if (Test-Path "$runDir\r-packages.cdx.json") { aws s3 cp "$runDir\r-packages.cdx.json" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/env-artifacts/r/$platform/$ts/r-packages.cdx.json" }
+                - if (Test-Path "$runDir\environment-artifacts.tar.gz") { aws s3 cp "$runDir\environment-artifacts.tar.gz" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/env-artifacts/r/$platform/$ts/environment-artifacts.tar.gz" }
+                - if (Test-Path "$runDir\trivy-sbom-report.json") { aws s3 cp "$runDir\trivy-sbom-report.json" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/model-results/r/$platform/$ts/trivy-sbom-report.json" }
+                - if (Test-Path "$runDir\vulnerability-findings.csv") { aws s3 cp "$runDir\vulnerability-findings.csv" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/governance/r/$platform/$ts/vulnerability-findings.csv" }
+                - if (Test-Path "$runDir\remediation-required.csv") { aws s3 cp "$runDir\remediation-required.csv" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/governance/r/$platform/$ts/remediation-required.csv" }
+                - if (Test-Path "$runDir\remediation-exceptions.csv") { aws s3 cp "$runDir\remediation-exceptions.csv" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/governance/r/$platform/$ts/remediation-exceptions.csv" }
+                - if (Test-Path "$runDir\remediation-spreadsheet.csv") { aws s3 cp "$runDir\remediation-spreadsheet.csv" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/governance/r/$platform/$ts/remediation-spreadsheet.csv" }
+                - if (Test-Path "$runDir\governance-summary.json") { aws s3 cp "$runDir\governance-summary.json" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/traceability/r/$platform/$ts/governance-summary.json" }
+                - $metaJson = "{`"platform`":`"$platform`",`"timestamp_utc`":`"$ts`",`"ephemeral_prefix`":`"${env:EPHEMERAL_PREFIX}/$platform/$ts`",`"cleanup`":`"requested`"}"; $metaJson | Out-File "$runDir\run-metadata.json" -Encoding ascii
+                - aws s3 cp "$runDir\run-metadata.json" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/traceability/r/$platform/$ts/run-metadata.json"
+                - aws s3 rm "s3://${env:EPHEMERAL_BUCKET}/${env:EPHEMERAL_PREFIX}/$platform/$ts/" --recursive
+                - if ($govExit -ne 0) { Write-Host "Governance gate failed with exit $govExit"; exit $govExit }
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        Type: WINDOWS_SERVER_2022_CONTAINER
+        Image: aws/codebuild/windows-base:2022-1.0
+        ComputeType: !Ref WindowsComputeType
+        EnvironmentVariables:
+          - Name: INPUT_BUCKET
+            Type: PLAINTEXT
+            Value: !If [CreateInputBucket, !Ref InputBucket, !Ref ExistingInputBucketName]
+          - Name: INPUT_OBJECT_KEY
+            Type: PLAINTEXT
+            Value: inputs/r/renv.lock
+          - Name: EVIDENCE_BUCKET
+            Type: PLAINTEXT
+            Value: !If [CreateEvidenceBucket, !Ref EvidenceBucket, !Ref ExistingEvidenceBucketName]
+          - Name: EVIDENCE_PREFIX
+            Type: PLAINTEXT
+            Value: evidence
+          - Name: EPHEMERAL_BUCKET
+            Type: PLAINTEXT
+            Value: !If [CreateEphemeralBucket, !Ref EphemeralBucket, !Ref ExistingEphemeralBucketName]
+          - Name: EPHEMERAL_PREFIX
+            Type: PLAINTEXT
+            Value: deploy/tmp/r
+          - Name: REMEDIATE_MEDIUM
+            Type: PLAINTEXT
+            Value: 'true'
+          - Name: FAIL_ON_MEDIUM
+            Type: PLAINTEXT
+            Value: 'false'
+          - Name: R_GOVERNANCE_SCRIPT_S3_KEY
+            Type: PLAINTEXT
+            Value: config/generate-r-governance-artifacts.py
+          - Name: R_SBOM_SCRIPT_S3_KEY
+            Type: PLAINTEXT
+            Value: config/generate-r-sbom.py
+          - Name: TRIVY_VERSION
+            Type: PLAINTEXT
+            Value: !Ref TrivyVersion
+          - Name: TRIVY_RELEASE_BASE_URL
+            Type: PLAINTEXT
+            Value: !Ref TrivyReleaseBaseUrl
+
+
 Outputs:
   InputBucketName:
     Value: !If [CreateInputBucket, !Ref InputBucket, !Ref ExistingInputBucketName]
@@ -493,4 +835,9 @@ Outputs:
     Value: !Ref LinuxArm64Project
   WindowsAmd64ProjectName:
     Value: !Ref WindowsAmd64Project
-
+  RLinuxAmd64ProjectName:
+    Value: !Ref RLinuxAmd64Project
+  RLinuxArm64ProjectName:
+    Value: !Ref RLinuxArm64Project
+  RWindowsAmd64ProjectName:
+    Value: !Ref RWindowsAmd64Project

@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 def load_renv_packages(lock_path: Path):
-    data = json.loads(lock_path.read_text(encoding="utf-8"))
+    data = json.loads(lock_path.read_text(encoding="utf-8-sig"))
     packages = data.get("Packages")
     if not isinstance(packages, dict):
         raise ValueError("renv.lock missing Packages object")

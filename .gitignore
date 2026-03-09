@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local test/temp artifacts
+.tmp-tests/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
