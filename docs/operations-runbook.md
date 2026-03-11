@@ -8,6 +8,7 @@
    - `aws cloudformation describe-stacks --stack-name <stack> --query "Stacks[0].StackStatus"`
 3. Submit scans (Python/R) per workflow.
 4. Verify governance outputs in evidence bucket.
+5. For enclave deliveries, capture the latest `renv.lock`, export cache bundles with `scripts/r-lockfile-tools.sh bundle`, and compute checksums before transfer.
 
 ## Standard Procedures
 
@@ -27,6 +28,7 @@
 
 - Use `scripts/start-r-scan.sh`.
 - Ensure `renv.lock` is uploaded first.
+- After a successful scan, upload the cache archive + `.sha256` file to `packages/offline/r/<platform>/<timestamp>/` so enclave teams can pull the approved bundle.
 
 ## Incident Procedure
 
@@ -55,6 +57,12 @@ For production updates:
 3. Deploy through approved profile/account.
 4. Run one Python and one R validation scan.
 
+## Storage Requirements
+
+- CodeBuild’s default NVMe scratch volume must have at least 15 GB free before each scan. Use `df -h` (Linux) or `Get-PSDrive C` (Windows) in troubleshooting steps.
+- Keep only the most recent `renv`/conda cache on disk. Once an archive is uploaded to S3, delete the local cache (`rm -rf ~/.local/share/renv/cache/*` or `Remove-Item -Recurse`) to reclaim space.
+- If you consistently exceed scratch capacity, update the stack to attach a larger EBS volume and mount it at `/mnt/package_cache` (Linux) or `G:\package_cache` (Windows), then point `RENV_PATHS_CACHE` there.
+
 ## Rollback Guidance
 
 - Re-deploy previous known-good template/scripts with same lock token.
@@ -67,3 +75,9 @@ For production updates:
 - Ephemeral bucket should purge by lifecycle policy and explicit cleanup.
 - Verify lifecycle policy in bucket configuration after deploy updates.
 
+## Enclave Transfer Checklist
+
+1. Pull the latest passing `renv.lock` and cache archive (plus `.sha256`) from the evidence bucket.
+2. Verify the checksum locally: `sha256sum -c renv-cache-<platform>.tar.gz.sha256`.
+3. Move the files across the approved transfer mechanism.
+4. Inside the enclave, unpack to the designated cache path, set `RENV_PATHS_CACHE`, install R 4.4.0, and run `renv::restore()` to hydrate the environment without outbound access.

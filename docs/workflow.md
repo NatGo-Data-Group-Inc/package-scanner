@@ -167,7 +167,30 @@ Evidence paths:
 - `s3://<evidence-bucket>/evidence/governance/r/<platform>/<timestamp>/...`
 - `s3://<evidence-bucket>/evidence/traceability/r/<platform>/<timestamp>/...`
 
-## 7) How to Scan Particular Package(s)
+## 7) Offline Bundle & Enclave Workflow
+
+When an enclave cannot reach the internet, treat the `renv.lock` as your blueprint and move only portable artifacts that have already passed cyber review.
+
+1. **Snapshot the approved environment** (on a connected build host):
+   ```bash
+   ./scripts/r-lockfile-tools.sh snapshot \
+     --project-dir /path/to/project \
+     --lockfile renv.lock
+   ```
+   Commit the lockfile so every change is auditable.
+2. **Restore and build per-platform caches** on dedicated linux/amd64, linux/arm64, and windows/amd64 builders using the same lockfile. Keep only one active cache per platform to minimize disk usage.
+3. **Bundle the cache for transport** after a successful `renv::restore`:
+   ```bash
+   ./scripts/r-lockfile-tools.sh bundle \
+     --cache-dir ~/.local/share/renv/cache \
+     --output-dir ./offline-artifacts \
+     --platform linux-amd64
+   ```
+   The script writes both the archive (for example `renv-cache-linux-amd64-<ts>.tar.gz`) and a `.sha256` checksum so enclave operators can verify integrity.
+4. **Run `scripts/start-r-scan.sh`** with the updated lockfile to generate the governance evidence shown above. Only publish cache archives that correspond to a passing scan.
+5. **Stage artifacts for the enclave** by uploading lockfile + cache archive + checksum to the evidence bucket (for example `s3://<evidence>/packages/offline/r/linux-amd64/<ts>/`). The enclave team copies those files through the existing transfer channel, sets `RENV_PATHS_CACHE` to the unpacked archive, installs R 4.4.0, and runs `renv::restore()` offline.
+
+## 8) How to Scan Particular Package(s)
 
 The scanner evaluates the resolved environment/lockfile. To scan specific packages:
 
@@ -176,13 +199,13 @@ The scanner evaluates the resolved environment/lockfile. To scan specific packag
 - R: include target packages in `renv.lock` by installing/snapshotting them first.
   - Example: `tidyverse`
 
-## 8) Failure/Gate Behavior
+## 9) Failure/Gate Behavior
 
 - Runs are fail-closed for required scanner inputs/artifacts.
 - Governance gate can fail run based on severity policy.
 - `--fail-on-medium true` makes medium findings gate-fail.
 
-## 9) PowerShell Users
+## 10) PowerShell Users
 
 Equivalent wrappers:
 
@@ -191,4 +214,3 @@ Equivalent wrappers:
 - `scripts/start-r-scan.ps1`
 
 Wrappers pass through to bash scripts with equivalent switches.
-

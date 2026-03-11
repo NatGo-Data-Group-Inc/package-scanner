@@ -430,6 +430,13 @@ Resources:
             install:
               commands:
                 - New-Item -ItemType Directory -Force -Path C:\scan-input, C:\scan-out | Out-Null
+                - $rtoolsRoot = 'C:\rtools44'
+                - if (-not (Test-Path $rtoolsRoot)) {
+                    $rtoolsInstaller = 'C:\rtools.exe';
+                    Invoke-WebRequest -Uri 'https://cloud.r-project.org/bin/windows/Rtools/rtools44.exe' -OutFile $rtoolsInstaller;
+                    Start-Process -FilePath $rtoolsInstaller -ArgumentList '/VERYSILENT','/DIR=C:\rtools44' -Wait;
+                  }
+                - $env:PATH = "C:\rtools44\usr\bin;C:\rtools44\mingw64\bin;$env:PATH"
                 - python -m pip install --upgrade pip
                 - python -m pip install safety cyclonedx-bom
                 - $trivyArchive = "trivy_${env:TRIVY_VERSION}_windows-64bit.zip"
@@ -741,6 +748,13 @@ Resources:
             install:
               commands:
                 - New-Item -ItemType Directory -Force -Path C:\scan-input, C:\scan-out | Out-Null
+                - $rtoolsRoot = 'C:\rtools44'
+                - if (-not (Test-Path $rtoolsRoot)) {
+                    $rtoolsInstaller = 'C:\rtools.exe';
+                    Invoke-WebRequest -Uri 'https://cloud.r-project.org/bin/windows/Rtools/rtools44.exe' -OutFile $rtoolsInstaller;
+                    Start-Process -FilePath $rtoolsInstaller -ArgumentList '/VERYSILENT','/DIR=C:\rtools44' -Wait;
+                  }
+                - $env:PATH = "C:\rtools44\usr\bin;C:\rtools44\mingw64\bin;$env:PATH"
                 - python -m pip install --upgrade pip
                 - aws s3 cp "s3://${env:EVIDENCE_BUCKET}/${env:R_GOVERNANCE_SCRIPT_S3_KEY}" C:\generate-r-governance-artifacts.py
                 - aws s3 cp "s3://${env:EVIDENCE_BUCKET}/${env:R_SBOM_SCRIPT_S3_KEY}" C:\generate-r-sbom.py
