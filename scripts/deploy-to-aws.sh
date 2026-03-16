@@ -14,8 +14,8 @@ DEPLOYMENT_LOCK_TOKEN="dev-lock-20260306"
 EXPECTED_ACCOUNT_ID="807497180525"
 PY_ENV_FILE="./.tmp-tests/smoke-python-environment.yml"
 PY_INPUT_S3_KEY="package-scanner/inputs/python/smoke-python-environment.yml"  # S3 object key (remote path)
-R_ENV_FILE="/home/tjansto/github/natgo/package-scanner/.tmp-tests/smoke-renv.lock"
-R_INPUT_KEY="inputs/r/smoke-renv.lock"
+R_ENV_FILE="/home/tjansto/github/natgo/package-scanner/artifacts/renv.lock"
+R_INPUT_KEY="inputs/r/renv.lock"
 SAFETY_API_KEY="8c73d240-2e0d3f4a-f9544793-670187fa"
 
 # -----------------------------------------------------------------------------
@@ -53,12 +53,6 @@ run aws s3 cp "${PY_ENV_FILE}" \
   --region "${REGION}" \
   --profile "${PROFILE}"
 
-echo "==> Uploading R lockfile to s3://${INPUT_BUCKET}/${R_INPUT_KEY}"
-run aws s3 cp "${R_ENV_FILE}" \
-  "s3://${INPUT_BUCKET}/${R_INPUT_KEY}" \
-  --region "${REGION}" \
-  --profile "${PROFILE}"
-
 echo "==> Starting Python (numpy) smoke scan"
 run ./scripts/start-python-scan.sh \
   --stack-name "${STACK_NAME}" \
@@ -77,6 +71,7 @@ run ./scripts/start-r-scan.sh \
   --stack-name "${STACK_NAME}" \
   --input-bucket "${INPUT_BUCKET}" \
   --input-object-key "${R_INPUT_KEY}" \
+  --source-lock-file "${R_ENV_FILE}" \
   --region "${REGION}" \
   --profile "${PROFILE}" \
   --expected-account-id "${EXPECTED_ACCOUNT_ID}" \
@@ -84,4 +79,4 @@ run ./scripts/start-r-scan.sh \
   --remediate-medium true \
   --fail-on-medium false
 
-echo "All AWS actions submitted. Monitor CodeBuild for completion."
+echo "All AWS actions submitted. Monitor the R Step Functions execution and CodeBuild child runs for completion."

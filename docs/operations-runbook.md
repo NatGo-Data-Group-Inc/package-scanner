@@ -8,7 +8,7 @@
    - `aws cloudformation describe-stacks --stack-name <stack> --query "Stacks[0].StackStatus"`
 3. Submit scans (Python/R) per workflow.
 4. Verify governance outputs in evidence bucket.
-5. For enclave deliveries, capture the latest `renv.lock`, export cache bundles with `scripts/r-lockfile-tools.sh bundle`, and compute checksums before transfer.
+5. For enclave deliveries, pull the latest platform cache bundles and `.sha256` files from `evidence/packages/offline/r/<platform>/<timestamp>/`.
 
 ## Standard Procedures
 
@@ -27,8 +27,8 @@
 ### Start R Scan
 
 - Use `scripts/start-r-scan.sh`.
-- Ensure `renv.lock` is uploaded first.
-- After a successful scan, upload the cache archive + `.sha256` file to `packages/offline/r/<platform>/<timestamp>/` so enclave teams can pull the approved bundle.
+- Ensure `renv.lock` is uploaded first, or pass `--source-lock-file`.
+- Each successful R build now restores the environment, emits materialization evidence, and publishes the cache archive + `.sha256` file to `evidence/packages/offline/r/<platform>/<timestamp>/`.
 
 ## Incident Procedure
 

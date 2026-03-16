@@ -18,7 +18,7 @@ $DeploymentLockToken = 'dev-lock-2026-03'
 $ExpectedAccountId = '123456789012'
 $PythonEnvFile = 'environment.yml'
 $PythonInputS3Key = 'package-scanner/inputs/python/environment.yml' # S3 object key (remote path)
-$REnvFile = 'renv.lock'
+$REnvFile = 'artifacts/renv.lock'
 $RInputKey = 'inputs/r/renv.lock'
 $SafetyApiKey = ''
 # -----------------------------------------------------------------------------
@@ -56,12 +56,6 @@ Invoke-Step "Uploading Python environment to s3://$InputBucket/$PythonInputS3Key
     --profile $Profile
 }
 
-Invoke-Step "Uploading R lockfile to s3://$InputBucket/$RInputKey" {
-  aws s3 cp $REnvFile "s3://$InputBucket/$RInputKey" `
-    --region $Region `
-    --profile $Profile
-}
-
 Invoke-Step "Starting Python (numpy) smoke scan" {
   ./scripts/start-python-scan.sh `
     --stack-name $StackName `
@@ -81,6 +75,7 @@ Invoke-Step "Starting R (tidyverse) smoke scan" {
     --stack-name $StackName `
     --input-bucket $InputBucket `
     --input-object-key $RInputKey `
+    --source-lock-file $REnvFile `
     --region $Region `
     --profile $Profile `
     --expected-account-id $ExpectedAccountId `
@@ -89,4 +84,4 @@ Invoke-Step "Starting R (tidyverse) smoke scan" {
     --fail-on-medium false
 }
 
-Write-Host "All AWS actions submitted. Monitor CodeBuild for completion."
+Write-Host "All AWS actions submitted. Monitor the R Step Functions execution and CodeBuild child runs for completion."

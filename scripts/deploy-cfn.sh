@@ -201,3 +201,18 @@ aws s3 cp "${REPO_ROOT}/scripts/generate-r-governance-artifacts.py" \
 aws s3 cp "${REPO_ROOT}/scripts/generate-r-sbom.py" \
   "s3://${EVIDENCE_BUCKET}/config/generate-r-sbom.py" \
   "${AWS_ARGS[@]}"
+aws s3 cp "${REPO_ROOT}/scripts/materialize-r-environment.R" \
+  "s3://${EVIDENCE_BUCKET}/config/materialize-r-environment.R" \
+  "${AWS_ARGS[@]}"
+aws s3 cp "${REPO_ROOT}/scripts/install-r-runtime.sh" \
+  "s3://${EVIDENCE_BUCKET}/config/install-r-runtime.sh" \
+  "${AWS_ARGS[@]}"
+aws s3 cp "${REPO_ROOT}/scripts/install-r-runtime.ps1" \
+  "s3://${EVIDENCE_BUCKET}/config/install-r-runtime.ps1" \
+  "${AWS_ARGS[@]}"
+aws s3 cp "${REPO_ROOT}/scripts/bundle-directory.py" \
+  "s3://${EVIDENCE_BUCKET}/config/bundle-directory.py" \
+  "${AWS_ARGS[@]}"
+aws s3 cp "${REPO_ROOT}/scripts/generate-r-materialization-summary.py" \
+  "s3://${EVIDENCE_BUCKET}/config/generate-r-materialization-summary.py" \
+  "${AWS_ARGS[@]}"

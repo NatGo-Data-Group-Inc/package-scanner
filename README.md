@@ -68,7 +68,7 @@ Project policies:
 - `api/openapi.yaml`: control-plane API contract for UI/backend integration.
 - `scripts/deploy-cfn.sh`: canonical deploy/update entrypoint.
 - `scripts/start-python-scan.sh`: canonical scan start entrypoint.
-- `scripts/start-r-scan.sh`: canonical R scan start entrypoint.
+- `scripts/start-r-scan.sh`: canonical R scan start entrypoint. Starts the Step Functions orchestration for the three R platforms.
 - `scripts/deploy-cfn.ps1`: PowerShell wrapper for `deploy-cfn.sh`.
 - `scripts/start-python-scan.ps1`: PowerShell wrapper for `start-python-scan.sh`.
 - `scripts/start-r-scan.ps1`: PowerShell wrapper for `start-r-scan.sh`.
@@ -89,6 +89,8 @@ Project policies:
   - `${EnvironmentName}-r-scan-linux-amd64`
   - `${EnvironmentName}-r-scan-linux-arm64`
   - `${EnvironmentName}-r-scan-windows-amd64`
+- 1 Step Functions state machine:
+  - `${EnvironmentName}-r-scan-orchestrator`
 
 ## Quick Start
 
@@ -149,6 +151,7 @@ R evidence outputs:
 - `s3://<evidence-bucket>/evidence/env-artifacts/r/<platform>/<timestamp>/...`
 - `s3://<evidence-bucket>/evidence/governance/r/<platform>/<timestamp>/...`
 - `s3://<evidence-bucket>/evidence/traceability/r/<platform>/<timestamp>/...`
+- `s3://<evidence-bucket>/evidence/packages/offline/r/<platform>/<timestamp>/...`
 
 Governance outputs include:
 - `approval-candidate-packages.csv`
@@ -193,7 +196,7 @@ Use scan-time overrides:
 
 ## R Scan Start
 
-1. Upload R lockfile:
+1. Upload R lockfile, or let the start script upload the local blueprint for you:
 
 ```powershell
 aws s3 cp .\renv.lock s3://<input-bucket>/inputs/r/renv.lock --region us-east-1 --profile <aws-profile>
@@ -205,11 +208,18 @@ aws s3 cp .\renv.lock s3://<input-bucket>/inputs/r/renv.lock --region us-east-1 
 ./scripts/start-r-scan.sh \
   --stack-name package-scanner-dev \
   --input-bucket <input-bucket> \
+  --source-lock-file ./artifacts/renv.lock \
   --region us-east-1 \
   --profile <aws-profile> \
   --expected-account-id <12-digit-account-id> \
   --deployment-lock-token <env-lock-token>
 ```
+
+The R jobs now materialize the environment on each platform before report generation:
+- install the requested R runtime from `renv.lock`
+- run `renv::restore()`
+- emit `installed-packages.csv`, `session-info.txt`, and restore logs
+- publish a platform cache bundle and checksum for enclave transfer
 
 ## API Contract
 

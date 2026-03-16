@@ -9,6 +9,9 @@ param(
   [string]$InputObjectKey = "inputs/r/renv.lock",
 
   [Parameter(Mandatory = $false)]
+  [string]$SourceLockFile = "",
+
+  [Parameter(Mandatory = $false)]
   [string]$EvidenceBucket = "",
 
   [Parameter(Mandatory = $false)]
@@ -63,6 +66,7 @@ $bashArgs = @(
   "--region", $Region
 )
 
+if ($SourceLockFile -ne "") { $bashArgs += @("--source-lock-file", $SourceLockFile) }
 if ($Profile -ne "") { $bashArgs += @("--profile", $Profile) }
 if ($AllowDefaultProfile) { $bashArgs += "--allow-default-profile" }
 if ($ExpectedAccountId -ne "") { $bashArgs += @("--expected-account-id", $ExpectedAccountId) }

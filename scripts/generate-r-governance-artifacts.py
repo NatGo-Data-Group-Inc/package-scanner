@@ -63,6 +63,33 @@ def parse_renv_lock(path: Path):
     return rows
 
 
+def parse_installed_packages(path: Path):
+    if not path.exists():
+        raise GovernanceError(f"Required file missing: {path}")
+
+    rows = []
+    with path.open(newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        for raw in reader:
+            name = str(raw.get("package_name") or raw.get("Package") or "").strip()
+            version = str(raw.get("package_version") or raw.get("Version") or "").strip()
+            if not name or not version:
+                continue
+            rows.append(
+                {
+                    "package_name": name,
+                    "package_version": version,
+                    "platform": "",
+                    "dependency_type": "materialized",
+                    "source": "installed-packages.csv",
+                    "approval_status": "candidate",
+                }
+            )
+    if not rows:
+        raise GovernanceError(f"No installed packages parsed from {path}")
+    return rows
+
+
 def severity_norm(v):
     if not v:
         return "UNKNOWN"
@@ -131,7 +158,11 @@ def main(argv=None):
     remediate_medium = bool_arg(args.remediate_medium, default=True)
     fail_on_medium = bool_arg(args.fail_on_medium, default=False)
 
-    approval = parse_renv_lock(run_dir / "renv.lock")
+    installed_packages_path = run_dir / "installed-packages.csv"
+    if installed_packages_path.exists():
+        approval = parse_installed_packages(installed_packages_path)
+    else:
+        approval = parse_renv_lock(run_dir / "renv.lock")
     for row in approval:
         row["platform"] = args.platform
 
@@ -293,6 +324,17 @@ def main(argv=None):
         },
         "policy": {"remediate_medium": remediate_medium, "fail_on_medium": fail_on_medium},
     }
+    if installed_packages_path.exists():
+        summary["artifacts"]["installed_packages"] = {
+            "path": str(installed_packages_path),
+            "sha256": sha256_file(installed_packages_path),
+        }
+    materialization_summary_path = run_dir / "materialization-summary.json"
+    if materialization_summary_path.exists():
+        summary["artifacts"]["materialization_summary"] = {
+            "path": str(materialization_summary_path),
+            "sha256": sha256_file(materialization_summary_path),
+        }
     (run_dir / "governance-summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
     if gate_hits > 0:

@@ -42,6 +42,8 @@ Resources:
     - `${EnvironmentName}-r-scan-linux-amd64`
     - `${EnvironmentName}-r-scan-linux-arm64`
     - `${EnvironmentName}-r-scan-windows-amd64`
+- Step Functions:
+  - `${EnvironmentName}-r-scan-orchestrator`
 
 Guardrails:
 
@@ -145,6 +147,8 @@ aws s3 cp ./renv.lock \
   --profile <aws-profile>
 ```
 
+You can skip this separate upload when the lockfile already exists locally in the repo and pass `--source-lock-file` in the next step instead.
+
 ### Step C: start scan (all R platforms)
 
 ```bash
@@ -152,6 +156,7 @@ aws s3 cp ./renv.lock \
   --stack-name package-scanner-dev \
   --input-bucket <input-bucket> \
   --input-object-key inputs/r/renv.lock \
+  --source-lock-file ./artifacts/renv.lock \
   --region us-east-1 \
   --profile <aws-profile> \
   --expected-account-id <12-digit-account-id> \
@@ -166,6 +171,7 @@ Evidence paths:
 
 - `s3://<evidence-bucket>/evidence/governance/r/<platform>/<timestamp>/...`
 - `s3://<evidence-bucket>/evidence/traceability/r/<platform>/<timestamp>/...`
+- `s3://<evidence-bucket>/evidence/packages/offline/r/<platform>/<timestamp>/...`
 
 ## 7) Offline Bundle & Enclave Workflow
 
@@ -178,17 +184,10 @@ When an enclave cannot reach the internet, treat the `renv.lock` as your bluepri
      --lockfile renv.lock
    ```
    Commit the lockfile so every change is auditable.
-2. **Restore and build per-platform caches** on dedicated linux/amd64, linux/arm64, and windows/amd64 builders using the same lockfile. Keep only one active cache per platform to minimize disk usage.
-3. **Bundle the cache for transport** after a successful `renv::restore`:
-   ```bash
-   ./scripts/r-lockfile-tools.sh bundle \
-     --cache-dir ~/.local/share/renv/cache \
-     --output-dir ./offline-artifacts \
-     --platform linux-amd64
-   ```
-   The script writes both the archive (for example `renv-cache-linux-amd64-<ts>.tar.gz`) and a `.sha256` checksum so enclave operators can verify integrity.
-4. **Run `scripts/start-r-scan.sh`** with the updated lockfile to generate the governance evidence shown above. Only publish cache archives that correspond to a passing scan.
-5. **Stage artifacts for the enclave** by uploading lockfile + cache archive + checksum to the evidence bucket (for example `s3://<evidence>/packages/offline/r/linux-amd64/<ts>/`). The enclave team copies those files through the existing transfer channel, sets `RENV_PATHS_CACHE` to the unpacked archive, installs R 4.4.0, and runs `renv::restore()` offline.
+2. **Run `scripts/start-r-scan.sh`** against the lockfile. It starts the R orchestration state machine, which fans out to the three platform jobs. Each platform job installs the requested R runtime, runs `renv::restore()`, captures the restored package set, and emits both evidence artifacts and an enclave-transferable cache bundle.
+3. **Collect the generated cache bundle** from `s3://<evidence>/evidence/packages/offline/r/<platform>/<timestamp>/`. Each run writes the platform archive (for example `renv-cache-linux-amd64-<ts>.tar.gz`) and a matching `.sha256`.
+4. **Review the materialization evidence** in `evidence/env-artifacts/r/<platform>/<timestamp>/`, including `installed-packages.csv`, `session-info.txt`, `restore.log`, and `materialization-summary.json`.
+5. **Stage artifacts for the enclave** by transferring lockfile + cache archive + checksum through the approved path. Inside the enclave, set `RENV_PATHS_CACHE` to the unpacked archive, install R 4.4.0, and run `renv::restore()` offline.
 
 ## 8) How to Scan Particular Package(s)
 

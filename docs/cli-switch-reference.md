@@ -108,6 +108,8 @@ Optional:
 
 - `--input-object-key <key>`
   - Input object key (default `inputs/r/renv.lock`).
+- `--source-lock-file <path>`
+  - Upload a local `renv.lock` to `s3://<input-bucket>/<input-object-key>` before starting the three remote R scans.
 - `--evidence-bucket <bucket>`
   - Override evidence bucket.
 - `--evidence-prefix <prefix>`

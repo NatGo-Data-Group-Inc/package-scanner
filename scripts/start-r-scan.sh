@@ -4,6 +4,7 @@ set -euo pipefail
 STACK_NAME=""
 INPUT_BUCKET=""
 INPUT_OBJECT_KEY="inputs/r/renv.lock"
+SOURCE_LOCK_FILE=""
 EVIDENCE_BUCKET=""
 EVIDENCE_PREFIX="evidence"
 EPHEMERAL_BUCKET=""
@@ -26,6 +27,7 @@ Required:
 
 Optional:
   --input-object-key <key>                (default: inputs/r/renv.lock)
+  --source-lock-file <path>               Upload local renv.lock before starting builds
   --evidence-bucket <bucket>              (default: auto from stack output)
   --evidence-prefix <prefix>              (default: evidence)
   --ephemeral-bucket <bucket>             (default: auto from stack output)
@@ -45,6 +47,7 @@ while [[ $# -gt 0 ]]; do
     --stack-name) STACK_NAME="$2"; shift 2 ;;
     --input-bucket) INPUT_BUCKET="$2"; shift 2 ;;
     --input-object-key) INPUT_OBJECT_KEY="$2"; shift 2 ;;
+    --source-lock-file) SOURCE_LOCK_FILE="$2"; shift 2 ;;
     --evidence-bucket) EVIDENCE_BUCKET="$2"; shift 2 ;;
     --evidence-prefix) EVIDENCE_PREFIX="$2"; shift 2 ;;
     --ephemeral-bucket) EPHEMERAL_BUCKET="$2"; shift 2 ;;
@@ -64,6 +67,10 @@ done
 if [[ -z "${STACK_NAME}" || -z "${INPUT_BUCKET}" ]]; then
   echo "Both --stack-name and --input-bucket are required." >&2
   usage >&2
+  exit 1
+fi
+if [[ -n "${SOURCE_LOCK_FILE}" && ! -f "${SOURCE_LOCK_FILE}" ]]; then
+  echo "Local lockfile not found: ${SOURCE_LOCK_FILE}" >&2
   exit 1
 fi
 if [[ "${ALLOW_DEFAULT_PROFILE}" != "true" && -z "${PROFILE}" ]]; then
@@ -132,40 +139,61 @@ if [[ -z "${EPHEMERAL_BUCKET}" || "${EPHEMERAL_BUCKET}" == "None" ]]; then
   exit 1
 fi
 
+if [[ -n "${SOURCE_LOCK_FILE}" ]]; then
+  echo "Uploading R blueprint ${SOURCE_LOCK_FILE} to s3://${INPUT_BUCKET}/${INPUT_OBJECT_KEY}"
+  aws s3 cp "${SOURCE_LOCK_FILE}" "s3://${INPUT_BUCKET}/${INPUT_OBJECT_KEY}" "${AWS_ARGS[@]}"
+fi
+
 start_build() {
-  local platform="$1"
-  local output_key="$2"
-  local project_name
-  local build_id
-
-  project_name="$(stack_output "${output_key}")"
-  if [[ -z "${project_name}" || "${project_name}" == "None" ]]; then
-    echo "Missing stack output: ${output_key}" >&2
-    exit 1
-  fi
-
-  echo "Starting R ${platform} scan: ${project_name}"
-  build_id="$(
-    aws codebuild start-build \
-      --project-name "${project_name}" \
-      --environment-variables-override \
-        "name=INPUT_BUCKET,value=${INPUT_BUCKET},type=PLAINTEXT" \
-        "name=INPUT_OBJECT_KEY,value=${INPUT_OBJECT_KEY},type=PLAINTEXT" \
-        "name=EVIDENCE_BUCKET,value=${EVIDENCE_BUCKET},type=PLAINTEXT" \
-        "name=EVIDENCE_PREFIX,value=${EVIDENCE_PREFIX},type=PLAINTEXT" \
-        "name=EPHEMERAL_BUCKET,value=${EPHEMERAL_BUCKET},type=PLAINTEXT" \
-        "name=EPHEMERAL_PREFIX,value=${EPHEMERAL_PREFIX},type=PLAINTEXT" \
-        "name=REMEDIATE_MEDIUM,value=${REMEDIATE_MEDIUM},type=PLAINTEXT" \
-        "name=FAIL_ON_MEDIUM,value=${FAIL_ON_MEDIUM},type=PLAINTEXT" \
-      --query "build.id" \
-      --output text \
-      "${AWS_ARGS[@]}"
-  )"
-
-  printf '%-16s %-48s %s\n' "${platform}" "${project_name}" "${build_id}"
+  :
 }
 
-printf '%-16s %-48s %s\n' "Platform" "ProjectName" "BuildId"
-start_build "linux-amd64" "RLinuxAmd64ProjectName"
-start_build "linux-arm64" "RLinuxArm64ProjectName"
-start_build "windows-amd64" "RWindowsAmd64ProjectName"
+STATE_MACHINE_ARN="$(stack_output RScanOrchestrationStateMachineArn)"
+if [[ -z "${STATE_MACHINE_ARN}" || "${STATE_MACHINE_ARN}" == "None" ]]; then
+  echo "Missing stack output: RScanOrchestrationStateMachineArn" >&2
+  exit 1
+fi
+
+SCAN_TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+SCAN_EXECUTION_ID="r-scan-${SCAN_TIMESTAMP}-$(python - <<'PY'
+import uuid
+print(uuid.uuid4().hex[:8])
+PY
+)"
+
+EXECUTION_INPUT="$(
+  python - <<PY
+import json
+payload = {
+    "scan_execution_id": ${SCAN_EXECUTION_ID@Q},
+    "scan_timestamp": ${SCAN_TIMESTAMP@Q},
+    "input_bucket": ${INPUT_BUCKET@Q},
+    "input_object_key": ${INPUT_OBJECT_KEY@Q},
+    "evidence_bucket": ${EVIDENCE_BUCKET@Q},
+    "evidence_prefix": ${EVIDENCE_PREFIX@Q},
+    "ephemeral_bucket": ${EPHEMERAL_BUCKET@Q},
+    "ephemeral_prefix": ${EPHEMERAL_PREFIX@Q},
+    "remediate_medium": ${REMEDIATE_MEDIUM@Q},
+    "fail_on_medium": ${FAIL_ON_MEDIUM@Q},
+}
+print(json.dumps(payload))
+PY
+)"
+
+EXECUTION_ARN="$(
+  aws stepfunctions start-execution \
+    --state-machine-arn "${STATE_MACHINE_ARN}" \
+    --name "${SCAN_EXECUTION_ID}" \
+    --input "${EXECUTION_INPUT}" \
+    --query "executionArn" \
+    --output text \
+    "${AWS_ARGS[@]}"
+)"
+
+cat <<EOF
+Started R scan orchestration
+ExecutionName: ${SCAN_EXECUTION_ID}
+ExecutionArn:  ${EXECUTION_ARN}
+TimestampUtc:  ${SCAN_TIMESTAMP}
+SummaryPath:   s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/orchestration/r/${SCAN_EXECUTION_ID}/orchestration-summary.json
+EOF
