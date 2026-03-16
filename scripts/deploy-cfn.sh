@@ -201,6 +201,9 @@ aws s3 cp "${REPO_ROOT}/scripts/generate-r-governance-artifacts.py" \
 aws s3 cp "${REPO_ROOT}/scripts/generate-r-sbom.py" \
   "s3://${EVIDENCE_BUCKET}/config/generate-r-sbom.py" \
   "${AWS_ARGS[@]}"
+aws s3 cp "${REPO_ROOT}/scripts/scan-r-vulnerabilities.py" \
+  "s3://${EVIDENCE_BUCKET}/config/scan-r-vulnerabilities.py" \
+  "${AWS_ARGS[@]}"
 aws s3 cp "${REPO_ROOT}/scripts/materialize-r-environment.R" \
   "s3://${EVIDENCE_BUCKET}/config/materialize-r-environment.R" \
   "${AWS_ARGS[@]}"

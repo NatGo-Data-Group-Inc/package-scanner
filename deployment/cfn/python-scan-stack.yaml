@@ -334,7 +334,7 @@ Resources:
             build:
               commands:
                 - set -euo pipefail
-                - TS="$(date -u +%Y%m%dT%H%M%SZ)"
+                - TS="${SCAN_TIMESTAMP:-$(date -u +%Y%m%dT%H%M%SZ)}"
                 - TARGET_PLATFORM="linux-arm64"
                 - RUN_DIR="/tmp/scan-out/${TS}"
                 - mkdir -p "${RUN_DIR}"
@@ -433,7 +433,7 @@ Resources:
                 - $rtoolsRoot = 'C:\rtools44'
                 - if (-not (Test-Path $rtoolsRoot)) {
                     $rtoolsInstaller = 'C:\rtools.exe';
-                    Invoke-WebRequest -Uri 'https://cloud.r-project.org/bin/windows/Rtools/rtools44.exe' -OutFile $rtoolsInstaller;
+                    Invoke-WebRequest -Uri 'https://cran.r-project.org/bin/windows/Rtools/rtools44/files/rtools44-6459-6401.exe' -OutFile $rtoolsInstaller;
                     Start-Process -FilePath $rtoolsInstaller -ArgumentList '/VERYSILENT','/DIR=C:\rtools44' -Wait;
                   }
                 - $env:PATH = "C:\rtools44\usr\bin;C:\rtools44\mingw64\bin;$env:PATH"
@@ -558,6 +558,7 @@ Resources:
                 - install -m 0755 /tmp/trivy /usr/local/bin/trivy
                 - aws s3 cp "s3://${EVIDENCE_BUCKET}/${R_GOVERNANCE_SCRIPT_S3_KEY}" /tmp/generate-r-governance-artifacts.py
                 - aws s3 cp "s3://${EVIDENCE_BUCKET}/${R_SBOM_SCRIPT_S3_KEY}" /tmp/generate-r-sbom.py
+                - aws s3 cp "s3://${EVIDENCE_BUCKET}/${R_VULN_SCAN_SCRIPT_S3_KEY}" /tmp/scan-r-vulnerabilities.py
                 - aws s3 cp "s3://${EVIDENCE_BUCKET}/${R_MATERIALIZE_SCRIPT_S3_KEY}" /tmp/materialize-r-environment.R
                 - aws s3 cp "s3://${EVIDENCE_BUCKET}/${R_INSTALL_RUNTIME_SCRIPT_S3_KEY}" /tmp/install-r-runtime.sh
                 - aws s3 cp "s3://${EVIDENCE_BUCKET}/${BUNDLE_SCRIPT_S3_KEY}" /tmp/bundle-directory.py
@@ -566,7 +567,7 @@ Resources:
             build:
               commands:
                 - set -euo pipefail
-                - TS="$(date -u +%Y%m%dT%H%M%SZ)"
+                - TS="${SCAN_TIMESTAMP:-$(date -u +%Y%m%dT%H%M%SZ)}"
                 - TARGET_PLATFORM="linux-amd64"
                 - RUN_DIR="/tmp/scan-out/${TS}"
                 - PROJECT_DIR="${RUN_DIR}/project"
@@ -583,9 +584,10 @@ Resources:
                 - python /tmp/bundle-directory.py --source-dir "${LIBRARY_PATH}" --output-file "${RUN_DIR}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz" --checksum-file "${RUN_DIR}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
                 - python /tmp/generate-r-materialization-summary.py --run-dir "${RUN_DIR}" --platform "${TARGET_PLATFORM}" --r-version "${R_VERSION}" --cache-dir "${CACHE_DIR}" --library-path "${LIBRARY_PATH}"
                 - python /tmp/generate-r-sbom.py --installed-packages-file "${RUN_DIR}/installed-packages.csv" --out-file "${RUN_DIR}/r-packages.cdx.json"
+                - python /tmp/scan-r-vulnerabilities.py --installed-packages-file "${RUN_DIR}/installed-packages.csv" --lock-file "${RUN_DIR}/renv.lock" --out-file "${RUN_DIR}/osv-report.json"
                 - trivy sbom --format json --output "${RUN_DIR}/trivy-sbom-report.json" "${RUN_DIR}/r-packages.cdx.json" || true
                 - GOVERNANCE_EXIT=0
-                - python /tmp/generate-r-governance-artifacts.py --run-dir "${RUN_DIR}" --platform "${TARGET_PLATFORM}" --remediate-medium "${REMEDIATE_MEDIUM:-true}" --fail-on-medium "${FAIL_ON_MEDIUM:-false}" || GOVERNANCE_EXIT=$?
+                - python /tmp/generate-r-governance-artifacts.py --run-dir "${RUN_DIR}" --platform "${TARGET_PLATFORM}" --remediate-medium "${REMEDIATE_MEDIUM:-true}" --fail-on-medium "${FAIL_ON_MEDIUM:-false}" --remediate-unknown "${REMEDIATE_UNKNOWN:-true}" --fail-on-unknown "${FAIL_ON_UNKNOWN:-false}" || GOVERNANCE_EXIT=$?
                 - tar -czf "${RUN_DIR}/environment-artifacts.tar.gz" -C "${RUN_DIR}" renv.lock installed-packages.csv session-info.txt renv-status.txt materialization-summary.json r-packages.cdx.json || true
                 - aws s3 cp "${RUN_DIR}/" "s3://${EPHEMERAL_BUCKET}/${EPHEMERAL_PREFIX}/${TARGET_PLATFORM}/${TS}/" --recursive
                 - aws s3 cp "${RUN_DIR}/renv.lock" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/r/${TARGET_PLATFORM}/${TS}/renv.lock"
@@ -602,6 +604,7 @@ Resources:
                 - if [ -f "${RUN_DIR}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz" ]; then aws s3 cp "${RUN_DIR}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/packages/offline/r/${TARGET_PLATFORM}/${TS}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz"; fi
                 - if [ -f "${RUN_DIR}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz.sha256" ]; then aws s3 cp "${RUN_DIR}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz.sha256" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/packages/offline/r/${TARGET_PLATFORM}/${TS}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"; fi
                 - if [ -f "${RUN_DIR}/trivy-sbom-report.json" ]; then aws s3 cp "${RUN_DIR}/trivy-sbom-report.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/model-results/r/${TARGET_PLATFORM}/${TS}/trivy-sbom-report.json"; fi
+                - if [ -f "${RUN_DIR}/osv-report.json" ]; then aws s3 cp "${RUN_DIR}/osv-report.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/model-results/r/${TARGET_PLATFORM}/${TS}/osv-report.json"; fi
                 - if [ -f "${RUN_DIR}/vulnerability-findings.csv" ]; then aws s3 cp "${RUN_DIR}/vulnerability-findings.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/governance/r/${TARGET_PLATFORM}/${TS}/vulnerability-findings.csv"; fi
                 - if [ -f "${RUN_DIR}/remediation-required.csv" ]; then aws s3 cp "${RUN_DIR}/remediation-required.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/governance/r/${TARGET_PLATFORM}/${TS}/remediation-required.csv"; fi
                 - if [ -f "${RUN_DIR}/remediation-exceptions.csv" ]; then aws s3 cp "${RUN_DIR}/remediation-exceptions.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/governance/r/${TARGET_PLATFORM}/${TS}/remediation-exceptions.csv"; fi
@@ -642,12 +645,21 @@ Resources:
           - Name: FAIL_ON_MEDIUM
             Type: PLAINTEXT
             Value: 'false'
+          - Name: REMEDIATE_UNKNOWN
+            Type: PLAINTEXT
+            Value: 'true'
+          - Name: FAIL_ON_UNKNOWN
+            Type: PLAINTEXT
+            Value: 'false'
           - Name: R_GOVERNANCE_SCRIPT_S3_KEY
             Type: PLAINTEXT
             Value: config/generate-r-governance-artifacts.py
           - Name: R_SBOM_SCRIPT_S3_KEY
             Type: PLAINTEXT
             Value: config/generate-r-sbom.py
+          - Name: R_VULN_SCAN_SCRIPT_S3_KEY
+            Type: PLAINTEXT
+            Value: config/scan-r-vulnerabilities.py
           - Name: R_MATERIALIZE_SCRIPT_S3_KEY
             Type: PLAINTEXT
             Value: config/materialize-r-environment.R
@@ -695,6 +707,7 @@ Resources:
                 - install -m 0755 /tmp/trivy /usr/local/bin/trivy
                 - aws s3 cp "s3://${EVIDENCE_BUCKET}/${R_GOVERNANCE_SCRIPT_S3_KEY}" /tmp/generate-r-governance-artifacts.py
                 - aws s3 cp "s3://${EVIDENCE_BUCKET}/${R_SBOM_SCRIPT_S3_KEY}" /tmp/generate-r-sbom.py
+                - aws s3 cp "s3://${EVIDENCE_BUCKET}/${R_VULN_SCAN_SCRIPT_S3_KEY}" /tmp/scan-r-vulnerabilities.py
                 - aws s3 cp "s3://${EVIDENCE_BUCKET}/${R_MATERIALIZE_SCRIPT_S3_KEY}" /tmp/materialize-r-environment.R
                 - aws s3 cp "s3://${EVIDENCE_BUCKET}/${R_INSTALL_RUNTIME_SCRIPT_S3_KEY}" /tmp/install-r-runtime.sh
                 - aws s3 cp "s3://${EVIDENCE_BUCKET}/${BUNDLE_SCRIPT_S3_KEY}" /tmp/bundle-directory.py
@@ -720,9 +733,10 @@ Resources:
                 - python /tmp/bundle-directory.py --source-dir "${LIBRARY_PATH}" --output-file "${RUN_DIR}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz" --checksum-file "${RUN_DIR}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
                 - python /tmp/generate-r-materialization-summary.py --run-dir "${RUN_DIR}" --platform "${TARGET_PLATFORM}" --r-version "${R_VERSION}" --cache-dir "${CACHE_DIR}" --library-path "${LIBRARY_PATH}"
                 - python /tmp/generate-r-sbom.py --installed-packages-file "${RUN_DIR}/installed-packages.csv" --out-file "${RUN_DIR}/r-packages.cdx.json"
+                - python /tmp/scan-r-vulnerabilities.py --installed-packages-file "${RUN_DIR}/installed-packages.csv" --lock-file "${RUN_DIR}/renv.lock" --out-file "${RUN_DIR}/osv-report.json"
                 - trivy sbom --format json --output "${RUN_DIR}/trivy-sbom-report.json" "${RUN_DIR}/r-packages.cdx.json" || true
                 - GOVERNANCE_EXIT=0
-                - python /tmp/generate-r-governance-artifacts.py --run-dir "${RUN_DIR}" --platform "${TARGET_PLATFORM}" --remediate-medium "${REMEDIATE_MEDIUM:-true}" --fail-on-medium "${FAIL_ON_MEDIUM:-false}" || GOVERNANCE_EXIT=$?
+                - python /tmp/generate-r-governance-artifacts.py --run-dir "${RUN_DIR}" --platform "${TARGET_PLATFORM}" --remediate-medium "${REMEDIATE_MEDIUM:-true}" --fail-on-medium "${FAIL_ON_MEDIUM:-false}" --remediate-unknown "${REMEDIATE_UNKNOWN:-true}" --fail-on-unknown "${FAIL_ON_UNKNOWN:-false}" || GOVERNANCE_EXIT=$?
                 - tar -czf "${RUN_DIR}/environment-artifacts.tar.gz" -C "${RUN_DIR}" renv.lock installed-packages.csv session-info.txt renv-status.txt materialization-summary.json r-packages.cdx.json || true
                 - aws s3 cp "${RUN_DIR}/" "s3://${EPHEMERAL_BUCKET}/${EPHEMERAL_PREFIX}/${TARGET_PLATFORM}/${TS}/" --recursive
                 - aws s3 cp "${RUN_DIR}/renv.lock" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/r/${TARGET_PLATFORM}/${TS}/renv.lock"
@@ -739,6 +753,7 @@ Resources:
                 - if [ -f "${RUN_DIR}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz" ]; then aws s3 cp "${RUN_DIR}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/packages/offline/r/${TARGET_PLATFORM}/${TS}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz"; fi
                 - if [ -f "${RUN_DIR}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz.sha256" ]; then aws s3 cp "${RUN_DIR}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz.sha256" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/packages/offline/r/${TARGET_PLATFORM}/${TS}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"; fi
                 - if [ -f "${RUN_DIR}/trivy-sbom-report.json" ]; then aws s3 cp "${RUN_DIR}/trivy-sbom-report.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/model-results/r/${TARGET_PLATFORM}/${TS}/trivy-sbom-report.json"; fi
+                - if [ -f "${RUN_DIR}/osv-report.json" ]; then aws s3 cp "${RUN_DIR}/osv-report.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/model-results/r/${TARGET_PLATFORM}/${TS}/osv-report.json"; fi
                 - if [ -f "${RUN_DIR}/vulnerability-findings.csv" ]; then aws s3 cp "${RUN_DIR}/vulnerability-findings.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/governance/r/${TARGET_PLATFORM}/${TS}/vulnerability-findings.csv"; fi
                 - if [ -f "${RUN_DIR}/remediation-required.csv" ]; then aws s3 cp "${RUN_DIR}/remediation-required.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/governance/r/${TARGET_PLATFORM}/${TS}/remediation-required.csv"; fi
                 - if [ -f "${RUN_DIR}/remediation-exceptions.csv" ]; then aws s3 cp "${RUN_DIR}/remediation-exceptions.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/governance/r/${TARGET_PLATFORM}/${TS}/remediation-exceptions.csv"; fi
@@ -779,12 +794,21 @@ Resources:
           - Name: FAIL_ON_MEDIUM
             Type: PLAINTEXT
             Value: 'false'
+          - Name: REMEDIATE_UNKNOWN
+            Type: PLAINTEXT
+            Value: 'true'
+          - Name: FAIL_ON_UNKNOWN
+            Type: PLAINTEXT
+            Value: 'false'
           - Name: R_GOVERNANCE_SCRIPT_S3_KEY
             Type: PLAINTEXT
             Value: config/generate-r-governance-artifacts.py
           - Name: R_SBOM_SCRIPT_S3_KEY
             Type: PLAINTEXT
             Value: config/generate-r-sbom.py
+          - Name: R_VULN_SCAN_SCRIPT_S3_KEY
+            Type: PLAINTEXT
+            Value: config/scan-r-vulnerabilities.py
           - Name: R_MATERIALIZE_SCRIPT_S3_KEY
             Type: PLAINTEXT
             Value: config/materialize-r-environment.R
@@ -823,13 +847,14 @@ Resources:
                 - $rtoolsRoot = 'C:\rtools44'
                 - if (-not (Test-Path $rtoolsRoot)) {
                     $rtoolsInstaller = 'C:\rtools.exe';
-                    Invoke-WebRequest -Uri 'https://cloud.r-project.org/bin/windows/Rtools/rtools44.exe' -OutFile $rtoolsInstaller;
+                    Invoke-WebRequest -Uri 'https://cran.r-project.org/bin/windows/Rtools/rtools44/files/rtools44-6459-6401.exe' -OutFile $rtoolsInstaller;
                     Start-Process -FilePath $rtoolsInstaller -ArgumentList '/VERYSILENT','/DIR=C:\rtools44' -Wait;
                   }
                 - $env:PATH = "C:\rtools44\usr\bin;C:\rtools44\mingw64\bin;$env:PATH"
                 - python -m pip install --upgrade pip
                 - aws s3 cp "s3://${env:EVIDENCE_BUCKET}/${env:R_GOVERNANCE_SCRIPT_S3_KEY}" C:\generate-r-governance-artifacts.py
                 - aws s3 cp "s3://${env:EVIDENCE_BUCKET}/${env:R_SBOM_SCRIPT_S3_KEY}" C:\generate-r-sbom.py
+                - aws s3 cp "s3://${env:EVIDENCE_BUCKET}/${env:R_VULN_SCAN_SCRIPT_S3_KEY}" C:\scan-r-vulnerabilities.py
                 - aws s3 cp "s3://${env:EVIDENCE_BUCKET}/${env:R_MATERIALIZE_SCRIPT_S3_KEY}" C:\materialize-r-environment.R
                 - aws s3 cp "s3://${env:EVIDENCE_BUCKET}/${env:R_INSTALL_RUNTIME_SCRIPT_S3_KEY}" C:\install-r-runtime.ps1
                 - aws s3 cp "s3://${env:EVIDENCE_BUCKET}/${env:BUNDLE_SCRIPT_S3_KEY}" C:\bundle-directory.py
@@ -860,9 +885,10 @@ Resources:
                 - python C:\bundle-directory.py --source-dir $libraryPath --output-file "$runDir\renv-library-$platform-$ts.tar.gz" --checksum-file "$runDir\renv-library-$platform-$ts.tar.gz.sha256"
                 - python C:\generate-r-materialization-summary.py --run-dir $runDir --platform $platform --r-version $rVersion --cache-dir $cacheDir --library-path $libraryPath
                 - python C:\generate-r-sbom.py --installed-packages-file "$runDir\installed-packages.csv" --out-file "$runDir\r-packages.cdx.json"
+                - python C:\scan-r-vulnerabilities.py --installed-packages-file "$runDir\installed-packages.csv" --lock-file "$runDir\renv.lock" --out-file "$runDir\osv-report.json"
                 - C:\trivy\trivy.exe sbom --format json --output "$runDir\trivy-sbom-report.json" "$runDir\r-packages.cdx.json"; $true
                 - $govExit = 0
-                - python C:\generate-r-governance-artifacts.py --run-dir $runDir --platform $platform --remediate-medium $env:REMEDIATE_MEDIUM --fail-on-medium $env:FAIL_ON_MEDIUM; if ($LASTEXITCODE -ne 0) { $govExit = $LASTEXITCODE }
+                - python C:\generate-r-governance-artifacts.py --run-dir $runDir --platform $platform --remediate-medium $env:REMEDIATE_MEDIUM --fail-on-medium $env:FAIL_ON_MEDIUM --remediate-unknown $env:REMEDIATE_UNKNOWN --fail-on-unknown $env:FAIL_ON_UNKNOWN; if ($LASTEXITCODE -ne 0) { $govExit = $LASTEXITCODE }
                 - try { tar -czf "$runDir\environment-artifacts.tar.gz" -C $runDir renv.lock installed-packages.csv session-info.txt renv-status.txt materialization-summary.json r-packages.cdx.json } catch { Write-Host 'archive step skipped' }
                 - aws s3 cp "$runDir\" "s3://${env:EPHEMERAL_BUCKET}/${env:EPHEMERAL_PREFIX}/$platform/$ts/" --recursive
                 - aws s3 cp "$runDir\renv.lock" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/requirements/r/$platform/$ts/renv.lock"
@@ -879,6 +905,7 @@ Resources:
                 - if (Test-Path "$runDir\renv-cache-$platform-$ts.tar.gz") { aws s3 cp "$runDir\renv-cache-$platform-$ts.tar.gz" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/packages/offline/r/$platform/$ts/renv-cache-$platform-$ts.tar.gz" }
                 - if (Test-Path "$runDir\renv-cache-$platform-$ts.tar.gz.sha256") { aws s3 cp "$runDir\renv-cache-$platform-$ts.tar.gz.sha256" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/packages/offline/r/$platform/$ts/renv-cache-$platform-$ts.tar.gz.sha256" }
                 - if (Test-Path "$runDir\trivy-sbom-report.json") { aws s3 cp "$runDir\trivy-sbom-report.json" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/model-results/r/$platform/$ts/trivy-sbom-report.json" }
+                - if (Test-Path "$runDir\osv-report.json") { aws s3 cp "$runDir\osv-report.json" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/model-results/r/$platform/$ts/osv-report.json" }
                 - if (Test-Path "$runDir\vulnerability-findings.csv") { aws s3 cp "$runDir\vulnerability-findings.csv" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/governance/r/$platform/$ts/vulnerability-findings.csv" }
                 - if (Test-Path "$runDir\remediation-required.csv") { aws s3 cp "$runDir\remediation-required.csv" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/governance/r/$platform/$ts/remediation-required.csv" }
                 - if (Test-Path "$runDir\remediation-exceptions.csv") { aws s3 cp "$runDir\remediation-exceptions.csv" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/governance/r/$platform/$ts/remediation-exceptions.csv" }
@@ -919,12 +946,21 @@ Resources:
           - Name: FAIL_ON_MEDIUM
             Type: PLAINTEXT
             Value: 'false'
+          - Name: REMEDIATE_UNKNOWN
+            Type: PLAINTEXT
+            Value: 'true'
+          - Name: FAIL_ON_UNKNOWN
+            Type: PLAINTEXT
+            Value: 'false'
           - Name: R_GOVERNANCE_SCRIPT_S3_KEY
             Type: PLAINTEXT
             Value: config/generate-r-governance-artifacts.py
           - Name: R_SBOM_SCRIPT_S3_KEY
             Type: PLAINTEXT
             Value: config/generate-r-sbom.py
+          - Name: R_VULN_SCAN_SCRIPT_S3_KEY
+            Type: PLAINTEXT
+            Value: config/scan-r-vulnerabilities.py
           - Name: R_MATERIALIZE_SCRIPT_S3_KEY
             Type: PLAINTEXT
             Value: config/materialize-r-environment.R
@@ -1167,6 +1203,8 @@ Resources:
                           { "Name": "EPHEMERAL_PREFIX", "Type": "PLAINTEXT", "Value.$": "$.ephemeral_prefix" },
                           { "Name": "REMEDIATE_MEDIUM", "Type": "PLAINTEXT", "Value.$": "$.remediate_medium" },
                           { "Name": "FAIL_ON_MEDIUM", "Type": "PLAINTEXT", "Value.$": "$.fail_on_medium" },
+                          { "Name": "REMEDIATE_UNKNOWN", "Type": "PLAINTEXT", "Value.$": "$.remediate_unknown" },
+                          { "Name": "FAIL_ON_UNKNOWN", "Type": "PLAINTEXT", "Value.$": "$.fail_on_unknown" },
                           { "Name": "SCAN_TIMESTAMP", "Type": "PLAINTEXT", "Value.$": "$.scan_timestamp" },
                           { "Name": "SCAN_EXECUTION_ID", "Type": "PLAINTEXT", "Value.$": "$.scan_execution_id" }
                         ]
@@ -1216,6 +1254,8 @@ Resources:
                           { "Name": "EPHEMERAL_PREFIX", "Type": "PLAINTEXT", "Value.$": "$.ephemeral_prefix" },
                           { "Name": "REMEDIATE_MEDIUM", "Type": "PLAINTEXT", "Value.$": "$.remediate_medium" },
                           { "Name": "FAIL_ON_MEDIUM", "Type": "PLAINTEXT", "Value.$": "$.fail_on_medium" },
+                          { "Name": "REMEDIATE_UNKNOWN", "Type": "PLAINTEXT", "Value.$": "$.remediate_unknown" },
+                          { "Name": "FAIL_ON_UNKNOWN", "Type": "PLAINTEXT", "Value.$": "$.fail_on_unknown" },
                           { "Name": "SCAN_TIMESTAMP", "Type": "PLAINTEXT", "Value.$": "$.scan_timestamp" },
                           { "Name": "SCAN_EXECUTION_ID", "Type": "PLAINTEXT", "Value.$": "$.scan_execution_id" }
                         ]
@@ -1265,6 +1305,8 @@ Resources:
                           { "Name": "EPHEMERAL_PREFIX", "Type": "PLAINTEXT", "Value.$": "$.ephemeral_prefix" },
                           { "Name": "REMEDIATE_MEDIUM", "Type": "PLAINTEXT", "Value.$": "$.remediate_medium" },
                           { "Name": "FAIL_ON_MEDIUM", "Type": "PLAINTEXT", "Value.$": "$.fail_on_medium" },
+                          { "Name": "REMEDIATE_UNKNOWN", "Type": "PLAINTEXT", "Value.$": "$.remediate_unknown" },
+                          { "Name": "FAIL_ON_UNKNOWN", "Type": "PLAINTEXT", "Value.$": "$.fail_on_unknown" },
                           { "Name": "SCAN_TIMESTAMP", "Type": "PLAINTEXT", "Value.$": "$.scan_timestamp" },
                           { "Name": "SCAN_EXECUTION_ID", "Type": "PLAINTEXT", "Value.$": "$.scan_execution_id" }
                         ]

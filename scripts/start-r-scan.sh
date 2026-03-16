@@ -16,6 +16,8 @@ EXPECTED_ACCOUNT_ID=""
 DEPLOYMENT_LOCK_TOKEN=""
 REMEDIATE_MEDIUM="true"
 FAIL_ON_MEDIUM="false"
+REMEDIATE_UNKNOWN="true"
+FAIL_ON_UNKNOWN="false"
 
 usage() {
   cat <<'EOF'
@@ -39,6 +41,8 @@ Optional:
   --deployment-lock-token <token>         (required)
   --remediate-medium <true|false>         (default: true)
   --fail-on-medium <true|false>           (default: false)
+  --remediate-unknown <true|false>        (default: true)
+  --fail-on-unknown <true|false>          (default: false)
 EOF
 }
 
@@ -59,6 +63,8 @@ while [[ $# -gt 0 ]]; do
     --deployment-lock-token) DEPLOYMENT_LOCK_TOKEN="$2"; shift 2 ;;
     --remediate-medium) REMEDIATE_MEDIUM="$2"; shift 2 ;;
     --fail-on-medium) FAIL_ON_MEDIUM="$2"; shift 2 ;;
+    --remediate-unknown) REMEDIATE_UNKNOWN="$2"; shift 2 ;;
+    --fail-on-unknown) FAIL_ON_UNKNOWN="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
   esac
@@ -175,6 +181,8 @@ payload = {
     "ephemeral_prefix": ${EPHEMERAL_PREFIX@Q},
     "remediate_medium": ${REMEDIATE_MEDIUM@Q},
     "fail_on_medium": ${FAIL_ON_MEDIUM@Q},
+    "remediate_unknown": ${REMEDIATE_UNKNOWN@Q},
+    "fail_on_unknown": ${FAIL_ON_UNKNOWN@Q},
 }
 print(json.dumps(payload))
 PY

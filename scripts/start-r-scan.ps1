@@ -42,7 +42,13 @@ param(
   [bool]$RemediateMedium = $true,
 
   [Parameter(Mandatory = $false)]
-  [bool]$FailOnMedium = $false
+  [bool]$FailOnMedium = $false,
+
+  [Parameter(Mandatory = $false)]
+  [bool]$RemediateUnknown = $true,
+
+  [Parameter(Mandatory = $false)]
+  [bool]$FailOnUnknown = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -75,6 +81,8 @@ if ($EvidenceBucket -ne "") { $bashArgs += @("--evidence-bucket", $EvidenceBucke
 if ($EphemeralBucket -ne "") { $bashArgs += @("--ephemeral-bucket", $EphemeralBucket) }
 $bashArgs += @("--remediate-medium", $RemediateMedium.ToString().ToLowerInvariant())
 $bashArgs += @("--fail-on-medium", $FailOnMedium.ToString().ToLowerInvariant())
+$bashArgs += @("--remediate-unknown", $RemediateUnknown.ToString().ToLowerInvariant())
+$bashArgs += @("--fail-on-unknown", $FailOnUnknown.ToString().ToLowerInvariant())
 
 & bash $bashScript @bashArgs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

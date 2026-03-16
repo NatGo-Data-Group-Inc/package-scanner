@@ -140,6 +140,42 @@ def parse_trivy(path: Path):
     return out
 
 
+def parse_osv(path: Path):
+    if not path.exists():
+        return []
+    data = load_json(path)
+    findings = data.get("findings")
+    if not isinstance(findings, list):
+        return []
+
+    out = []
+    for vuln in findings:
+        if not isinstance(vuln, dict):
+            raise GovernanceError(f"Unexpected OSV finding entry in {path}")
+        vuln_id = str(vuln.get("vulnerability_id") or "").strip()
+        pkg = str(vuln.get("package_name") or "").strip()
+        if not pkg or not vuln_id:
+            raise GovernanceError(f"OSV finding missing required fields in {path}")
+        aliases = [str(alias).strip() for alias in (vuln.get("aliases") or []) if str(alias).strip()]
+        fixed_versions = [str(v).strip() for v in (vuln.get("fixed_versions") or []) if str(v).strip()]
+        out.append(
+            {
+                "package_name": pkg,
+                "package_version": str(vuln.get("package_version") or "").strip(),
+                "vulnerability_id": vuln_id,
+                "severity": severity_norm(vuln.get("severity")),
+                "scanner": "osv",
+                "title": str(vuln.get("summary") or vuln.get("details") or "").strip(),
+                "aliases": ";".join(aliases),
+                "reference_url": str(vuln.get("reference_url") or "").strip(),
+                "nvd_url": nvd_url(vuln_id) or next((nvd_url(alias) for alias in aliases if nvd_url(alias)), ""),
+                "fixed_versions": ";".join(fixed_versions),
+                "fixed_available": "yes" if fixed_versions or bool(vuln.get("fixed_available")) else "no",
+            }
+        )
+    return out
+
+
 def bool_arg(v, default=False):
     if v is None:
         return default
@@ -152,11 +188,15 @@ def main(argv=None):
     ap.add_argument("--platform", required=True)
     ap.add_argument("--remediate-medium", default="true")
     ap.add_argument("--fail-on-medium", default="false")
+    ap.add_argument("--remediate-unknown", default="true")
+    ap.add_argument("--fail-on-unknown", default="false")
     args = ap.parse_args(argv)
 
     run_dir = Path(args.run_dir)
     remediate_medium = bool_arg(args.remediate_medium, default=True)
     fail_on_medium = bool_arg(args.fail_on_medium, default=False)
+    remediate_unknown = bool_arg(args.remediate_unknown, default=True)
+    fail_on_unknown = bool_arg(args.fail_on_unknown, default=False)
 
     installed_packages_path = run_dir / "installed-packages.csv"
     if installed_packages_path.exists():
@@ -166,17 +206,23 @@ def main(argv=None):
     for row in approval:
         row["platform"] = args.platform
 
-    findings = parse_trivy(run_dir / "trivy-sbom-report.json")
+    findings = parse_osv(run_dir / "osv-report.json")
+    if not findings:
+        findings = parse_trivy(run_dir / "trivy-sbom-report.json")
     for row in findings:
         row["platform"] = args.platform
 
     required_levels = {"CRITICAL", "HIGH"}
     if remediate_medium:
         required_levels.add("MEDIUM")
+    if remediate_unknown:
+        required_levels.add("UNKNOWN")
 
     gate_levels = {"CRITICAL", "HIGH"}
     if fail_on_medium:
         gate_levels.add("MEDIUM")
+    if fail_on_unknown:
+        gate_levels.add("UNKNOWN")
 
     remediation_required = []
     remediation_exceptions = []
@@ -246,6 +292,7 @@ def main(argv=None):
             "severity",
             "scanner",
             "title",
+            "aliases",
             "reference_url",
             "nvd_url",
             "fixed_versions",
@@ -322,12 +369,23 @@ def main(argv=None):
             "exceptions_total": len(remediation_exceptions),
             "gate_hits": gate_hits,
         },
-        "policy": {"remediate_medium": remediate_medium, "fail_on_medium": fail_on_medium},
+        "policy": {
+            "remediate_medium": remediate_medium,
+            "fail_on_medium": fail_on_medium,
+            "remediate_unknown": remediate_unknown,
+            "fail_on_unknown": fail_on_unknown,
+        },
     }
     if installed_packages_path.exists():
         summary["artifacts"]["installed_packages"] = {
             "path": str(installed_packages_path),
             "sha256": sha256_file(installed_packages_path),
+        }
+    osv_report_path = run_dir / "osv-report.json"
+    if osv_report_path.exists():
+        summary["artifacts"]["osv_report"] = {
+            "path": str(osv_report_path),
+            "sha256": sha256_file(osv_report_path),
         }
     materialization_summary_path = run_dir / "materialization-summary.json"
     if materialization_summary_path.exists():
