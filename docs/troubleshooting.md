@@ -158,6 +158,22 @@ Fix:
 2. Remediate package versions or process approved exceptions.
 3. Re-run scan.
 
+### CodeBuild timeout mismatch
+
+Cause:
+
+- The live CodeBuild project timeout and the timeout actually applied to started builds do not match.
+
+Fix:
+
+1. Run the timeout diagnostic:
+   - `./scripts/diagnose-codebuild-timeouts.sh --project-name package-scanner-dev-r-scan-linux-amd64 --region us-east-1 --profile AdministratorAccess-807497180525 --include-no-override --override-timeout 60 --override-timeout 120 --override-timeout 480 --output-file /tmp/codebuild-timeout-report.json`
+2. Inspect the report for:
+   - project `timeout_in_minutes`
+   - each probe build's returned `timeout_in_minutes`
+3. By default the script stops the probe builds after the timeout value is confirmed.
+4. If the project reports one timeout and the started builds still come back with another, treat it as an AWS-side issue and attach the report to the support case.
+
 ## 5) Output Discovery Issues
 
 If unsure where reports landed:
@@ -172,4 +188,3 @@ If unsure where reports landed:
 ## 6) Known Environment Limitation
 
 In some local Windows setups, `bash -n` can fail due Git Bash signal pipe permission errors. This does not necessarily indicate a script syntax issue in repository content; validate via wrapper execution path or alternate shell host.
-
