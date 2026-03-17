@@ -122,6 +122,8 @@ Evidence paths:
 
 - `s3://<evidence-bucket>/evidence/governance/python/<platform>/<timestamp>/...`
 - `s3://<evidence-bucket>/evidence/traceability/python/<platform>/<timestamp>/...`
+- `s3://<evidence-bucket>/evidence/model-results/python/<platform>/<timestamp>/...`
+- `s3://<evidence-bucket>/evidence/requirements/python/<platform>/<timestamp>/...`
 
 ## 6) R Scan: Example (`tidyverse`)
 
@@ -169,9 +171,12 @@ You can skip this separate upload when the lockfile already exists locally in th
 
 Evidence paths:
 
+- `s3://<evidence-bucket>/evidence/orchestration/r/<execution-name>/orchestration-summary.json`
 - `s3://<evidence-bucket>/evidence/governance/r/<platform>/<timestamp>/...`
 - `s3://<evidence-bucket>/evidence/traceability/r/<platform>/<timestamp>/...`
 - `s3://<evidence-bucket>/evidence/packages/offline/r/<platform>/<timestamp>/...`
+- `s3://<evidence-bucket>/evidence/model-results/r/<platform>/<timestamp>/...`
+- `s3://<evidence-bucket>/evidence/requirements/r/<platform>/<timestamp>/...`
 
 ## 7) Offline Bundle & Enclave Workflow
 
@@ -203,6 +208,10 @@ The scanner evaluates the resolved environment/lockfile. To scan specific packag
 - Runs are fail-closed for required scanner inputs/artifacts.
 - Governance gate can fail run based on severity policy.
 - `--fail-on-medium true` makes medium findings gate-fail.
+- R also supports:
+  - `--remediate-unknown true|false`
+  - `--fail-on-unknown true|false`
+- Large R lockfiles should use staged restores via `--r-stage-package-count`.
 
 ## 10) PowerShell Users
 
@@ -213,3 +222,11 @@ Equivalent wrappers:
 - `scripts/start-r-scan.ps1`
 
 Wrappers pass through to bash scripts with equivalent switches.
+
+## 11) Turnover Guidance
+
+For operator handoff and steady-state execution, use:
+
+- [handoff-runbook.md](./handoff-runbook.md)
+- [operations-runbook.md](./operations-runbook.md)
+- [troubleshooting.md](./troubleshooting.md)

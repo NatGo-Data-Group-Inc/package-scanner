@@ -21,6 +21,7 @@ This folder is the operator guide for `package_scanner`.
 
 Full procedures and examples are in:
 
+- [handoff-runbook.md](./handoff-runbook.md)
 - [workflow.md](./workflow.md)
 - [cli-switch-reference.md](./cli-switch-reference.md)
 - [troubleshooting.md](./troubleshooting.md)

@@ -3,6 +3,7 @@
 Redeployable AWS infrastructure for package scanning, starting with Python/Conda and designed for a multi-platform build matrix.
 
 Operator documentation:
+- `docs/handoff-runbook.md`
 - `docs/README.md`
 - `docs/workflow.md`
 - `docs/cli-switch-reference.md`
@@ -116,7 +117,7 @@ and passes its SHA-256 into CloudFormation for runtime integrity verification.
 aws s3 cp .\environment.yml s3://<input-bucket>/inputs/python/environment.yml --region us-east-1 --profile <aws-profile>
 ```
 
-3. Start all platform scans (canonical bash):
+3. Start all Python platform scans (canonical bash):
 
 ```bash
 ./scripts/start-python-scan.sh \
@@ -137,7 +138,7 @@ Only include `--safety-api-key` when supplying your licensed Safety token; omit 
 flag to run without authenticated Safety.
 Pass them only when overriding to alternate buckets.
 
-4. Review evidence outputs:
+4. Review Python evidence outputs:
 
 - `s3://<evidence-bucket>/evidence/requirements/python/<platform>/<timestamp>/...`
 - `s3://<evidence-bucket>/evidence/model-results/python/<platform>/<timestamp>/...`
@@ -145,7 +146,25 @@ Pass them only when overriding to alternate buckets.
 - `s3://<evidence-bucket>/evidence/governance/python/<platform>/<timestamp>/...`
 - `s3://<evidence-bucket>/evidence/traceability/python/<platform>/<timestamp>/run-metadata.json`
 
-R evidence outputs:
+5. Start R all-platform scans:
+
+```bash
+./scripts/start-r-scan.sh \
+  --stack-name package-scanner-dev \
+  --input-bucket <input-bucket> \
+  --source-lock-file ./artifacts/renv.lock \
+  --region us-east-1 \
+  --profile <aws-profile> \
+  --expected-account-id <12-digit-account-id> \
+  --deployment-lock-token <env-lock-token> \
+  --remediate-medium true \
+  --fail-on-medium false \
+  --remediate-unknown true \
+  --fail-on-unknown false \
+  --r-stage-package-count 10
+```
+
+6. Review R evidence outputs:
 - `s3://<evidence-bucket>/evidence/requirements/r/<platform>/<timestamp>/...`
 - `s3://<evidence-bucket>/evidence/model-results/r/<platform>/<timestamp>/...`
 - `s3://<evidence-bucket>/evidence/env-artifacts/r/<platform>/<timestamp>/...`
@@ -217,9 +236,15 @@ aws s3 cp .\renv.lock s3://<input-bucket>/inputs/r/renv.lock --region us-east-1 
 
 The R jobs now materialize the environment on each platform before report generation:
 - install the requested R runtime from `renv.lock`
-- run `renv::restore()`
+- restore the environment in staged batches through Step Functions and CodeBuild
 - emit `installed-packages.csv`, `session-info.txt`, and restore logs
 - publish a platform cache bundle and checksum for enclave transfer
+
+For daily operation and handoff, use:
+
+- `docs/handoff-runbook.md`
+- `docs/operations-runbook.md`
+- `docs/troubleshooting.md`
 
 ## API Contract
 

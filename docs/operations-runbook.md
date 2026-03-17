@@ -1,5 +1,7 @@
 # Operations Runbook
 
+Use [handoff-runbook.md](./handoff-runbook.md) as the primary day-to-day operator guide. This file is the shorter operational checklist.
+
 ## Daily Operations
 
 1. Validate AWS identity and region:
@@ -8,7 +10,8 @@
    - `aws cloudformation describe-stacks --stack-name <stack> --query "Stacks[0].StackStatus"`
 3. Submit scans (Python/R) per workflow.
 4. Verify governance outputs in evidence bucket.
-5. For enclave deliveries, pull the latest platform cache bundles and `.sha256` files from `evidence/packages/offline/r/<platform>/<timestamp>/`.
+5. For R, verify Step Functions execution status before reviewing per-platform artifacts.
+6. For enclave deliveries, pull the latest platform cache bundles and `.sha256` files from `evidence/packages/offline/r/<platform>/<timestamp>/`.
 
 ## Standard Procedures
 
@@ -28,7 +31,12 @@
 
 - Use `scripts/start-r-scan.sh`.
 - Ensure `renv.lock` is uploaded first, or pass `--source-lock-file`.
-- Each successful R build now restores the environment, emits materialization evidence, and publishes the cache archive + `.sha256` file to `evidence/packages/offline/r/<platform>/<timestamp>/`.
+- Each successful R workflow now:
+  - plans staged restore batches
+  - runs sequential CodeBuild stages per platform
+  - restores the environment
+  - emits materialization evidence
+  - publishes the cache archive + `.sha256` file to `evidence/packages/offline/r/<platform>/<timestamp>/`
 
 ## Incident Procedure
 
@@ -43,6 +51,11 @@ If scans fail unexpectedly:
    - governance gate failure
 4. Use `docs/troubleshooting.md` for remediation.
 5. Re-run after corrective action.
+
+For R failures, inspect both:
+
+- the Step Functions execution status
+- the failing platform/stage CodeBuild build ID
 
 ## Change Management
 

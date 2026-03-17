@@ -174,6 +174,32 @@ Fix:
 3. By default the script stops the probe builds after the timeout value is confirmed.
 4. If the project reports one timeout and the started builds still come back with another, treat it as an AWS-side issue and attach the report to the support case.
 
+### R stage exceeds the effective 45-minute runtime
+
+Cause:
+
+- The current AWS account behavior still enforces an effective 45-minute CodeBuild runtime, so a stage that restores too many packages can time out.
+
+Fix:
+
+1. Lower the R stage size:
+   - rerun with `--r-stage-package-count 10`
+   - if still too large, reduce further
+2. Restart the R scan with the same `renv.lock`.
+3. Confirm the new stage 1 build includes the smaller `STAGE_PACKAGES_JSON` payload in the build environment.
+
+### Windows R stage failed during Rtools installation
+
+Cause:
+
+- External download failure or transient network problem while obtaining the Rtools installer.
+
+Fix:
+
+1. Confirm the build is using the helper-based installer path, not the old inline download.
+2. Re-run the scan after deployment if the stack was recently updated.
+3. Check whether the installer is now being pulled from the evidence bucket cache path.
+
 ## 5) Output Discovery Issues
 
 If unsure where reports landed:
