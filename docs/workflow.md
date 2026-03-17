@@ -184,7 +184,7 @@ When an enclave cannot reach the internet, treat the `renv.lock` as your bluepri
      --lockfile renv.lock
    ```
    Commit the lockfile so every change is auditable.
-2. **Run `scripts/start-r-scan.sh`** against the lockfile. It starts the R orchestration state machine, which fans out to the three platform jobs. Each platform job installs the requested R runtime, runs `renv::restore()`, captures the restored package set, and emits both evidence artifacts and an enclave-transferable cache bundle.
+2. **Run `scripts/start-r-scan.sh`** against the lockfile. It starts the R orchestration state machine, which first plans staged restore batches from `renv.lock`, then fans out to the three platform jobs. Each platform processes those stages sequentially, checkpointing the cache and library between CodeBuild runs before the final stage emits evidence artifacts and the enclave-transferable cache bundle.
 3. **Collect the generated cache bundle** from `s3://<evidence>/evidence/packages/offline/r/<platform>/<timestamp>/`. Each run writes the platform archive (for example `renv-cache-linux-amd64-<ts>.tar.gz`) and a matching `.sha256`.
 4. **Review the materialization evidence** in `evidence/env-artifacts/r/<platform>/<timestamp>/`, including `installed-packages.csv`, `session-info.txt`, `restore.log`, and `materialization-summary.json`.
 5. **Stage artifacts for the enclave** by transferring lockfile + cache archive + checksum through the approved path. Inside the enclave, set `RENV_PATHS_CACHE` to the unpacked archive, install R 4.4.0, and run `renv::restore()` offline.

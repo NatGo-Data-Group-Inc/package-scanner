@@ -213,8 +213,17 @@ aws s3 cp "${REPO_ROOT}/scripts/install-r-runtime.sh" \
 aws s3 cp "${REPO_ROOT}/scripts/install-r-runtime.ps1" \
   "s3://${EVIDENCE_BUCKET}/config/install-r-runtime.ps1" \
   "${AWS_ARGS[@]}"
+aws s3 cp "${REPO_ROOT}/scripts/run-r-materialization-stage.sh" \
+  "s3://${EVIDENCE_BUCKET}/config/run-r-materialization-stage.sh" \
+  "${AWS_ARGS[@]}"
+aws s3 cp "${REPO_ROOT}/scripts/run-r-materialization-stage.ps1" \
+  "s3://${EVIDENCE_BUCKET}/config/run-r-materialization-stage.ps1" \
+  "${AWS_ARGS[@]}"
 aws s3 cp "${REPO_ROOT}/scripts/bundle-directory.py" \
   "s3://${EVIDENCE_BUCKET}/config/bundle-directory.py" \
+  "${AWS_ARGS[@]}"
+aws s3 cp "${REPO_ROOT}/scripts/extract-archive.py" \
+  "s3://${EVIDENCE_BUCKET}/config/extract-archive.py" \
   "${AWS_ARGS[@]}"
 aws s3 cp "${REPO_ROOT}/scripts/generate-r-materialization-summary.py" \
   "s3://${EVIDENCE_BUCKET}/config/generate-r-materialization-summary.py" \

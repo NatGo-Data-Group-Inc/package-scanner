@@ -48,7 +48,10 @@ param(
   [bool]$RemediateUnknown = $true,
 
   [Parameter(Mandatory = $false)]
-  [bool]$FailOnUnknown = $false
+  [bool]$FailOnUnknown = $false,
+
+  [Parameter(Mandatory = $false)]
+  [int]$RStagePackageCount = 25
 )
 
 $ErrorActionPreference = "Stop"
@@ -83,6 +86,7 @@ $bashArgs += @("--remediate-medium", $RemediateMedium.ToString().ToLowerInvarian
 $bashArgs += @("--fail-on-medium", $FailOnMedium.ToString().ToLowerInvariant())
 $bashArgs += @("--remediate-unknown", $RemediateUnknown.ToString().ToLowerInvariant())
 $bashArgs += @("--fail-on-unknown", $FailOnUnknown.ToString().ToLowerInvariant())
+$bashArgs += @("--r-stage-package-count", $RStagePackageCount.ToString())
 
 & bash $bashScript @bashArgs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

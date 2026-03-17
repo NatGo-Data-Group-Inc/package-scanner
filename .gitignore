@@ -4,6 +4,12 @@ __pycache__/
 *.pyo
 *.pyd
 
+# R transient/local files
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+
 # Local test/temp artifacts
 .tmp-tests/
 

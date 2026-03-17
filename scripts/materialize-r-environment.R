@@ -14,9 +14,14 @@ cache_dir <- normalizePath(get_arg("--cache-dir"), mustWork = FALSE)
 output_dir <- normalizePath(get_arg("--output-dir"), mustWork = FALSE)
 platform <- get_arg("--platform")
 
+library_dir <- if ("--library-dir" %in% args) normalizePath(get_arg("--library-dir"), mustWork = FALSE) else normalizePath(file.path(output_dir, "library"), mustWork = FALSE)
+packages_file <- if ("--packages-file" %in% args) normalizePath(get_arg("--packages-file"), mustWork = TRUE) else NULL
+clean_restore <- if ("--clean" %in% args) tolower(get_arg("--clean")) == "true" else FALSE
+
 dir.create(project_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(library_dir, recursive = TRUE, showWarnings = FALSE)
 file.copy(lock_file, file.path(project_dir, "renv.lock"), overwrite = TRUE)
 
 log_path <- file.path(output_dir, "restore.log")
@@ -35,6 +40,7 @@ Sys.setenv(
   RENV_CONFIG_CACHE_SYMLINKS = "FALSE",
   RENV_CONFIG_PAK_ENABLED = "FALSE"
 )
+.libPaths(unique(c(library_dir, .libPaths())))
 
 if (!requireNamespace("renv", quietly = TRUE)) {
   install.packages("renv")
@@ -42,9 +48,26 @@ if (!requireNamespace("renv", quietly = TRUE)) {
 
 renv::consent(provided = TRUE)
 setwd(project_dir)
-renv::restore(project = project_dir, lockfile = file.path(project_dir, "renv.lock"), prompt = FALSE, clean = TRUE)
 
-project_library <- .libPaths()[1]
+packages_to_restore <- NULL
+if (!is.null(packages_file)) {
+  packages_to_restore <- trimws(readLines(packages_file, warn = FALSE))
+  packages_to_restore <- packages_to_restore[nzchar(packages_to_restore)]
+  if (!length(packages_to_restore)) {
+    packages_to_restore <- NULL
+  }
+}
+
+renv::restore(
+  project = project_dir,
+  lockfile = file.path(project_dir, "renv.lock"),
+  library = library_dir,
+  packages = packages_to_restore,
+  prompt = FALSE,
+  clean = clean_restore
+)
+
+project_library <- normalizePath(library_dir, winslash = "/", mustWork = FALSE)
 installed <- as.data.frame(
   installed.packages(
     lib.loc = project_library,

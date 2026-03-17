@@ -18,6 +18,7 @@ REMEDIATE_MEDIUM="true"
 FAIL_ON_MEDIUM="false"
 REMEDIATE_UNKNOWN="true"
 FAIL_ON_UNKNOWN="false"
+R_STAGE_PACKAGE_COUNT="25"
 
 usage() {
   cat <<'EOF'
@@ -43,6 +44,7 @@ Optional:
   --fail-on-medium <true|false>           (default: false)
   --remediate-unknown <true|false>        (default: true)
   --fail-on-unknown <true|false>          (default: false)
+  --r-stage-package-count <count>         (default: 25)
 EOF
 }
 
@@ -65,6 +67,7 @@ while [[ $# -gt 0 ]]; do
     --fail-on-medium) FAIL_ON_MEDIUM="$2"; shift 2 ;;
     --remediate-unknown) REMEDIATE_UNKNOWN="$2"; shift 2 ;;
     --fail-on-unknown) FAIL_ON_UNKNOWN="$2"; shift 2 ;;
+    --r-stage-package-count) R_STAGE_PACKAGE_COUNT="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
   esac
@@ -183,6 +186,7 @@ payload = {
     "fail_on_medium": ${FAIL_ON_MEDIUM@Q},
     "remediate_unknown": ${REMEDIATE_UNKNOWN@Q},
     "fail_on_unknown": ${FAIL_ON_UNKNOWN@Q},
+    "r_stage_package_count": ${R_STAGE_PACKAGE_COUNT@Q},
 }
 print(json.dumps(payload))
 PY

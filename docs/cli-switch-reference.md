@@ -88,6 +88,12 @@ Optional:
   - Include medium findings in remediation-required outputs.
 - `--fail-on-medium <true|false>`
   - Gate-fail build on medium findings.
+- `--remediate-unknown <true|false>`
+  - Include `UNKNOWN` findings in remediation-required outputs.
+- `--fail-on-unknown <true|false>`
+  - Gate-fail build on `UNKNOWN` findings.
+- `--r-stage-package-count <count>`
+  - Number of lockfile packages included in each staged R restore build.
 - `-h|--help`
   - Prints usage.
 
@@ -180,6 +186,9 @@ Parameter names are PowerShell-style (for example `-StackName`, `-InputBucket`, 
 - `-FortifyCommand`
 - `-RemediateMedium`
 - `-FailOnMedium`
+- `-RemediateUnknown`
+- `-FailOnUnknown`
+- `-RStagePackageCount`
 
 ### `scripts/start-r-scan.ps1` parameters
 

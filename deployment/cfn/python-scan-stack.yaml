@@ -430,13 +430,6 @@ Resources:
             install:
               commands:
                 - New-Item -ItemType Directory -Force -Path C:\scan-input, C:\scan-out | Out-Null
-                - $rtoolsRoot = 'C:\rtools44'
-                - if (-not (Test-Path $rtoolsRoot)) {
-                    $rtoolsInstaller = 'C:\rtools.exe';
-                    Invoke-WebRequest -Uri 'https://cran.r-project.org/bin/windows/Rtools/rtools44/files/rtools44-6459-6401.exe' -OutFile $rtoolsInstaller;
-                    Start-Process -FilePath $rtoolsInstaller -ArgumentList '/VERYSILENT','/DIR=C:\rtools44' -Wait;
-                  }
-                - $env:PATH = "C:\rtools44\usr\bin;C:\rtools44\mingw64\bin;$env:PATH"
                 - python -m pip install --upgrade pip
                 - python -m pip install safety cyclonedx-bom
                 - $trivyArchive = "trivy_${env:TRIVY_VERSION}_windows-64bit.zip"
@@ -561,59 +554,14 @@ Resources:
                 - aws s3 cp "s3://${EVIDENCE_BUCKET}/${R_VULN_SCAN_SCRIPT_S3_KEY}" /tmp/scan-r-vulnerabilities.py
                 - aws s3 cp "s3://${EVIDENCE_BUCKET}/${R_MATERIALIZE_SCRIPT_S3_KEY}" /tmp/materialize-r-environment.R
                 - aws s3 cp "s3://${EVIDENCE_BUCKET}/${R_INSTALL_RUNTIME_SCRIPT_S3_KEY}" /tmp/install-r-runtime.sh
+                - aws s3 cp "s3://${EVIDENCE_BUCKET}/${R_STAGE_RUNNER_SCRIPT_S3_KEY}" /tmp/run-r-materialization-stage.sh
                 - aws s3 cp "s3://${EVIDENCE_BUCKET}/${BUNDLE_SCRIPT_S3_KEY}" /tmp/bundle-directory.py
+                - aws s3 cp "s3://${EVIDENCE_BUCKET}/${EXTRACT_SCRIPT_S3_KEY}" /tmp/extract-archive.py
                 - aws s3 cp "s3://${EVIDENCE_BUCKET}/${R_MATERIALIZATION_SUMMARY_SCRIPT_S3_KEY}" /tmp/generate-r-materialization-summary.py
-                - chmod +x /tmp/install-r-runtime.sh
+                - chmod +x /tmp/install-r-runtime.sh /tmp/run-r-materialization-stage.sh
             build:
               commands:
-                - set -euo pipefail
-                - TS="${SCAN_TIMESTAMP:-$(date -u +%Y%m%dT%H%M%SZ)}"
-                - TARGET_PLATFORM="linux-amd64"
-                - RUN_DIR="/tmp/scan-out/${TS}"
-                - PROJECT_DIR="${RUN_DIR}/project"
-                - CACHE_DIR="${RUN_DIR}/cache"
-                - mkdir -p "${RUN_DIR}" "${PROJECT_DIR}" "${CACHE_DIR}"
-                - aws s3 cp "s3://${INPUT_BUCKET}/${INPUT_OBJECT_KEY}" /tmp/scan-input/renv.lock
-                - cp /tmp/scan-input/renv.lock "${RUN_DIR}/renv.lock"
-                - R_VERSION="$(python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8-sig"))["R"]["Version"])' /tmp/scan-input/renv.lock)"
-                - /tmp/install-r-runtime.sh --r-version "${R_VERSION}"
-                - export PATH="/opt/R/${R_VERSION}/bin:${PATH}"
-                - Rscript /tmp/materialize-r-environment.R --lock-file "${RUN_DIR}/renv.lock" --project-dir "${PROJECT_DIR}" --cache-dir "${CACHE_DIR}" --output-dir "${RUN_DIR}" --platform "${TARGET_PLATFORM}"
-                - LIBRARY_PATH="$(cat "${RUN_DIR}/library-path.txt")"
-                - python /tmp/bundle-directory.py --source-dir "${CACHE_DIR}" --output-file "${RUN_DIR}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz" --checksum-file "${RUN_DIR}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
-                - python /tmp/bundle-directory.py --source-dir "${LIBRARY_PATH}" --output-file "${RUN_DIR}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz" --checksum-file "${RUN_DIR}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
-                - python /tmp/generate-r-materialization-summary.py --run-dir "${RUN_DIR}" --platform "${TARGET_PLATFORM}" --r-version "${R_VERSION}" --cache-dir "${CACHE_DIR}" --library-path "${LIBRARY_PATH}"
-                - python /tmp/generate-r-sbom.py --installed-packages-file "${RUN_DIR}/installed-packages.csv" --out-file "${RUN_DIR}/r-packages.cdx.json"
-                - python /tmp/scan-r-vulnerabilities.py --installed-packages-file "${RUN_DIR}/installed-packages.csv" --lock-file "${RUN_DIR}/renv.lock" --out-file "${RUN_DIR}/osv-report.json"
-                - trivy sbom --format json --output "${RUN_DIR}/trivy-sbom-report.json" "${RUN_DIR}/r-packages.cdx.json" || true
-                - GOVERNANCE_EXIT=0
-                - python /tmp/generate-r-governance-artifacts.py --run-dir "${RUN_DIR}" --platform "${TARGET_PLATFORM}" --remediate-medium "${REMEDIATE_MEDIUM:-true}" --fail-on-medium "${FAIL_ON_MEDIUM:-false}" --remediate-unknown "${REMEDIATE_UNKNOWN:-true}" --fail-on-unknown "${FAIL_ON_UNKNOWN:-false}" || GOVERNANCE_EXIT=$?
-                - tar -czf "${RUN_DIR}/environment-artifacts.tar.gz" -C "${RUN_DIR}" renv.lock installed-packages.csv session-info.txt renv-status.txt materialization-summary.json r-packages.cdx.json || true
-                - aws s3 cp "${RUN_DIR}/" "s3://${EPHEMERAL_BUCKET}/${EPHEMERAL_PREFIX}/${TARGET_PLATFORM}/${TS}/" --recursive
-                - aws s3 cp "${RUN_DIR}/renv.lock" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/r/${TARGET_PLATFORM}/${TS}/renv.lock"
-                - if [ -f "${RUN_DIR}/approval-candidate-packages.csv" ]; then aws s3 cp "${RUN_DIR}/approval-candidate-packages.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/r/${TARGET_PLATFORM}/${TS}/approval-candidate-packages.csv"; fi
-                - if [ -f "${RUN_DIR}/installed-packages.csv" ]; then aws s3 cp "${RUN_DIR}/installed-packages.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/r/${TARGET_PLATFORM}/${TS}/installed-packages.csv"; fi
-                - if [ -f "${RUN_DIR}/r-packages.cdx.json" ]; then aws s3 cp "${RUN_DIR}/r-packages.cdx.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/r-packages.cdx.json"; fi
-                - if [ -f "${RUN_DIR}/session-info.txt" ]; then aws s3 cp "${RUN_DIR}/session-info.txt" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/session-info.txt"; fi
-                - if [ -f "${RUN_DIR}/renv-status.txt" ]; then aws s3 cp "${RUN_DIR}/renv-status.txt" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/renv-status.txt"; fi
-                - if [ -f "${RUN_DIR}/restore.log" ]; then aws s3 cp "${RUN_DIR}/restore.log" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/restore.log"; fi
-                - if [ -f "${RUN_DIR}/materialization-summary.json" ]; then aws s3 cp "${RUN_DIR}/materialization-summary.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/r/${TARGET_PLATFORM}/${TS}/materialization-summary.json"; fi
-                - if [ -f "${RUN_DIR}/environment-artifacts.tar.gz" ]; then aws s3 cp "${RUN_DIR}/environment-artifacts.tar.gz" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/environment-artifacts.tar.gz"; fi
-                - if [ -f "${RUN_DIR}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz" ]; then aws s3 cp "${RUN_DIR}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz"; fi
-                - if [ -f "${RUN_DIR}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz.sha256" ]; then aws s3 cp "${RUN_DIR}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz.sha256" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"; fi
-                - if [ -f "${RUN_DIR}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz" ]; then aws s3 cp "${RUN_DIR}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/packages/offline/r/${TARGET_PLATFORM}/${TS}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz"; fi
-                - if [ -f "${RUN_DIR}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz.sha256" ]; then aws s3 cp "${RUN_DIR}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz.sha256" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/packages/offline/r/${TARGET_PLATFORM}/${TS}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"; fi
-                - if [ -f "${RUN_DIR}/trivy-sbom-report.json" ]; then aws s3 cp "${RUN_DIR}/trivy-sbom-report.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/model-results/r/${TARGET_PLATFORM}/${TS}/trivy-sbom-report.json"; fi
-                - if [ -f "${RUN_DIR}/osv-report.json" ]; then aws s3 cp "${RUN_DIR}/osv-report.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/model-results/r/${TARGET_PLATFORM}/${TS}/osv-report.json"; fi
-                - if [ -f "${RUN_DIR}/vulnerability-findings.csv" ]; then aws s3 cp "${RUN_DIR}/vulnerability-findings.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/governance/r/${TARGET_PLATFORM}/${TS}/vulnerability-findings.csv"; fi
-                - if [ -f "${RUN_DIR}/remediation-required.csv" ]; then aws s3 cp "${RUN_DIR}/remediation-required.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/governance/r/${TARGET_PLATFORM}/${TS}/remediation-required.csv"; fi
-                - if [ -f "${RUN_DIR}/remediation-exceptions.csv" ]; then aws s3 cp "${RUN_DIR}/remediation-exceptions.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/governance/r/${TARGET_PLATFORM}/${TS}/remediation-exceptions.csv"; fi
-                - if [ -f "${RUN_DIR}/remediation-spreadsheet.csv" ]; then aws s3 cp "${RUN_DIR}/remediation-spreadsheet.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/governance/r/${TARGET_PLATFORM}/${TS}/remediation-spreadsheet.csv"; fi
-                - if [ -f "${RUN_DIR}/governance-summary.json" ]; then aws s3 cp "${RUN_DIR}/governance-summary.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/r/${TARGET_PLATFORM}/${TS}/governance-summary.json"; fi
-                - printf '{"platform":"%s","timestamp_utc":"%s","scan_execution_id":"%s","r_version":"%s","ephemeral_prefix":"%s/%s/%s","offline_bundle_prefix":"%s/packages/offline/r/%s/%s","cleanup":"requested"}' "${TARGET_PLATFORM}" "${TS}" "${SCAN_EXECUTION_ID:-manual}" "${R_VERSION}" "${EPHEMERAL_PREFIX}" "${TARGET_PLATFORM}" "${TS}" "${EVIDENCE_PREFIX}" "${TARGET_PLATFORM}" "${TS}" > "${RUN_DIR}/run-metadata.json"
-                - aws s3 cp "${RUN_DIR}/run-metadata.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/r/${TARGET_PLATFORM}/${TS}/run-metadata.json"
-                - aws s3 rm "s3://${EPHEMERAL_BUCKET}/${EPHEMERAL_PREFIX}/${TARGET_PLATFORM}/${TS}/" --recursive
-                - if [ "${GOVERNANCE_EXIT}" -ne 0 ]; then echo "Governance gate failed with exit ${GOVERNANCE_EXIT}"; exit "${GOVERNANCE_EXIT}"; fi
+                - /tmp/run-r-materialization-stage.sh linux-amd64
       Artifacts:
         Type: NO_ARTIFACTS
       Environment:
@@ -666,9 +614,15 @@ Resources:
           - Name: R_INSTALL_RUNTIME_SCRIPT_S3_KEY
             Type: PLAINTEXT
             Value: config/install-r-runtime.sh
+          - Name: R_STAGE_RUNNER_SCRIPT_S3_KEY
+            Type: PLAINTEXT
+            Value: config/run-r-materialization-stage.sh
           - Name: BUNDLE_SCRIPT_S3_KEY
             Type: PLAINTEXT
             Value: config/bundle-directory.py
+          - Name: EXTRACT_SCRIPT_S3_KEY
+            Type: PLAINTEXT
+            Value: config/extract-archive.py
           - Name: R_MATERIALIZATION_SUMMARY_SCRIPT_S3_KEY
             Type: PLAINTEXT
             Value: config/generate-r-materialization-summary.py
@@ -710,59 +664,14 @@ Resources:
                 - aws s3 cp "s3://${EVIDENCE_BUCKET}/${R_VULN_SCAN_SCRIPT_S3_KEY}" /tmp/scan-r-vulnerabilities.py
                 - aws s3 cp "s3://${EVIDENCE_BUCKET}/${R_MATERIALIZE_SCRIPT_S3_KEY}" /tmp/materialize-r-environment.R
                 - aws s3 cp "s3://${EVIDENCE_BUCKET}/${R_INSTALL_RUNTIME_SCRIPT_S3_KEY}" /tmp/install-r-runtime.sh
+                - aws s3 cp "s3://${EVIDENCE_BUCKET}/${R_STAGE_RUNNER_SCRIPT_S3_KEY}" /tmp/run-r-materialization-stage.sh
                 - aws s3 cp "s3://${EVIDENCE_BUCKET}/${BUNDLE_SCRIPT_S3_KEY}" /tmp/bundle-directory.py
+                - aws s3 cp "s3://${EVIDENCE_BUCKET}/${EXTRACT_SCRIPT_S3_KEY}" /tmp/extract-archive.py
                 - aws s3 cp "s3://${EVIDENCE_BUCKET}/${R_MATERIALIZATION_SUMMARY_SCRIPT_S3_KEY}" /tmp/generate-r-materialization-summary.py
-                - chmod +x /tmp/install-r-runtime.sh
+                - chmod +x /tmp/install-r-runtime.sh /tmp/run-r-materialization-stage.sh
             build:
               commands:
-                - set -euo pipefail
-                - TS="${SCAN_TIMESTAMP:-$(date -u +%Y%m%dT%H%M%SZ)}"
-                - TARGET_PLATFORM="linux-arm64"
-                - RUN_DIR="/tmp/scan-out/${TS}"
-                - PROJECT_DIR="${RUN_DIR}/project"
-                - CACHE_DIR="${RUN_DIR}/cache"
-                - mkdir -p "${RUN_DIR}" "${PROJECT_DIR}" "${CACHE_DIR}"
-                - aws s3 cp "s3://${INPUT_BUCKET}/${INPUT_OBJECT_KEY}" /tmp/scan-input/renv.lock
-                - cp /tmp/scan-input/renv.lock "${RUN_DIR}/renv.lock"
-                - R_VERSION="$(python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8-sig"))["R"]["Version"])' /tmp/scan-input/renv.lock)"
-                - /tmp/install-r-runtime.sh --r-version "${R_VERSION}"
-                - export PATH="/opt/R/${R_VERSION}/bin:${PATH}"
-                - Rscript /tmp/materialize-r-environment.R --lock-file "${RUN_DIR}/renv.lock" --project-dir "${PROJECT_DIR}" --cache-dir "${CACHE_DIR}" --output-dir "${RUN_DIR}" --platform "${TARGET_PLATFORM}"
-                - LIBRARY_PATH="$(cat "${RUN_DIR}/library-path.txt")"
-                - python /tmp/bundle-directory.py --source-dir "${CACHE_DIR}" --output-file "${RUN_DIR}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz" --checksum-file "${RUN_DIR}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
-                - python /tmp/bundle-directory.py --source-dir "${LIBRARY_PATH}" --output-file "${RUN_DIR}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz" --checksum-file "${RUN_DIR}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
-                - python /tmp/generate-r-materialization-summary.py --run-dir "${RUN_DIR}" --platform "${TARGET_PLATFORM}" --r-version "${R_VERSION}" --cache-dir "${CACHE_DIR}" --library-path "${LIBRARY_PATH}"
-                - python /tmp/generate-r-sbom.py --installed-packages-file "${RUN_DIR}/installed-packages.csv" --out-file "${RUN_DIR}/r-packages.cdx.json"
-                - python /tmp/scan-r-vulnerabilities.py --installed-packages-file "${RUN_DIR}/installed-packages.csv" --lock-file "${RUN_DIR}/renv.lock" --out-file "${RUN_DIR}/osv-report.json"
-                - trivy sbom --format json --output "${RUN_DIR}/trivy-sbom-report.json" "${RUN_DIR}/r-packages.cdx.json" || true
-                - GOVERNANCE_EXIT=0
-                - python /tmp/generate-r-governance-artifacts.py --run-dir "${RUN_DIR}" --platform "${TARGET_PLATFORM}" --remediate-medium "${REMEDIATE_MEDIUM:-true}" --fail-on-medium "${FAIL_ON_MEDIUM:-false}" --remediate-unknown "${REMEDIATE_UNKNOWN:-true}" --fail-on-unknown "${FAIL_ON_UNKNOWN:-false}" || GOVERNANCE_EXIT=$?
-                - tar -czf "${RUN_DIR}/environment-artifacts.tar.gz" -C "${RUN_DIR}" renv.lock installed-packages.csv session-info.txt renv-status.txt materialization-summary.json r-packages.cdx.json || true
-                - aws s3 cp "${RUN_DIR}/" "s3://${EPHEMERAL_BUCKET}/${EPHEMERAL_PREFIX}/${TARGET_PLATFORM}/${TS}/" --recursive
-                - aws s3 cp "${RUN_DIR}/renv.lock" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/r/${TARGET_PLATFORM}/${TS}/renv.lock"
-                - if [ -f "${RUN_DIR}/approval-candidate-packages.csv" ]; then aws s3 cp "${RUN_DIR}/approval-candidate-packages.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/r/${TARGET_PLATFORM}/${TS}/approval-candidate-packages.csv"; fi
-                - if [ -f "${RUN_DIR}/installed-packages.csv" ]; then aws s3 cp "${RUN_DIR}/installed-packages.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/r/${TARGET_PLATFORM}/${TS}/installed-packages.csv"; fi
-                - if [ -f "${RUN_DIR}/r-packages.cdx.json" ]; then aws s3 cp "${RUN_DIR}/r-packages.cdx.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/r-packages.cdx.json"; fi
-                - if [ -f "${RUN_DIR}/session-info.txt" ]; then aws s3 cp "${RUN_DIR}/session-info.txt" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/session-info.txt"; fi
-                - if [ -f "${RUN_DIR}/renv-status.txt" ]; then aws s3 cp "${RUN_DIR}/renv-status.txt" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/renv-status.txt"; fi
-                - if [ -f "${RUN_DIR}/restore.log" ]; then aws s3 cp "${RUN_DIR}/restore.log" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/restore.log"; fi
-                - if [ -f "${RUN_DIR}/materialization-summary.json" ]; then aws s3 cp "${RUN_DIR}/materialization-summary.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/r/${TARGET_PLATFORM}/${TS}/materialization-summary.json"; fi
-                - if [ -f "${RUN_DIR}/environment-artifacts.tar.gz" ]; then aws s3 cp "${RUN_DIR}/environment-artifacts.tar.gz" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/environment-artifacts.tar.gz"; fi
-                - if [ -f "${RUN_DIR}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz" ]; then aws s3 cp "${RUN_DIR}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz"; fi
-                - if [ -f "${RUN_DIR}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz.sha256" ]; then aws s3 cp "${RUN_DIR}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz.sha256" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"; fi
-                - if [ -f "${RUN_DIR}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz" ]; then aws s3 cp "${RUN_DIR}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/packages/offline/r/${TARGET_PLATFORM}/${TS}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz"; fi
-                - if [ -f "${RUN_DIR}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz.sha256" ]; then aws s3 cp "${RUN_DIR}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz.sha256" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/packages/offline/r/${TARGET_PLATFORM}/${TS}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"; fi
-                - if [ -f "${RUN_DIR}/trivy-sbom-report.json" ]; then aws s3 cp "${RUN_DIR}/trivy-sbom-report.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/model-results/r/${TARGET_PLATFORM}/${TS}/trivy-sbom-report.json"; fi
-                - if [ -f "${RUN_DIR}/osv-report.json" ]; then aws s3 cp "${RUN_DIR}/osv-report.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/model-results/r/${TARGET_PLATFORM}/${TS}/osv-report.json"; fi
-                - if [ -f "${RUN_DIR}/vulnerability-findings.csv" ]; then aws s3 cp "${RUN_DIR}/vulnerability-findings.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/governance/r/${TARGET_PLATFORM}/${TS}/vulnerability-findings.csv"; fi
-                - if [ -f "${RUN_DIR}/remediation-required.csv" ]; then aws s3 cp "${RUN_DIR}/remediation-required.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/governance/r/${TARGET_PLATFORM}/${TS}/remediation-required.csv"; fi
-                - if [ -f "${RUN_DIR}/remediation-exceptions.csv" ]; then aws s3 cp "${RUN_DIR}/remediation-exceptions.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/governance/r/${TARGET_PLATFORM}/${TS}/remediation-exceptions.csv"; fi
-                - if [ -f "${RUN_DIR}/remediation-spreadsheet.csv" ]; then aws s3 cp "${RUN_DIR}/remediation-spreadsheet.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/governance/r/${TARGET_PLATFORM}/${TS}/remediation-spreadsheet.csv"; fi
-                - if [ -f "${RUN_DIR}/governance-summary.json" ]; then aws s3 cp "${RUN_DIR}/governance-summary.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/r/${TARGET_PLATFORM}/${TS}/governance-summary.json"; fi
-                - printf '{"platform":"%s","timestamp_utc":"%s","scan_execution_id":"%s","r_version":"%s","ephemeral_prefix":"%s/%s/%s","offline_bundle_prefix":"%s/packages/offline/r/%s/%s","cleanup":"requested"}' "${TARGET_PLATFORM}" "${TS}" "${SCAN_EXECUTION_ID:-manual}" "${R_VERSION}" "${EPHEMERAL_PREFIX}" "${TARGET_PLATFORM}" "${TS}" "${EVIDENCE_PREFIX}" "${TARGET_PLATFORM}" "${TS}" > "${RUN_DIR}/run-metadata.json"
-                - aws s3 cp "${RUN_DIR}/run-metadata.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/r/${TARGET_PLATFORM}/${TS}/run-metadata.json"
-                - aws s3 rm "s3://${EPHEMERAL_BUCKET}/${EPHEMERAL_PREFIX}/${TARGET_PLATFORM}/${TS}/" --recursive
-                - if [ "${GOVERNANCE_EXIT}" -ne 0 ]; then echo "Governance gate failed with exit ${GOVERNANCE_EXIT}"; exit "${GOVERNANCE_EXIT}"; fi
+                - /tmp/run-r-materialization-stage.sh linux-arm64
       Artifacts:
         Type: NO_ARTIFACTS
       Environment:
@@ -815,9 +724,15 @@ Resources:
           - Name: R_INSTALL_RUNTIME_SCRIPT_S3_KEY
             Type: PLAINTEXT
             Value: config/install-r-runtime.sh
+          - Name: R_STAGE_RUNNER_SCRIPT_S3_KEY
+            Type: PLAINTEXT
+            Value: config/run-r-materialization-stage.sh
           - Name: BUNDLE_SCRIPT_S3_KEY
             Type: PLAINTEXT
             Value: config/bundle-directory.py
+          - Name: EXTRACT_SCRIPT_S3_KEY
+            Type: PLAINTEXT
+            Value: config/extract-archive.py
           - Name: R_MATERIALIZATION_SUMMARY_SCRIPT_S3_KEY
             Type: PLAINTEXT
             Value: config/generate-r-materialization-summary.py
@@ -844,20 +759,17 @@ Resources:
             install:
               commands:
                 - New-Item -ItemType Directory -Force -Path C:\scan-input, C:\scan-out | Out-Null
-                - $rtoolsRoot = 'C:\rtools44'
-                - if (-not (Test-Path $rtoolsRoot)) {
-                    $rtoolsInstaller = 'C:\rtools.exe';
-                    Invoke-WebRequest -Uri 'https://cran.r-project.org/bin/windows/Rtools/rtools44/files/rtools44-6459-6401.exe' -OutFile $rtoolsInstaller;
-                    Start-Process -FilePath $rtoolsInstaller -ArgumentList '/VERYSILENT','/DIR=C:\rtools44' -Wait;
-                  }
-                - $env:PATH = "C:\rtools44\usr\bin;C:\rtools44\mingw64\bin;$env:PATH"
                 - python -m pip install --upgrade pip
                 - aws s3 cp "s3://${env:EVIDENCE_BUCKET}/${env:R_GOVERNANCE_SCRIPT_S3_KEY}" C:\generate-r-governance-artifacts.py
                 - aws s3 cp "s3://${env:EVIDENCE_BUCKET}/${env:R_SBOM_SCRIPT_S3_KEY}" C:\generate-r-sbom.py
                 - aws s3 cp "s3://${env:EVIDENCE_BUCKET}/${env:R_VULN_SCAN_SCRIPT_S3_KEY}" C:\scan-r-vulnerabilities.py
                 - aws s3 cp "s3://${env:EVIDENCE_BUCKET}/${env:R_MATERIALIZE_SCRIPT_S3_KEY}" C:\materialize-r-environment.R
                 - aws s3 cp "s3://${env:EVIDENCE_BUCKET}/${env:R_INSTALL_RUNTIME_SCRIPT_S3_KEY}" C:\install-r-runtime.ps1
+                - powershell -ExecutionPolicy Bypass -File C:\install-r-runtime.ps1 -RVersion 4.4.0 -EnsureRtools -SkipRRuntime -EvidenceBucket $env:EVIDENCE_BUCKET
+                - $env:PATH = "C:\rtools44\usr\bin;C:\rtools44\mingw64\bin;$env:PATH"
+                - aws s3 cp "s3://${env:EVIDENCE_BUCKET}/${env:R_STAGE_RUNNER_SCRIPT_S3_KEY}" C:\run-r-materialization-stage.ps1
                 - aws s3 cp "s3://${env:EVIDENCE_BUCKET}/${env:BUNDLE_SCRIPT_S3_KEY}" C:\bundle-directory.py
+                - aws s3 cp "s3://${env:EVIDENCE_BUCKET}/${env:EXTRACT_SCRIPT_S3_KEY}" C:\extract-archive.py
                 - aws s3 cp "s3://${env:EVIDENCE_BUCKET}/${env:R_MATERIALIZATION_SUMMARY_SCRIPT_S3_KEY}" C:\generate-r-materialization-summary.py
                 - $trivyArchive = "trivy_${env:TRIVY_VERSION}_windows-64bit.zip"
                 - $ok = $false; try { aws s3 cp "s3://${env:EVIDENCE_BUCKET}/config/trivy/$trivyArchive" C:\trivy.zip 2>$null; if ($LASTEXITCODE -eq 0) { $ok = $true } } catch {}
@@ -865,56 +777,7 @@ Resources:
                 - Expand-Archive -Path C:\trivy.zip -DestinationPath C:\trivy -Force
             build:
               commands:
-                - Write-Host 'Build phase starting'
-                - $ts = if ($env:SCAN_TIMESTAMP) { $env:SCAN_TIMESTAMP } else { (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ') }
-                - $platform = 'windows-amd64'
-                - $runDir = "C:\scan-out\$ts"
-                - $projectDir = "$runDir\project"
-                - $cacheDir = "$runDir\cache"
-                - New-Item -ItemType Directory -Force -Path $runDir, $projectDir, $cacheDir | Out-Null
-                - aws s3 cp "s3://${env:INPUT_BUCKET}/${env:INPUT_OBJECT_KEY}" C:\scan-input\renv.lock
-                - Copy-Item C:\scan-input\renv.lock "$runDir\renv.lock" -Force
-                - $rVersion = ((Get-Content C:\scan-input\renv.lock -Raw | ConvertFrom-Json).R.Version)
-                - powershell -ExecutionPolicy Bypass -File C:\install-r-runtime.ps1 -RVersion $rVersion
-                - >-
-                  $env:PATH = "C:\R\R-$rVersion\bin;C:\rtools44\usr\bin;C:\rtools44\mingw64\bin;$env:PATH"
-                - >-
-                  & "C:\R\R-$rVersion\bin\Rscript.exe" C:\materialize-r-environment.R --lock-file "$runDir\renv.lock" --project-dir $projectDir --cache-dir $cacheDir --output-dir $runDir --platform $platform
-                - $libraryPath = (Get-Content "$runDir\library-path.txt" -Raw).Trim()
-                - python C:\bundle-directory.py --source-dir $cacheDir --output-file "$runDir\renv-cache-$platform-$ts.tar.gz" --checksum-file "$runDir\renv-cache-$platform-$ts.tar.gz.sha256"
-                - python C:\bundle-directory.py --source-dir $libraryPath --output-file "$runDir\renv-library-$platform-$ts.tar.gz" --checksum-file "$runDir\renv-library-$platform-$ts.tar.gz.sha256"
-                - python C:\generate-r-materialization-summary.py --run-dir $runDir --platform $platform --r-version $rVersion --cache-dir $cacheDir --library-path $libraryPath
-                - python C:\generate-r-sbom.py --installed-packages-file "$runDir\installed-packages.csv" --out-file "$runDir\r-packages.cdx.json"
-                - python C:\scan-r-vulnerabilities.py --installed-packages-file "$runDir\installed-packages.csv" --lock-file "$runDir\renv.lock" --out-file "$runDir\osv-report.json"
-                - C:\trivy\trivy.exe sbom --format json --output "$runDir\trivy-sbom-report.json" "$runDir\r-packages.cdx.json"; $true
-                - $govExit = 0
-                - python C:\generate-r-governance-artifacts.py --run-dir $runDir --platform $platform --remediate-medium $env:REMEDIATE_MEDIUM --fail-on-medium $env:FAIL_ON_MEDIUM --remediate-unknown $env:REMEDIATE_UNKNOWN --fail-on-unknown $env:FAIL_ON_UNKNOWN; if ($LASTEXITCODE -ne 0) { $govExit = $LASTEXITCODE }
-                - try { tar -czf "$runDir\environment-artifacts.tar.gz" -C $runDir renv.lock installed-packages.csv session-info.txt renv-status.txt materialization-summary.json r-packages.cdx.json } catch { Write-Host 'archive step skipped' }
-                - aws s3 cp "$runDir\" "s3://${env:EPHEMERAL_BUCKET}/${env:EPHEMERAL_PREFIX}/$platform/$ts/" --recursive
-                - aws s3 cp "$runDir\renv.lock" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/requirements/r/$platform/$ts/renv.lock"
-                - if (Test-Path "$runDir\approval-candidate-packages.csv") { aws s3 cp "$runDir\approval-candidate-packages.csv" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/requirements/r/$platform/$ts/approval-candidate-packages.csv" }
-                - if (Test-Path "$runDir\installed-packages.csv") { aws s3 cp "$runDir\installed-packages.csv" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/requirements/r/$platform/$ts/installed-packages.csv" }
-                - if (Test-Path "$runDir\r-packages.cdx.json") { aws s3 cp "$runDir\r-packages.cdx.json" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/env-artifacts/r/$platform/$ts/r-packages.cdx.json" }
-                - if (Test-Path "$runDir\session-info.txt") { aws s3 cp "$runDir\session-info.txt" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/env-artifacts/r/$platform/$ts/session-info.txt" }
-                - if (Test-Path "$runDir\renv-status.txt") { aws s3 cp "$runDir\renv-status.txt" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/env-artifacts/r/$platform/$ts/renv-status.txt" }
-                - if (Test-Path "$runDir\restore.log") { aws s3 cp "$runDir\restore.log" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/env-artifacts/r/$platform/$ts/restore.log" }
-                - if (Test-Path "$runDir\materialization-summary.json") { aws s3 cp "$runDir\materialization-summary.json" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/traceability/r/$platform/$ts/materialization-summary.json" }
-                - if (Test-Path "$runDir\environment-artifacts.tar.gz") { aws s3 cp "$runDir\environment-artifacts.tar.gz" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/env-artifacts/r/$platform/$ts/environment-artifacts.tar.gz" }
-                - if (Test-Path "$runDir\renv-library-$platform-$ts.tar.gz") { aws s3 cp "$runDir\renv-library-$platform-$ts.tar.gz" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/env-artifacts/r/$platform/$ts/renv-library-$platform-$ts.tar.gz" }
-                - if (Test-Path "$runDir\renv-library-$platform-$ts.tar.gz.sha256") { aws s3 cp "$runDir\renv-library-$platform-$ts.tar.gz.sha256" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/env-artifacts/r/$platform/$ts/renv-library-$platform-$ts.tar.gz.sha256" }
-                - if (Test-Path "$runDir\renv-cache-$platform-$ts.tar.gz") { aws s3 cp "$runDir\renv-cache-$platform-$ts.tar.gz" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/packages/offline/r/$platform/$ts/renv-cache-$platform-$ts.tar.gz" }
-                - if (Test-Path "$runDir\renv-cache-$platform-$ts.tar.gz.sha256") { aws s3 cp "$runDir\renv-cache-$platform-$ts.tar.gz.sha256" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/packages/offline/r/$platform/$ts/renv-cache-$platform-$ts.tar.gz.sha256" }
-                - if (Test-Path "$runDir\trivy-sbom-report.json") { aws s3 cp "$runDir\trivy-sbom-report.json" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/model-results/r/$platform/$ts/trivy-sbom-report.json" }
-                - if (Test-Path "$runDir\osv-report.json") { aws s3 cp "$runDir\osv-report.json" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/model-results/r/$platform/$ts/osv-report.json" }
-                - if (Test-Path "$runDir\vulnerability-findings.csv") { aws s3 cp "$runDir\vulnerability-findings.csv" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/governance/r/$platform/$ts/vulnerability-findings.csv" }
-                - if (Test-Path "$runDir\remediation-required.csv") { aws s3 cp "$runDir\remediation-required.csv" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/governance/r/$platform/$ts/remediation-required.csv" }
-                - if (Test-Path "$runDir\remediation-exceptions.csv") { aws s3 cp "$runDir\remediation-exceptions.csv" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/governance/r/$platform/$ts/remediation-exceptions.csv" }
-                - if (Test-Path "$runDir\remediation-spreadsheet.csv") { aws s3 cp "$runDir\remediation-spreadsheet.csv" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/governance/r/$platform/$ts/remediation-spreadsheet.csv" }
-                - if (Test-Path "$runDir\governance-summary.json") { aws s3 cp "$runDir\governance-summary.json" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/traceability/r/$platform/$ts/governance-summary.json" }
-                - $metaJson = "{`"platform`":`"$platform`",`"timestamp_utc`":`"$ts`",`"scan_execution_id`":`"$($env:SCAN_EXECUTION_ID)`",`"r_version`":`"$rVersion`",`"ephemeral_prefix`":`"${env:EPHEMERAL_PREFIX}/$platform/$ts`",`"offline_bundle_prefix`":`"${env:EVIDENCE_PREFIX}/packages/offline/r/$platform/$ts`",`"cleanup`":`"requested`"}"; $metaJson | Out-File "$runDir\run-metadata.json" -Encoding ascii
-                - aws s3 cp "$runDir\run-metadata.json" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/traceability/r/$platform/$ts/run-metadata.json"
-                - aws s3 rm "s3://${env:EPHEMERAL_BUCKET}/${env:EPHEMERAL_PREFIX}/$platform/$ts/" --recursive
-                - if ($govExit -ne 0) { Write-Host "Governance gate failed with exit $govExit"; exit $govExit }
+                - powershell -ExecutionPolicy Bypass -File C:\run-r-materialization-stage.ps1 -Platform windows-amd64
       Artifacts:
         Type: NO_ARTIFACTS
       Environment:
@@ -967,9 +830,15 @@ Resources:
           - Name: R_INSTALL_RUNTIME_SCRIPT_S3_KEY
             Type: PLAINTEXT
             Value: config/install-r-runtime.ps1
+          - Name: R_STAGE_RUNNER_SCRIPT_S3_KEY
+            Type: PLAINTEXT
+            Value: config/run-r-materialization-stage.ps1
           - Name: BUNDLE_SCRIPT_S3_KEY
             Type: PLAINTEXT
             Value: config/bundle-directory.py
+          - Name: EXTRACT_SCRIPT_S3_KEY
+            Type: PLAINTEXT
+            Value: config/extract-archive.py
           - Name: R_MATERIALIZATION_SUMMARY_SCRIPT_S3_KEY
             Type: PLAINTEXT
             Value: config/generate-r-materialization-summary.py
@@ -1025,6 +894,127 @@ Resources:
                 Action:
                   - events:PutEvents
                 Resource: '*'
+
+  RStagePlannerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-r-stage-planner-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: Logs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+        - PolicyName: InputAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !If [CreateInputBucket, !Sub '${InputBucket.Arn}/*', !Sub 'arn:aws:s3:::${ExistingInputBucketName}/*']
+
+  RStagePlannerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${EnvironmentName}-r-stage-planner'
+      Runtime: python3.12
+      Handler: index.handler
+      Timeout: 60
+      Role: !GetAtt RStagePlannerRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import re
+          from collections import defaultdict, deque
+          import boto3
+
+          s3 = boto3.client("s3")
+          DEP_FIELDS = ("Depends", "Imports", "LinkingTo")
+          NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9.]*")
+
+
+          def dep_name(entry):
+              m = NAME_RE.match((entry or "").strip())
+              if not m:
+                  return None
+              name = m.group(0)
+              return None if name == "R" else name
+
+
+          def package_deps(record, known):
+              names = []
+              for field in DEP_FIELDS:
+                  for entry in record.get(field, []):
+                      name = dep_name(entry)
+                      if name and name in known:
+                          names.append(name)
+              return sorted(set(names), key=str.lower)
+
+
+          def topo_sort(packages):
+              known = set(packages)
+              deps = {name: package_deps(record, known) for name, record in packages.items()}
+              dependents = defaultdict(set)
+              indegree = {name: len(values) for name, values in deps.items()}
+              for name, values in deps.items():
+                  for dep in values:
+                      dependents[dep].add(name)
+              ready = deque(sorted((name for name, degree in indegree.items() if degree == 0), key=str.lower))
+              ordered = []
+              while ready:
+                  current = ready.popleft()
+                  ordered.append(current)
+                  for dependent in sorted(dependents.get(current, ()), key=str.lower):
+                      indegree[dependent] -= 1
+                      if indegree[dependent] == 0:
+                          ready.append(dependent)
+              if len(ordered) != len(packages):
+                  ordered.extend(sorted((name for name in packages if name not in ordered), key=str.lower))
+              return ordered
+
+
+          def handler(event, _context):
+              obj = s3.get_object(Bucket=event["input_bucket"], Key=event["input_object_key"])
+              payload = json.loads(obj["Body"].read().decode("utf-8-sig"))
+              ordered = topo_sort(payload.get("Packages", {}))
+              chunk_size = max(1, int(event.get("stage_package_count", 25)))
+              stages = []
+              for index in range(0, len(ordered), chunk_size):
+                  chunk = ordered[index:index + chunk_size]
+                  stages.append(
+                      {
+                          "stage_index": str(len(stages) + 1),
+                          "package_count": len(chunk),
+                          "packages_json": json.dumps(chunk),
+                          "final_stage": "false",
+                      }
+                  )
+              if not stages:
+                  stages = [{"stage_index": "1", "package_count": 0, "packages_json": "[]", "final_stage": "true"}]
+              else:
+                  stages[-1]["final_stage"] = "true"
+              total = str(len(stages))
+              for stage in stages:
+                  stage["total_stages"] = total
+              return {
+                  "package_count": len(ordered),
+                  "stage_count": len(stages),
+                  "stages": stages,
+              }
 
   RScanSummaryFunction:
     Type: AWS::Lambda::Function
@@ -1172,7 +1162,9 @@ Resources:
               - Effect: Allow
                 Action:
                   - lambda:InvokeFunction
-                Resource: !GetAtt RScanSummaryFunction.Arn
+                Resource:
+                  - !GetAtt RScanSummaryFunction.Arn
+                  - !GetAtt RStagePlannerFunction.Arn
 
   RScanOrchestrationStateMachine:
     Type: AWS::StepFunctions::StateMachine
@@ -1181,39 +1173,86 @@ Resources:
       RoleArn: !GetAtt RScanOrchestrationRole.Arn
       DefinitionString: !Sub |
         {
-          "StartAt": "RunBuilds",
+          "StartAt": "PlanStages",
           "States": {
+            "PlanStages": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "ResultSelector": {
+                "package_count.$": "$.Payload.package_count",
+                "stage_count.$": "$.Payload.stage_count",
+                "stages.$": "$.Payload.stages"
+              },
+              "ResultPath": "$.stage_plan",
+              "Parameters": {
+                "FunctionName": "${RStagePlannerFunction.Arn}",
+                "Payload": {
+                  "input_bucket.$": "$.input_bucket",
+                  "input_object_key.$": "$.input_object_key",
+                  "stage_package_count.$": "$.r_stage_package_count"
+                }
+              },
+              "Next": "RunBuilds"
+            },
             "RunBuilds": {
               "Type": "Parallel",
               "Branches": [
                 {
-                  "StartAt": "LinuxAmd64Build",
+                  "StartAt": "LinuxAmd64Stages",
                   "States": {
-                    "LinuxAmd64Build": {
-                      "Type": "Task",
-                      "Resource": "arn:aws:states:::codebuild:startBuild.sync",
+                    "LinuxAmd64Stages": {
+                      "Type": "Map",
+                      "ItemsPath": "$.stage_plan.stages",
+                      "MaxConcurrency": 1,
+                      "ResultPath": "$.stage_results",
                       "Parameters": {
-                        "ProjectName": "${RLinuxAmd64Project}",
-                        "EnvironmentVariablesOverride": [
-                          { "Name": "INPUT_BUCKET", "Type": "PLAINTEXT", "Value.$": "$.input_bucket" },
-                          { "Name": "INPUT_OBJECT_KEY", "Type": "PLAINTEXT", "Value.$": "$.input_object_key" },
-                          { "Name": "EVIDENCE_BUCKET", "Type": "PLAINTEXT", "Value.$": "$.evidence_bucket" },
-                          { "Name": "EVIDENCE_PREFIX", "Type": "PLAINTEXT", "Value.$": "$.evidence_prefix" },
-                          { "Name": "EPHEMERAL_BUCKET", "Type": "PLAINTEXT", "Value.$": "$.ephemeral_bucket" },
-                          { "Name": "EPHEMERAL_PREFIX", "Type": "PLAINTEXT", "Value.$": "$.ephemeral_prefix" },
-                          { "Name": "REMEDIATE_MEDIUM", "Type": "PLAINTEXT", "Value.$": "$.remediate_medium" },
-                          { "Name": "FAIL_ON_MEDIUM", "Type": "PLAINTEXT", "Value.$": "$.fail_on_medium" },
-                          { "Name": "REMEDIATE_UNKNOWN", "Type": "PLAINTEXT", "Value.$": "$.remediate_unknown" },
-                          { "Name": "FAIL_ON_UNKNOWN", "Type": "PLAINTEXT", "Value.$": "$.fail_on_unknown" },
-                          { "Name": "SCAN_TIMESTAMP", "Type": "PLAINTEXT", "Value.$": "$.scan_timestamp" },
-                          { "Name": "SCAN_EXECUTION_ID", "Type": "PLAINTEXT", "Value.$": "$.scan_execution_id" }
-                        ]
+                        "stage.$": "$$.Map.Item.Value",
+                        "input_bucket.$": "$.input_bucket",
+                        "input_object_key.$": "$.input_object_key",
+                        "evidence_bucket.$": "$.evidence_bucket",
+                        "evidence_prefix.$": "$.evidence_prefix",
+                        "ephemeral_bucket.$": "$.ephemeral_bucket",
+                        "ephemeral_prefix.$": "$.ephemeral_prefix",
+                        "remediate_medium.$": "$.remediate_medium",
+                        "fail_on_medium.$": "$.fail_on_medium",
+                        "remediate_unknown.$": "$.remediate_unknown",
+                        "fail_on_unknown.$": "$.fail_on_unknown",
+                        "scan_timestamp.$": "$.scan_timestamp",
+                        "scan_execution_id.$": "$.scan_execution_id"
                       },
-                      "ResultSelector": {
-                        "platform": "linux-amd64",
-                        "status": "SUCCEEDED",
-                        "projectName": "${RLinuxAmd64Project}",
-                        "buildId.$": "$.Build.Id"
+                      "Iterator": {
+                        "StartAt": "LinuxAmd64RunStage",
+                        "States": {
+                          "LinuxAmd64RunStage": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::codebuild:startBuild.sync",
+                            "Parameters": {
+                              "ProjectName": "${RLinuxAmd64Project}",
+                              "EnvironmentVariablesOverride": [
+                                { "Name": "INPUT_BUCKET", "Type": "PLAINTEXT", "Value.$": "$.input_bucket" },
+                                { "Name": "INPUT_OBJECT_KEY", "Type": "PLAINTEXT", "Value.$": "$.input_object_key" },
+                                { "Name": "EVIDENCE_BUCKET", "Type": "PLAINTEXT", "Value.$": "$.evidence_bucket" },
+                                { "Name": "EVIDENCE_PREFIX", "Type": "PLAINTEXT", "Value.$": "$.evidence_prefix" },
+                                { "Name": "EPHEMERAL_BUCKET", "Type": "PLAINTEXT", "Value.$": "$.ephemeral_bucket" },
+                                { "Name": "EPHEMERAL_PREFIX", "Type": "PLAINTEXT", "Value.$": "$.ephemeral_prefix" },
+                                { "Name": "REMEDIATE_MEDIUM", "Type": "PLAINTEXT", "Value.$": "$.remediate_medium" },
+                                { "Name": "FAIL_ON_MEDIUM", "Type": "PLAINTEXT", "Value.$": "$.fail_on_medium" },
+                                { "Name": "REMEDIATE_UNKNOWN", "Type": "PLAINTEXT", "Value.$": "$.remediate_unknown" },
+                                { "Name": "FAIL_ON_UNKNOWN", "Type": "PLAINTEXT", "Value.$": "$.fail_on_unknown" },
+                                { "Name": "SCAN_TIMESTAMP", "Type": "PLAINTEXT", "Value.$": "$.scan_timestamp" },
+                                { "Name": "SCAN_EXECUTION_ID", "Type": "PLAINTEXT", "Value.$": "$.scan_execution_id" },
+                                { "Name": "STAGE_INDEX", "Type": "PLAINTEXT", "Value.$": "$.stage.stage_index" },
+                                { "Name": "TOTAL_STAGES", "Type": "PLAINTEXT", "Value.$": "$.stage.total_stages" },
+                                { "Name": "FINAL_STAGE", "Type": "PLAINTEXT", "Value.$": "$.stage.final_stage" },
+                                { "Name": "STAGE_PACKAGES_JSON", "Type": "PLAINTEXT", "Value.$": "$.stage.packages_json" }
+                              ]
+                            },
+                            "ResultSelector": {
+                              "buildId.$": "$.Build.Id"
+                            },
+                            "End": true
+                          }
+                        }
                       },
                       "Catch": [
                         {
@@ -1222,6 +1261,16 @@ Resources:
                           "Next": "LinuxAmd64Failure"
                         }
                       ],
+                      "Next": "LinuxAmd64Success"
+                    },
+                    "LinuxAmd64Success": {
+                      "Type": "Pass",
+                      "Parameters": {
+                        "platform": "linux-amd64",
+                        "status": "SUCCEEDED",
+                        "projectName": "${RLinuxAmd64Project}",
+                        "stageCount.$": "$.stage_plan.stage_count"
+                      },
                       "End": true
                     },
                     "LinuxAmd64Failure": {
@@ -1238,33 +1287,61 @@ Resources:
                   }
                 },
                 {
-                  "StartAt": "LinuxArm64Build",
+                  "StartAt": "LinuxArm64Stages",
                   "States": {
-                    "LinuxArm64Build": {
-                      "Type": "Task",
-                      "Resource": "arn:aws:states:::codebuild:startBuild.sync",
+                    "LinuxArm64Stages": {
+                      "Type": "Map",
+                      "ItemsPath": "$.stage_plan.stages",
+                      "MaxConcurrency": 1,
+                      "ResultPath": "$.stage_results",
                       "Parameters": {
-                        "ProjectName": "${RLinuxArm64Project}",
-                        "EnvironmentVariablesOverride": [
-                          { "Name": "INPUT_BUCKET", "Type": "PLAINTEXT", "Value.$": "$.input_bucket" },
-                          { "Name": "INPUT_OBJECT_KEY", "Type": "PLAINTEXT", "Value.$": "$.input_object_key" },
-                          { "Name": "EVIDENCE_BUCKET", "Type": "PLAINTEXT", "Value.$": "$.evidence_bucket" },
-                          { "Name": "EVIDENCE_PREFIX", "Type": "PLAINTEXT", "Value.$": "$.evidence_prefix" },
-                          { "Name": "EPHEMERAL_BUCKET", "Type": "PLAINTEXT", "Value.$": "$.ephemeral_bucket" },
-                          { "Name": "EPHEMERAL_PREFIX", "Type": "PLAINTEXT", "Value.$": "$.ephemeral_prefix" },
-                          { "Name": "REMEDIATE_MEDIUM", "Type": "PLAINTEXT", "Value.$": "$.remediate_medium" },
-                          { "Name": "FAIL_ON_MEDIUM", "Type": "PLAINTEXT", "Value.$": "$.fail_on_medium" },
-                          { "Name": "REMEDIATE_UNKNOWN", "Type": "PLAINTEXT", "Value.$": "$.remediate_unknown" },
-                          { "Name": "FAIL_ON_UNKNOWN", "Type": "PLAINTEXT", "Value.$": "$.fail_on_unknown" },
-                          { "Name": "SCAN_TIMESTAMP", "Type": "PLAINTEXT", "Value.$": "$.scan_timestamp" },
-                          { "Name": "SCAN_EXECUTION_ID", "Type": "PLAINTEXT", "Value.$": "$.scan_execution_id" }
-                        ]
+                        "stage.$": "$$.Map.Item.Value",
+                        "input_bucket.$": "$.input_bucket",
+                        "input_object_key.$": "$.input_object_key",
+                        "evidence_bucket.$": "$.evidence_bucket",
+                        "evidence_prefix.$": "$.evidence_prefix",
+                        "ephemeral_bucket.$": "$.ephemeral_bucket",
+                        "ephemeral_prefix.$": "$.ephemeral_prefix",
+                        "remediate_medium.$": "$.remediate_medium",
+                        "fail_on_medium.$": "$.fail_on_medium",
+                        "remediate_unknown.$": "$.remediate_unknown",
+                        "fail_on_unknown.$": "$.fail_on_unknown",
+                        "scan_timestamp.$": "$.scan_timestamp",
+                        "scan_execution_id.$": "$.scan_execution_id"
                       },
-                      "ResultSelector": {
-                        "platform": "linux-arm64",
-                        "status": "SUCCEEDED",
-                        "projectName": "${RLinuxArm64Project}",
-                        "buildId.$": "$.Build.Id"
+                      "Iterator": {
+                        "StartAt": "LinuxArm64RunStage",
+                        "States": {
+                          "LinuxArm64RunStage": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::codebuild:startBuild.sync",
+                            "Parameters": {
+                              "ProjectName": "${RLinuxArm64Project}",
+                              "EnvironmentVariablesOverride": [
+                                { "Name": "INPUT_BUCKET", "Type": "PLAINTEXT", "Value.$": "$.input_bucket" },
+                                { "Name": "INPUT_OBJECT_KEY", "Type": "PLAINTEXT", "Value.$": "$.input_object_key" },
+                                { "Name": "EVIDENCE_BUCKET", "Type": "PLAINTEXT", "Value.$": "$.evidence_bucket" },
+                                { "Name": "EVIDENCE_PREFIX", "Type": "PLAINTEXT", "Value.$": "$.evidence_prefix" },
+                                { "Name": "EPHEMERAL_BUCKET", "Type": "PLAINTEXT", "Value.$": "$.ephemeral_bucket" },
+                                { "Name": "EPHEMERAL_PREFIX", "Type": "PLAINTEXT", "Value.$": "$.ephemeral_prefix" },
+                                { "Name": "REMEDIATE_MEDIUM", "Type": "PLAINTEXT", "Value.$": "$.remediate_medium" },
+                                { "Name": "FAIL_ON_MEDIUM", "Type": "PLAINTEXT", "Value.$": "$.fail_on_medium" },
+                                { "Name": "REMEDIATE_UNKNOWN", "Type": "PLAINTEXT", "Value.$": "$.remediate_unknown" },
+                                { "Name": "FAIL_ON_UNKNOWN", "Type": "PLAINTEXT", "Value.$": "$.fail_on_unknown" },
+                                { "Name": "SCAN_TIMESTAMP", "Type": "PLAINTEXT", "Value.$": "$.scan_timestamp" },
+                                { "Name": "SCAN_EXECUTION_ID", "Type": "PLAINTEXT", "Value.$": "$.scan_execution_id" },
+                                { "Name": "STAGE_INDEX", "Type": "PLAINTEXT", "Value.$": "$.stage.stage_index" },
+                                { "Name": "TOTAL_STAGES", "Type": "PLAINTEXT", "Value.$": "$.stage.total_stages" },
+                                { "Name": "FINAL_STAGE", "Type": "PLAINTEXT", "Value.$": "$.stage.final_stage" },
+                                { "Name": "STAGE_PACKAGES_JSON", "Type": "PLAINTEXT", "Value.$": "$.stage.packages_json" }
+                              ]
+                            },
+                            "ResultSelector": {
+                              "buildId.$": "$.Build.Id"
+                            },
+                            "End": true
+                          }
+                        }
                       },
                       "Catch": [
                         {
@@ -1273,6 +1350,16 @@ Resources:
                           "Next": "LinuxArm64Failure"
                         }
                       ],
+                      "Next": "LinuxArm64Success"
+                    },
+                    "LinuxArm64Success": {
+                      "Type": "Pass",
+                      "Parameters": {
+                        "platform": "linux-arm64",
+                        "status": "SUCCEEDED",
+                        "projectName": "${RLinuxArm64Project}",
+                        "stageCount.$": "$.stage_plan.stage_count"
+                      },
                       "End": true
                     },
                     "LinuxArm64Failure": {
@@ -1289,33 +1376,61 @@ Resources:
                   }
                 },
                 {
-                  "StartAt": "WindowsAmd64Build",
+                  "StartAt": "WindowsAmd64Stages",
                   "States": {
-                    "WindowsAmd64Build": {
-                      "Type": "Task",
-                      "Resource": "arn:aws:states:::codebuild:startBuild.sync",
+                    "WindowsAmd64Stages": {
+                      "Type": "Map",
+                      "ItemsPath": "$.stage_plan.stages",
+                      "MaxConcurrency": 1,
+                      "ResultPath": "$.stage_results",
                       "Parameters": {
-                        "ProjectName": "${RWindowsAmd64Project}",
-                        "EnvironmentVariablesOverride": [
-                          { "Name": "INPUT_BUCKET", "Type": "PLAINTEXT", "Value.$": "$.input_bucket" },
-                          { "Name": "INPUT_OBJECT_KEY", "Type": "PLAINTEXT", "Value.$": "$.input_object_key" },
-                          { "Name": "EVIDENCE_BUCKET", "Type": "PLAINTEXT", "Value.$": "$.evidence_bucket" },
-                          { "Name": "EVIDENCE_PREFIX", "Type": "PLAINTEXT", "Value.$": "$.evidence_prefix" },
-                          { "Name": "EPHEMERAL_BUCKET", "Type": "PLAINTEXT", "Value.$": "$.ephemeral_bucket" },
-                          { "Name": "EPHEMERAL_PREFIX", "Type": "PLAINTEXT", "Value.$": "$.ephemeral_prefix" },
-                          { "Name": "REMEDIATE_MEDIUM", "Type": "PLAINTEXT", "Value.$": "$.remediate_medium" },
-                          { "Name": "FAIL_ON_MEDIUM", "Type": "PLAINTEXT", "Value.$": "$.fail_on_medium" },
-                          { "Name": "REMEDIATE_UNKNOWN", "Type": "PLAINTEXT", "Value.$": "$.remediate_unknown" },
-                          { "Name": "FAIL_ON_UNKNOWN", "Type": "PLAINTEXT", "Value.$": "$.fail_on_unknown" },
-                          { "Name": "SCAN_TIMESTAMP", "Type": "PLAINTEXT", "Value.$": "$.scan_timestamp" },
-                          { "Name": "SCAN_EXECUTION_ID", "Type": "PLAINTEXT", "Value.$": "$.scan_execution_id" }
-                        ]
+                        "stage.$": "$$.Map.Item.Value",
+                        "input_bucket.$": "$.input_bucket",
+                        "input_object_key.$": "$.input_object_key",
+                        "evidence_bucket.$": "$.evidence_bucket",
+                        "evidence_prefix.$": "$.evidence_prefix",
+                        "ephemeral_bucket.$": "$.ephemeral_bucket",
+                        "ephemeral_prefix.$": "$.ephemeral_prefix",
+                        "remediate_medium.$": "$.remediate_medium",
+                        "fail_on_medium.$": "$.fail_on_medium",
+                        "remediate_unknown.$": "$.remediate_unknown",
+                        "fail_on_unknown.$": "$.fail_on_unknown",
+                        "scan_timestamp.$": "$.scan_timestamp",
+                        "scan_execution_id.$": "$.scan_execution_id"
                       },
-                      "ResultSelector": {
-                        "platform": "windows-amd64",
-                        "status": "SUCCEEDED",
-                        "projectName": "${RWindowsAmd64Project}",
-                        "buildId.$": "$.Build.Id"
+                      "Iterator": {
+                        "StartAt": "WindowsAmd64RunStage",
+                        "States": {
+                          "WindowsAmd64RunStage": {
+                            "Type": "Task",
+                            "Resource": "arn:aws:states:::codebuild:startBuild.sync",
+                            "Parameters": {
+                              "ProjectName": "${RWindowsAmd64Project}",
+                              "EnvironmentVariablesOverride": [
+                                { "Name": "INPUT_BUCKET", "Type": "PLAINTEXT", "Value.$": "$.input_bucket" },
+                                { "Name": "INPUT_OBJECT_KEY", "Type": "PLAINTEXT", "Value.$": "$.input_object_key" },
+                                { "Name": "EVIDENCE_BUCKET", "Type": "PLAINTEXT", "Value.$": "$.evidence_bucket" },
+                                { "Name": "EVIDENCE_PREFIX", "Type": "PLAINTEXT", "Value.$": "$.evidence_prefix" },
+                                { "Name": "EPHEMERAL_BUCKET", "Type": "PLAINTEXT", "Value.$": "$.ephemeral_bucket" },
+                                { "Name": "EPHEMERAL_PREFIX", "Type": "PLAINTEXT", "Value.$": "$.ephemeral_prefix" },
+                                { "Name": "REMEDIATE_MEDIUM", "Type": "PLAINTEXT", "Value.$": "$.remediate_medium" },
+                                { "Name": "FAIL_ON_MEDIUM", "Type": "PLAINTEXT", "Value.$": "$.fail_on_medium" },
+                                { "Name": "REMEDIATE_UNKNOWN", "Type": "PLAINTEXT", "Value.$": "$.remediate_unknown" },
+                                { "Name": "FAIL_ON_UNKNOWN", "Type": "PLAINTEXT", "Value.$": "$.fail_on_unknown" },
+                                { "Name": "SCAN_TIMESTAMP", "Type": "PLAINTEXT", "Value.$": "$.scan_timestamp" },
+                                { "Name": "SCAN_EXECUTION_ID", "Type": "PLAINTEXT", "Value.$": "$.scan_execution_id" },
+                                { "Name": "STAGE_INDEX", "Type": "PLAINTEXT", "Value.$": "$.stage.stage_index" },
+                                { "Name": "TOTAL_STAGES", "Type": "PLAINTEXT", "Value.$": "$.stage.total_stages" },
+                                { "Name": "FINAL_STAGE", "Type": "PLAINTEXT", "Value.$": "$.stage.final_stage" },
+                                { "Name": "STAGE_PACKAGES_JSON", "Type": "PLAINTEXT", "Value.$": "$.stage.packages_json" }
+                              ]
+                            },
+                            "ResultSelector": {
+                              "buildId.$": "$.Build.Id"
+                            },
+                            "End": true
+                          }
+                        }
                       },
                       "Catch": [
                         {
@@ -1324,6 +1439,16 @@ Resources:
                           "Next": "WindowsAmd64Failure"
                         }
                       ],
+                      "Next": "WindowsAmd64Success"
+                    },
+                    "WindowsAmd64Success": {
+                      "Type": "Pass",
+                      "Parameters": {
+                        "platform": "windows-amd64",
+                        "status": "SUCCEEDED",
+                        "projectName": "${RWindowsAmd64Project}",
+                        "stageCount.$": "$.stage_plan.stage_count"
+                      },
                       "End": true
                     },
                     "WindowsAmd64Failure": {
