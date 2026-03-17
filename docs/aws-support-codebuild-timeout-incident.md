@@ -82,6 +82,26 @@ Returned:
 ]
 ```
 
+## Evidence: No Timeout-Related Service Quota Is Visible
+
+We also checked Service Quotas for CodeBuild in `us-east-1`:
+
+```bash
+aws service-quotas list-service-quotas \
+  --service-code codebuild \
+  --region us-east-1 \
+  --profile AdministratorAccess-807497180525 \
+  --query 'Quotas[?contains(QuotaName, `timeout`) || contains(QuotaName, `Timeout`) || contains(Description, `timeout`) || contains(Description, `Timeout`)]'
+```
+
+Returned:
+
+```json
+[]
+```
+
+There is no visible timeout-related Service Quota explaining the effective `45` minute runtime limit.
+
 ## Evidence: Step Functions Does Not Override Timeout
 
 The live state machine definition for `package-scanner-dev-r-scan-orchestrator` uses:
@@ -186,14 +206,66 @@ The same debug session also showed the service request ID:
 
 - `x-amzn-RequestId: eb9a59b0-57eb-4ee1-be50-599f5e9d7f22`
 
+## Evidence: Fresh Minimal Projects Also Reproduce the Problem
+
+To rule out drift or corruption in the original scanner projects, we created brand-new minimal `NO_SOURCE` CodeBuild projects with a trivial buildspec in two regions:
+
+- `timeout-probe-us-east-1-20260317T155940Z`
+- `timeout-probe-us-west-2-20260317T155940Z`
+
+Both projects were created with:
+
+- `timeoutInMinutes = 120`
+- `queuedTimeoutInMinutes = 480`
+- image: `aws/codebuild/standard:7.0`
+- compute type: `BUILD_GENERAL1_SMALL`
+
+### Fresh Project in `us-east-1`
+
+Project creation returned:
+
+- project name: `timeout-probe-us-east-1-20260317T155940Z`
+- `timeoutInMinutes = 120`
+- `queuedTimeoutInMinutes = 480`
+
+Started builds:
+
+1. Without override:
+   - build ID: `timeout-probe-us-east-1-20260317T155940Z:66777a80-a2ef-41aa-a79c-3d04aab7439a`
+   - returned `timeoutInMinutes = 45`
+2. With explicit `--timeout-in-minutes-override 120`:
+   - build ID: `timeout-probe-us-east-1-20260317T155940Z:c2b62179-b8d9-4c9f-a63e-4a898dd4c2fc`
+   - returned `timeoutInMinutes = 45`
+
+### Fresh Project in `us-west-2`
+
+Project creation returned:
+
+- project name: `timeout-probe-us-west-2-20260317T155940Z`
+- `timeoutInMinutes = 120`
+- `queuedTimeoutInMinutes = 480`
+
+Started builds:
+
+1. Without override:
+   - build ID: `timeout-probe-us-west-2-20260317T155940Z:416b2a18-227a-4cc9-8d1a-9fe7f9543eb3`
+   - returned `timeoutInMinutes = 45`
+2. With explicit `--timeout-in-minutes-override 120`:
+   - build ID: `timeout-probe-us-west-2-20260317T155940Z:c83036e5-3f94-48f8-a1db-c9a53fda62f7`
+   - returned `timeoutInMinutes = 45`
+
+All four probe builds were then stopped, and both temporary projects were deleted.
+
 ## Why This Appears To Be a Service-Side Problem
 
-All four of these are simultaneously true:
+All of these are simultaneously true:
 
 1. The deployed project objects report `timeoutInMinutes = 480`.
 2. The Step Functions state machine does not override timeout.
 3. A direct `StartBuild` without override returns `timeoutInMinutes = 45`.
 4. A direct `StartBuild` with `timeoutInMinutesOverride = 480` still returns `timeoutInMinutes = 45`.
+5. Brand-new minimal projects in `us-east-1` and `us-west-2` configured for `120` also return `timeoutInMinutes = 45`.
+6. No timeout-related Service Quota is visible for CodeBuild in `us-east-1`.
 
 Because the explicit `StartBuild` request body included the override and the service response still created a `45` minute build, this does not appear to be caused by local CLI construction, CloudFormation template content, or Step Functions orchestration.
 
@@ -208,11 +280,14 @@ Please investigate why CodeBuild in this account and region is creating builds w
 - the projects are configured at `480`
 - `StartBuild` can be observed receiving `timeoutInMinutesOverride = 480`
 
+We have now also confirmed the same behavior on brand-new minimal CodeBuild projects in both `us-east-1` and `us-west-2`, configured for `120`, with and without explicit `120` overrides.
+
 Please confirm whether:
 
 - there is a service-side constraint or hidden account-level override being applied
 - the projects are affected by a regional or account-specific issue
 - there is any backend state drift between the stored project definition and runtime build creation
+- there is an account-level backend policy affecting CodeBuild timeout enforcement across multiple regions
 
 ## Reference Documentation
 
