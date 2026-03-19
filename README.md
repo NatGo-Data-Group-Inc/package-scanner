@@ -1,6 +1,9 @@
 # package_scanner
 
-Redeployable AWS infrastructure for package scanning, starting with Python/Conda and designed for a multi-platform build matrix.
+Redeployable AWS infrastructure for package scanning across Python and R with
+platform-specific execution paths:
+- Python currently runs on CodeBuild.
+- R is migrating to ECS on EC2 for long-running materialization and scan work.
 
 Operator documentation:
 - `docs/handoff-runbook.md`
@@ -20,6 +23,7 @@ Project policies:
 ## Scope (current)
 
 - Python package scans from a Conda `environment.yml`.
+- R package scans from an `renv.lock`.
 - Platform-native scan runs:
   - linux/amd64
   - linux/arm64
@@ -27,6 +31,7 @@ Project policies:
 - Scanners:
   - `trivy` (SBOM scan)
   - `safety` (Python package vuln scan)
+  - `osv.dev` (R package vuln scan via CRAN/Bioconductor ecosystem matching)
   - `fortify` (optional command hook)
 - Governance artifacts generated per run:
   - approval candidate package list
@@ -59,17 +64,20 @@ Project policies:
 ## Why this design
 
 - Fully redeployable with CloudFormation.
-- Native platform parity without managing static EC2 builders.
+- Python stays on a simple CodeBuild path.
+- R uses ECS on EC2 because package materialization can exceed practical CodeBuild limits.
 - Traceability is retained while temporary deploy artifacts are removed.
 - Evidence paths cleanly separate requirements, model results, and environment packages.
 
 ## Project Layout
 
-- `deployment/cfn/python-scan-stack.yaml`: AWS infrastructure and scan logic.
+- `deployment/cfn/python-scan-stack.yaml`: Python scan infrastructure and the preserved CodeBuild-based path.
+- `deployment/cfn/ecs-scan-stack.yaml`: R ECS infrastructure and orchestration.
 - `api/openapi.yaml`: control-plane API contract for UI/backend integration.
 - `scripts/deploy-cfn.sh`: canonical deploy/update entrypoint.
+- `scripts/deploy-r-ecs-cfn.sh`: deploy/update entrypoint for the R ECS stack.
 - `scripts/start-python-scan.sh`: canonical scan start entrypoint.
-- `scripts/start-r-scan.sh`: canonical R scan start entrypoint. Starts the Step Functions orchestration for the three R platforms.
+- `scripts/start-r-scan.sh`: canonical R scan start entrypoint. Starts the Step Functions orchestration for the ECS R workflow.
 - `scripts/deploy-cfn.ps1`: PowerShell wrapper for `deploy-cfn.sh`.
 - `scripts/start-python-scan.ps1`: PowerShell wrapper for `start-python-scan.sh`.
 - `scripts/start-r-scan.ps1`: PowerShell wrapper for `start-r-scan.sh`.
@@ -79,19 +87,15 @@ Project policies:
 
 ## AWS Resources Created
 
-- S3 input bucket (optional, created if not supplied).
-- S3 evidence bucket (optional, created if not supplied).
-- S3 ephemeral bucket (optional, created if not supplied).
-- IAM Role for CodeBuild.
-- 6 CodeBuild projects:
-  - `${EnvironmentName}-python-scan-linux-amd64`
-  - `${EnvironmentName}-python-scan-linux-arm64`
-  - `${EnvironmentName}-python-scan-windows-amd64`
-  - `${EnvironmentName}-r-scan-linux-amd64`
-  - `${EnvironmentName}-r-scan-linux-arm64`
-  - `${EnvironmentName}-r-scan-windows-amd64`
-- 1 Step Functions state machine:
-  - `${EnvironmentName}-r-scan-orchestrator`
+- Shared S3 input/evidence/ephemeral buckets (optional, created if not supplied).
+- Python stack:
+  - CodeBuild projects for Python platform scans
+- R ECS stack:
+  - ECS clusters for Linux and Windows R workers
+  - ECR repositories for Linux and Windows R images
+  - Step Functions state machines for:
+    - all-platform R ECS scans
+    - Linux-only R ECS scans
 
 ## Quick Start
 
@@ -146,11 +150,39 @@ Pass them only when overriding to alternate buckets.
 - `s3://<evidence-bucket>/evidence/governance/python/<platform>/<timestamp>/...`
 - `s3://<evidence-bucket>/evidence/traceability/python/<platform>/<timestamp>/run-metadata.json`
 
-5. Start R all-platform scans:
+5. Deploy the R ECS stack:
+
+```bash
+./scripts/deploy-r-ecs-cfn.sh \
+  --stack-name cyber-scanner-dev-r-ecs \
+  --environment-name package-scanner-dev \
+  --region us-east-1 \
+  --profile <aws-profile> \
+  --expected-account-id <12-digit-account-id> \
+  --deployment-lock-token <env-lock-token> \
+  --existing-input-bucket-name <input-bucket> \
+  --existing-evidence-bucket-name <evidence-bucket> \
+  --existing-ephemeral-bucket-name <ephemeral-bucket> \
+  --s3-bucket <evidence-bucket>
+```
+
+6. Build and push the R ECS images:
+
+```bash
+./scripts/build-r-ecs-images.sh \
+  --stack-name cyber-scanner-dev-r-ecs \
+  --region us-east-1 \
+  --profile <aws-profile>
+```
+
+The Windows R image must be built from a Windows Docker host. See
+`docs/ecs-cutover-runbook.md`.
+
+7. Start R scans:
 
 ```bash
 ./scripts/start-r-scan.sh \
-  --stack-name package-scanner-dev \
+  --stack-name cyber-scanner-dev-r-ecs \
   --input-bucket <input-bucket> \
   --source-lock-file ./artifacts/renv.lock \
   --region us-east-1 \
@@ -161,10 +193,24 @@ Pass them only when overriding to alternate buckets.
   --fail-on-medium false \
   --remediate-unknown true \
   --fail-on-unknown false \
-  --r-stage-package-count 10
+  --platform-set all
 ```
 
-6. Review R evidence outputs:
+Use `--platform-set linux-only` to validate Linux without waiting on the Windows image:
+
+```bash
+./scripts/start-r-scan.sh \
+  --stack-name cyber-scanner-dev-r-ecs \
+  --input-bucket <input-bucket> \
+  --source-lock-file ./artifacts/renv.test.lock \
+  --region us-east-1 \
+  --profile <aws-profile> \
+  --expected-account-id <12-digit-account-id> \
+  --deployment-lock-token <env-lock-token> \
+  --platform-set linux-only
+```
+
+8. Review R evidence outputs:
 - `s3://<evidence-bucket>/evidence/requirements/r/<platform>/<timestamp>/...`
 - `s3://<evidence-bucket>/evidence/model-results/r/<platform>/<timestamp>/...`
 - `s3://<evidence-bucket>/evidence/env-artifacts/r/<platform>/<timestamp>/...`
@@ -213,30 +259,11 @@ Use scan-time overrides:
   --fortify-command "sourceanalyzer ..."
 ```
 
-## R Scan Start
+## R Execution Model
 
-1. Upload R lockfile, or let the start script upload the local blueprint for you:
-
-```powershell
-aws s3 cp .\renv.lock s3://<input-bucket>/inputs/r/renv.lock --region us-east-1 --profile <aws-profile>
-```
-
-2. Start R all-platform scans:
-
-```bash
-./scripts/start-r-scan.sh \
-  --stack-name package-scanner-dev \
-  --input-bucket <input-bucket> \
-  --source-lock-file ./artifacts/renv.lock \
-  --region us-east-1 \
-  --profile <aws-profile> \
-  --expected-account-id <12-digit-account-id> \
-  --deployment-lock-token <env-lock-token>
-```
-
-The R jobs now materialize the environment on each platform before report generation:
+The R ECS workflow materializes the environment on each platform before report generation:
 - install the requested R runtime from `renv.lock`
-- restore the environment in staged batches through Step Functions and CodeBuild
+- restore the environment inside long-lived ECS tasks
 - emit `installed-packages.csv`, `session-info.txt`, and restore logs
 - publish a platform cache bundle and checksum for enclave transfer
 
