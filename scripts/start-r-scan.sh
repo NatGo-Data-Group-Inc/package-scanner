@@ -19,6 +19,7 @@ FAIL_ON_MEDIUM="false"
 REMEDIATE_UNKNOWN="true"
 FAIL_ON_UNKNOWN="false"
 R_STAGE_PACKAGE_COUNT="25"
+PLATFORM_SET="all"
 
 usage() {
   cat <<'EOF'
@@ -45,6 +46,7 @@ Optional:
   --remediate-unknown <true|false>        (default: true)
   --fail-on-unknown <true|false>          (default: false)
   --r-stage-package-count <count>         (default: 25)
+  --platform-set <all|linux-only>         (default: all)
 EOF
 }
 
@@ -68,6 +70,7 @@ while [[ $# -gt 0 ]]; do
     --remediate-unknown) REMEDIATE_UNKNOWN="$2"; shift 2 ;;
     --fail-on-unknown) FAIL_ON_UNKNOWN="$2"; shift 2 ;;
     --r-stage-package-count) R_STAGE_PACKAGE_COUNT="$2"; shift 2 ;;
+    --platform-set) PLATFORM_SET="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
   esac
@@ -88,6 +91,10 @@ if [[ "${ALLOW_DEFAULT_PROFILE}" != "true" && -z "${PROFILE}" ]]; then
 fi
 if [[ -z "${DEPLOYMENT_LOCK_TOKEN}" ]]; then
   echo "Guardrail: --deployment-lock-token is required." >&2
+  exit 1
+fi
+if [[ "${PLATFORM_SET}" != "all" && "${PLATFORM_SET}" != "linux-only" ]]; then
+  echo "--platform-set must be one of: all, linux-only" >&2
   exit 1
 fi
 
@@ -157,9 +164,13 @@ start_build() {
   :
 }
 
-STATE_MACHINE_ARN="$(stack_output RScanOrchestrationStateMachineArn)"
+STATE_MACHINE_OUTPUT_KEY="RScanOrchestrationStateMachineArn"
+if [[ "${PLATFORM_SET}" == "linux-only" ]]; then
+  STATE_MACHINE_OUTPUT_KEY="RLinuxScanOrchestrationStateMachineArn"
+fi
+STATE_MACHINE_ARN="$(stack_output "${STATE_MACHINE_OUTPUT_KEY}")"
 if [[ -z "${STATE_MACHINE_ARN}" || "${STATE_MACHINE_ARN}" == "None" ]]; then
-  echo "Missing stack output: RScanOrchestrationStateMachineArn" >&2
+  echo "Missing stack output: ${STATE_MACHINE_OUTPUT_KEY}" >&2
   exit 1
 fi
 
@@ -204,6 +215,7 @@ EXECUTION_ARN="$(
 
 cat <<EOF
 Started R scan orchestration
+PlatformSet:  ${PLATFORM_SET}
 ExecutionName: ${SCAN_EXECUTION_ID}
 ExecutionArn:  ${EXECUTION_ARN}
 TimestampUtc:  ${SCAN_TIMESTAMP}

@@ -1,0 +1,1057 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  ECS on EC2 infrastructure for multi-platform package scanning. This stack
+  provisions three ECS-backed worker pools (linux/amd64, linux/arm64,
+  windows/amd64), S3 evidence buckets, and the R scan orchestration flow.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: pkgscan-dev
+
+  ExistingInputBucketName:
+    Type: String
+    Default: ''
+
+  ExistingEvidenceBucketName:
+    Type: String
+    Default: ''
+
+  ExistingEphemeralBucketName:
+    Type: String
+    Default: ''
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+
+  LinuxSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+
+  WindowsSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+
+  LinuxAmd64InstanceType:
+    Type: String
+    Default: m7i.large
+
+  LinuxArm64InstanceType:
+    Type: String
+    Default: m7g.large
+
+  WindowsAmd64InstanceType:
+    Type: String
+    Default: m7i.xlarge
+
+  LinuxRootVolumeSize:
+    Type: Number
+    Default: 250
+    MinValue: 80
+    MaxValue: 1000
+
+  WindowsRootVolumeSize:
+    Type: Number
+    Default: 300
+    MinValue: 100
+    MaxValue: 1000
+
+Conditions:
+  CreateInputBucket: !Equals [!Ref ExistingInputBucketName, '']
+  CreateEvidenceBucket: !Equals [!Ref ExistingEvidenceBucketName, '']
+  CreateEphemeralBucket: !Equals [!Ref ExistingEphemeralBucketName, '']
+
+Resources:
+  InputBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateInputBucket
+    Properties:
+      BucketName: !Sub '${EnvironmentName}-scan-input-${AWS::AccountId}-${AWS::Region}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+
+  EvidenceBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateEvidenceBucket
+    Properties:
+      BucketName: !Sub '${EnvironmentName}-scan-evidence-${AWS::AccountId}-${AWS::Region}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+
+  EphemeralBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateEphemeralBucket
+    Properties:
+      BucketName: !Sub '${EnvironmentName}-scan-ephemeral-${AWS::AccountId}-${AWS::Region}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireDeployArtifacts
+            Status: Enabled
+            Prefix: deploy/tmp/
+            ExpirationInDays: 3
+
+  RWorkerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub '${EnvironmentName} ECS package scanner workers'
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  ECSInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-ecs-instance-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  ECSInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub '${EnvironmentName}-ecs-instance-profile'
+      Roles:
+        - !Ref ECSInstanceRole
+
+  RTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-r-task-execution-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  RTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-r-task-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: BucketList
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource:
+                  - !If [CreateInputBucket, !GetAtt InputBucket.Arn, !Sub 'arn:aws:s3:::${ExistingInputBucketName}']
+                  - !If [CreateEvidenceBucket, !GetAtt EvidenceBucket.Arn, !Sub 'arn:aws:s3:::${ExistingEvidenceBucketName}']
+                  - !If [CreateEphemeralBucket, !GetAtt EphemeralBucket.Arn, !Sub 'arn:aws:s3:::${ExistingEphemeralBucketName}']
+        - PolicyName: BucketObjects
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !If [CreateInputBucket, !Sub '${InputBucket.Arn}/*', !Sub 'arn:aws:s3:::${ExistingInputBucketName}/*']
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource:
+                  - !If [CreateEvidenceBucket, !Sub '${EvidenceBucket.Arn}/*', !Sub 'arn:aws:s3:::${ExistingEvidenceBucketName}/*']
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:DeleteObject
+                Resource:
+                  - !If [CreateEphemeralBucket, !Sub '${EphemeralBucket.Arn}/*', !Sub 'arn:aws:s3:::${ExistingEphemeralBucketName}/*']
+
+  RLinuxCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub '${EnvironmentName}-r-linux'
+
+  RWindowsCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub '${EnvironmentName}-r-windows'
+
+  RLinuxAmd64LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub '${EnvironmentName}-r-linux-amd64'
+      LaunchTemplateData:
+        IamInstanceProfile:
+          Arn: !GetAtt ECSInstanceProfile.Arn
+        ImageId: !Sub '{{resolve:ssm:/aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_id}}'
+        InstanceType: !Ref LinuxAmd64InstanceType
+        SecurityGroupIds:
+          - !Ref RWorkerSecurityGroup
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              VolumeSize: !Ref LinuxRootVolumeSize
+              VolumeType: gp3
+              DeleteOnTermination: true
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            echo "ECS_CLUSTER=${RLinuxCluster}" >> /etc/ecs/ecs.config
+            echo "ECS_ENABLE_TASK_IAM_ROLE=true" >> /etc/ecs/ecs.config
+            echo "ECS_ENABLE_TASK_IAM_ROLE_NETWORK_HOST=true" >> /etc/ecs/ecs.config
+            mkdir -p /var/lib/package-scanner
+
+  RLinuxArm64LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub '${EnvironmentName}-r-linux-arm64'
+      LaunchTemplateData:
+        IamInstanceProfile:
+          Arn: !GetAtt ECSInstanceProfile.Arn
+        ImageId: !Sub '{{resolve:ssm:/aws/service/ecs/optimized-ami/amazon-linux-2023/arm64/recommended/image_id}}'
+        InstanceType: !Ref LinuxArm64InstanceType
+        SecurityGroupIds:
+          - !Ref RWorkerSecurityGroup
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              VolumeSize: !Ref LinuxRootVolumeSize
+              VolumeType: gp3
+              DeleteOnTermination: true
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            echo "ECS_CLUSTER=${RLinuxCluster}" >> /etc/ecs/ecs.config
+            echo "ECS_ENABLE_TASK_IAM_ROLE=true" >> /etc/ecs/ecs.config
+            echo "ECS_ENABLE_TASK_IAM_ROLE_NETWORK_HOST=true" >> /etc/ecs/ecs.config
+            mkdir -p /var/lib/package-scanner
+
+  RWindowsLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub '${EnvironmentName}-r-windows-amd64'
+      LaunchTemplateData:
+        IamInstanceProfile:
+          Arn: !GetAtt ECSInstanceProfile.Arn
+        ImageId: !Sub '{{resolve:ssm:/aws/service/ami-windows-latest/Windows_Server-2022-English-Full-ECS_Optimized/image_id}}'
+        InstanceType: !Ref WindowsAmd64InstanceType
+        SecurityGroupIds:
+          - !Ref RWorkerSecurityGroup
+        BlockDeviceMappings:
+          - DeviceName: /dev/sda1
+            Ebs:
+              VolumeSize: !Ref WindowsRootVolumeSize
+              VolumeType: gp3
+              DeleteOnTermination: true
+        UserData:
+          Fn::Base64: !Sub |
+            <powershell>
+            Import-Module ECSTools
+            Initialize-ECSAgent -Cluster '${RWindowsCluster}' -EnableTaskIAMRole -LoggingDrivers '["json-file","awslogs"]'
+            New-Item -ItemType Directory -Force -Path C:\package-scanner-data | Out-Null
+            </powershell>
+
+  RLinuxAmd64ASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub '${EnvironmentName}-r-linux-amd64'
+      MinSize: '1'
+      MaxSize: '1'
+      DesiredCapacity: '1'
+      VPCZoneIdentifier: !Ref LinuxSubnetIds
+      LaunchTemplate:
+        LaunchTemplateId: !Ref RLinuxAmd64LaunchTemplate
+        Version: !GetAtt RLinuxAmd64LaunchTemplate.LatestVersionNumber
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-r-linux-amd64'
+          PropagateAtLaunch: true
+
+  RLinuxArm64ASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub '${EnvironmentName}-r-linux-arm64'
+      MinSize: '1'
+      MaxSize: '1'
+      DesiredCapacity: '1'
+      VPCZoneIdentifier: !Ref LinuxSubnetIds
+      LaunchTemplate:
+        LaunchTemplateId: !Ref RLinuxArm64LaunchTemplate
+        Version: !GetAtt RLinuxArm64LaunchTemplate.LatestVersionNumber
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-r-linux-arm64'
+          PropagateAtLaunch: true
+
+  RWindowsASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub '${EnvironmentName}-r-windows-amd64'
+      MinSize: '1'
+      MaxSize: '1'
+      DesiredCapacity: '1'
+      VPCZoneIdentifier: !Ref WindowsSubnetIds
+      LaunchTemplate:
+        LaunchTemplateId: !Ref RWindowsLaunchTemplate
+        Version: !GetAtt RWindowsLaunchTemplate.LatestVersionNumber
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-r-windows-amd64'
+          PropagateAtLaunch: true
+
+  RLinuxRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub '${EnvironmentName}/r-scan-linux'
+      ImageScanningConfiguration:
+        ScanOnPush: true
+
+  RWindowsRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub '${EnvironmentName}/r-scan-windows'
+      ImageScanningConfiguration:
+        ScanOnPush: true
+
+  RLinuxAmd64LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/${EnvironmentName}/r/linux-amd64'
+      RetentionInDays: 30
+
+  RLinuxArm64LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/${EnvironmentName}/r/linux-arm64'
+      RetentionInDays: 30
+
+  RWindowsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/${EnvironmentName}/r/windows-amd64'
+      RetentionInDays: 30
+
+  RLinuxAmd64TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${EnvironmentName}-r-linux-amd64'
+      Cpu: '4096'
+      Memory: '8192'
+      NetworkMode: bridge
+      RequiresCompatibilities: [EC2]
+      ExecutionRoleArn: !GetAtt RTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt RTaskRole.Arn
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      ContainerDefinitions:
+        - Name: scanner
+          Image: !Sub '${RLinuxRepository.RepositoryUri}:latest'
+          Essential: true
+          Command: ['linux-amd64']
+          Environment:
+            - Name: SCRIPT_ROOT
+              Value: /opt/package-scanner/scripts
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref RLinuxAmd64LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: scanner
+
+  RLinuxArm64TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${EnvironmentName}-r-linux-arm64'
+      Cpu: '4096'
+      Memory: '8192'
+      NetworkMode: bridge
+      RequiresCompatibilities: [EC2]
+      ExecutionRoleArn: !GetAtt RTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt RTaskRole.Arn
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      ContainerDefinitions:
+        - Name: scanner
+          Image: !Sub '${RLinuxRepository.RepositoryUri}:latest'
+          Essential: true
+          Command: ['linux-arm64']
+          Environment:
+            - Name: SCRIPT_ROOT
+              Value: /opt/package-scanner/scripts
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref RLinuxArm64LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: scanner
+
+  RWindowsTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${EnvironmentName}-r-windows-amd64'
+      Cpu: '4096'
+      Memory: '12288'
+      NetworkMode: bridge
+      RequiresCompatibilities: [EC2]
+      ExecutionRoleArn: !GetAtt RTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt RTaskRole.Arn
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: WINDOWS_SERVER_2022_FULL
+      ContainerDefinitions:
+        - Name: scanner
+          Image: !Sub '${RWindowsRepository.RepositoryUri}:latest'
+          Essential: true
+          Command:
+            - -Platform
+            - windows-amd64
+          EntryPoint:
+            - powershell
+            - -NoProfile
+            - -ExecutionPolicy
+            - Bypass
+            - -File
+            - C:\package-scanner\scripts\run-r-ecs-task.ps1
+          Environment:
+            - Name: SCRIPT_ROOT
+              Value: C:\package-scanner\scripts
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref RWindowsLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: scanner
+
+  RScanSummaryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-r-ecs-scan-summary-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: Logs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents]
+                Resource: '*'
+        - PolicyName: EvidenceAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [s3:ListBucket]
+                Resource:
+                  - !If [CreateEvidenceBucket, !GetAtt EvidenceBucket.Arn, !Sub 'arn:aws:s3:::${ExistingEvidenceBucketName}']
+              - Effect: Allow
+                Action: [s3:GetObject, s3:PutObject]
+                Resource:
+                  - !If [CreateEvidenceBucket, !Sub '${EvidenceBucket.Arn}/*', !Sub 'arn:aws:s3:::${ExistingEvidenceBucketName}/*']
+        - PolicyName: EventBridge
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [events:PutEvents]
+                Resource: '*'
+
+  RScanSummaryFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${EnvironmentName}-r-ecs-scan-summary'
+      Runtime: python3.12
+      Handler: index.handler
+      Timeout: 60
+      Role: !GetAtt RScanSummaryRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          from botocore.exceptions import ClientError
+
+          s3 = boto3.client("s3")
+          events = boto3.client("events")
+
+          def head_exists(bucket, key):
+              try:
+                  s3.head_object(Bucket=bucket, Key=key)
+                  return True
+              except ClientError as exc:
+                  if exc.response["Error"]["Code"] in {"404", "NoSuchKey", "NotFound"}:
+                      return False
+                  raise
+
+          def list_keys(bucket, prefix):
+              paginator = s3.get_paginator("list_objects_v2")
+              keys = []
+              for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+                  keys.extend(obj["Key"] for obj in page.get("Contents", []))
+              return keys
+
+          def handler(event, _context):
+              bucket = event["evidence_bucket"]
+              prefix = event.get("evidence_prefix", "evidence").rstrip("/")
+              timestamp = event["scan_timestamp"]
+              execution_id = event["scan_execution_id"]
+              platforms = []
+              overall = "SUCCEEDED"
+              for result in event["results"]:
+                  platform = result["platform"]
+                  status = result["status"]
+                  platform_summary = {
+                      "platform": platform,
+                      "status": status,
+                      "task_arn": result.get("taskArn"),
+                      "cluster_arn": result.get("clusterArn"),
+                      "validated": False,
+                  }
+                  if status == "SUCCEEDED":
+                      required = [
+                          f"{prefix}/requirements/r/{platform}/{timestamp}/renv.lock",
+                          f"{prefix}/requirements/r/{platform}/{timestamp}/installed-packages.csv",
+                          f"{prefix}/traceability/r/{platform}/{timestamp}/materialization-summary.json",
+                          f"{prefix}/traceability/r/{platform}/{timestamp}/run-metadata.json",
+                      ]
+                      missing = [key for key in required if not head_exists(bucket, key)]
+                      bundle_prefix = f"{prefix}/packages/offline/r/{platform}/{timestamp}/"
+                      bundle_keys = list_keys(bucket, bundle_prefix)
+                      tarballs = [key for key in bundle_keys if key.endswith(".tar.gz")]
+                      checksums = [key for key in bundle_keys if key.endswith(".tar.gz.sha256")]
+                      if not tarballs:
+                          missing.append(f"{bundle_prefix}*.tar.gz")
+                      if not checksums:
+                          missing.append(f"{bundle_prefix}*.tar.gz.sha256")
+                      platform_summary["bundle_keys"] = bundle_keys
+                      platform_summary["missing"] = missing
+                      platform_summary["validated"] = not missing
+                      if missing:
+                          overall = "FAILED"
+                  else:
+                      overall = "FAILED"
+                      platform_summary["error"] = result.get("error")
+                      platform_summary["cause"] = result.get("cause")
+                  platforms.append(platform_summary)
+              summary = {
+                  "scan_execution_id": execution_id,
+                  "scan_timestamp": timestamp,
+                  "overall_status": overall,
+                  "platforms": platforms,
+              }
+              summary_key = f"{prefix}/orchestration/r/{execution_id}/orchestration-summary.json"
+              s3.put_object(Bucket=bucket, Key=summary_key, Body=json.dumps(summary, indent=2).encode("utf-8"), ContentType="application/json")
+              summary["summary_key"] = summary_key
+              events.put_events(Entries=[{"Source": "package-scanner.r", "DetailType": f"R Materialization Orchestration {overall}", "Detail": json.dumps(summary)}])
+              return summary
+
+  RScanOrchestrationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-r-ecs-scan-orchestrator-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ECSExecution
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecs:RunTask
+                  - ecs:StopTask
+                  - ecs:DescribeTasks
+                Resource:
+                  - !Ref RLinuxAmd64TaskDefinition
+                  - !Ref RLinuxArm64TaskDefinition
+                  - !Ref RWindowsTaskDefinition
+              - Effect: Allow
+                Action: ecs:RunTask
+                Resource:
+                  - !GetAtt RLinuxCluster.Arn
+                  - !GetAtt RWindowsCluster.Arn
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  - !GetAtt RTaskExecutionRole.Arn
+                  - !GetAtt RTaskRole.Arn
+              - Effect: Allow
+                Action:
+                  - events:PutTargets
+                  - events:PutRule
+                  - events:DescribeRule
+                Resource: !Sub 'arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/StepFunctionsGetEventsForECSTaskRule'
+        - PolicyName: InvokeSummary
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt RScanSummaryFunction.Arn
+
+  RScanOrchestrationStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub '${EnvironmentName}-r-ecs-scan-orchestrator'
+      RoleArn: !GetAtt RScanOrchestrationRole.Arn
+      DefinitionString: !Sub |
+        {
+          "StartAt": "RunTasks",
+          "States": {
+            "RunTasks": {
+              "Type": "Parallel",
+              "Branches": [
+                {
+                  "StartAt": "RunLinuxAmd64",
+                  "States": {
+                    "RunLinuxAmd64": {
+                      "Type": "Task",
+                      "Resource": "arn:aws:states:::ecs:runTask.sync",
+                      "Parameters": {
+                        "Cluster": "${RLinuxCluster.Arn}",
+                        "TaskDefinition": "${RLinuxAmd64TaskDefinition}",
+                        "Overrides": {
+                          "ContainerOverrides": [
+                            {
+                              "Name": "scanner",
+                              "Environment": [
+                                { "Name": "INPUT_BUCKET", "Value.$": "$.input_bucket" },
+                                { "Name": "INPUT_OBJECT_KEY", "Value.$": "$.input_object_key" },
+                                { "Name": "EVIDENCE_BUCKET", "Value.$": "$.evidence_bucket" },
+                                { "Name": "EVIDENCE_PREFIX", "Value.$": "$.evidence_prefix" },
+                                { "Name": "EPHEMERAL_BUCKET", "Value.$": "$.ephemeral_bucket" },
+                                { "Name": "EPHEMERAL_PREFIX", "Value.$": "$.ephemeral_prefix" },
+                                { "Name": "REMEDIATE_MEDIUM", "Value.$": "$.remediate_medium" },
+                                { "Name": "FAIL_ON_MEDIUM", "Value.$": "$.fail_on_medium" },
+                                { "Name": "REMEDIATE_UNKNOWN", "Value.$": "$.remediate_unknown" },
+                                { "Name": "FAIL_ON_UNKNOWN", "Value.$": "$.fail_on_unknown" },
+                                { "Name": "SCAN_TIMESTAMP", "Value.$": "$.scan_timestamp" },
+                                { "Name": "SCAN_EXECUTION_ID", "Value.$": "$.scan_execution_id" }
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "ResultSelector": {
+                        "platform": "linux-amd64",
+                        "status": "SUCCEEDED",
+                        "taskArn.$": "$.Tasks[0].TaskArn",
+                        "clusterArn": "${RLinuxCluster.Arn}"
+                      },
+                      "Catch": [
+                        {
+                          "ErrorEquals": ["States.ALL"],
+                          "ResultPath": "$.error",
+                          "Next": "LinuxAmd64Failure"
+                        }
+                      ],
+                      "End": true
+                    },
+                    "LinuxAmd64Failure": {
+                      "Type": "Pass",
+                      "Parameters": {
+                        "platform": "linux-amd64",
+                        "status": "FAILED",
+                        "error.$": "$.error.Error",
+                        "cause.$": "$.error.Cause"
+                      },
+                      "End": true
+                    }
+                  }
+                },
+                {
+                  "StartAt": "RunLinuxArm64",
+                  "States": {
+                    "RunLinuxArm64": {
+                      "Type": "Task",
+                      "Resource": "arn:aws:states:::ecs:runTask.sync",
+                      "Parameters": {
+                        "Cluster": "${RLinuxCluster.Arn}",
+                        "TaskDefinition": "${RLinuxArm64TaskDefinition}",
+                        "Overrides": {
+                          "ContainerOverrides": [
+                            {
+                              "Name": "scanner",
+                              "Environment": [
+                                { "Name": "INPUT_BUCKET", "Value.$": "$.input_bucket" },
+                                { "Name": "INPUT_OBJECT_KEY", "Value.$": "$.input_object_key" },
+                                { "Name": "EVIDENCE_BUCKET", "Value.$": "$.evidence_bucket" },
+                                { "Name": "EVIDENCE_PREFIX", "Value.$": "$.evidence_prefix" },
+                                { "Name": "EPHEMERAL_BUCKET", "Value.$": "$.ephemeral_bucket" },
+                                { "Name": "EPHEMERAL_PREFIX", "Value.$": "$.ephemeral_prefix" },
+                                { "Name": "REMEDIATE_MEDIUM", "Value.$": "$.remediate_medium" },
+                                { "Name": "FAIL_ON_MEDIUM", "Value.$": "$.fail_on_medium" },
+                                { "Name": "REMEDIATE_UNKNOWN", "Value.$": "$.remediate_unknown" },
+                                { "Name": "FAIL_ON_UNKNOWN", "Value.$": "$.fail_on_unknown" },
+                                { "Name": "SCAN_TIMESTAMP", "Value.$": "$.scan_timestamp" },
+                                { "Name": "SCAN_EXECUTION_ID", "Value.$": "$.scan_execution_id" }
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "ResultSelector": {
+                        "platform": "linux-arm64",
+                        "status": "SUCCEEDED",
+                        "taskArn.$": "$.Tasks[0].TaskArn",
+                        "clusterArn": "${RLinuxCluster.Arn}"
+                      },
+                      "Catch": [
+                        {
+                          "ErrorEquals": ["States.ALL"],
+                          "ResultPath": "$.error",
+                          "Next": "LinuxArm64Failure"
+                        }
+                      ],
+                      "End": true
+                    },
+                    "LinuxArm64Failure": {
+                      "Type": "Pass",
+                      "Parameters": {
+                        "platform": "linux-arm64",
+                        "status": "FAILED",
+                        "error.$": "$.error.Error",
+                        "cause.$": "$.error.Cause"
+                      },
+                      "End": true
+                    }
+                  }
+                },
+                {
+                  "StartAt": "RunWindowsAmd64",
+                  "States": {
+                    "RunWindowsAmd64": {
+                      "Type": "Task",
+                      "Resource": "arn:aws:states:::ecs:runTask.sync",
+                      "Parameters": {
+                        "Cluster": "${RWindowsCluster.Arn}",
+                        "TaskDefinition": "${RWindowsTaskDefinition}",
+                        "Overrides": {
+                          "ContainerOverrides": [
+                            {
+                              "Name": "scanner",
+                              "Environment": [
+                                { "Name": "INPUT_BUCKET", "Value.$": "$.input_bucket" },
+                                { "Name": "INPUT_OBJECT_KEY", "Value.$": "$.input_object_key" },
+                                { "Name": "EVIDENCE_BUCKET", "Value.$": "$.evidence_bucket" },
+                                { "Name": "EVIDENCE_PREFIX", "Value.$": "$.evidence_prefix" },
+                                { "Name": "EPHEMERAL_BUCKET", "Value.$": "$.ephemeral_bucket" },
+                                { "Name": "EPHEMERAL_PREFIX", "Value.$": "$.ephemeral_prefix" },
+                                { "Name": "REMEDIATE_MEDIUM", "Value.$": "$.remediate_medium" },
+                                { "Name": "FAIL_ON_MEDIUM", "Value.$": "$.fail_on_medium" },
+                                { "Name": "REMEDIATE_UNKNOWN", "Value.$": "$.remediate_unknown" },
+                                { "Name": "FAIL_ON_UNKNOWN", "Value.$": "$.fail_on_unknown" },
+                                { "Name": "SCAN_TIMESTAMP", "Value.$": "$.scan_timestamp" },
+                                { "Name": "SCAN_EXECUTION_ID", "Value.$": "$.scan_execution_id" }
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "ResultSelector": {
+                        "platform": "windows-amd64",
+                        "status": "SUCCEEDED",
+                        "taskArn.$": "$.Tasks[0].TaskArn",
+                        "clusterArn": "${RWindowsCluster.Arn}"
+                      },
+                      "Catch": [
+                        {
+                          "ErrorEquals": ["States.ALL"],
+                          "ResultPath": "$.error",
+                          "Next": "WindowsFailure"
+                        }
+                      ],
+                      "End": true
+                    },
+                    "WindowsFailure": {
+                      "Type": "Pass",
+                      "Parameters": {
+                        "platform": "windows-amd64",
+                        "status": "FAILED",
+                        "error.$": "$.error.Error",
+                        "cause.$": "$.error.Cause"
+                      },
+                      "End": true
+                    }
+                  }
+                }
+              ],
+              "ResultPath": "$.results",
+              "Next": "ValidateArtifacts"
+            },
+            "ValidateArtifacts": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "OutputPath": "$.Payload",
+              "Parameters": {
+                "FunctionName": "${RScanSummaryFunction.Arn}",
+                "Payload": {
+                  "scan_execution_id.$": "$.scan_execution_id",
+                  "scan_timestamp.$": "$.scan_timestamp",
+                  "evidence_bucket.$": "$.evidence_bucket",
+                  "evidence_prefix.$": "$.evidence_prefix",
+                  "results.$": "$.results"
+                }
+              },
+              "Next": "ValidationResult"
+            },
+            "ValidationResult": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.overall_status",
+                  "StringEquals": "SUCCEEDED",
+                  "Next": "Done"
+                }
+              ],
+              "Default": "ValidationFailed"
+            },
+            "Done": { "Type": "Succeed" },
+            "ValidationFailed": {
+              "Type": "Fail",
+              "Error": "RScanValidationFailed",
+              "Cause": "One or more platform tasks failed or required artifacts were missing."
+            }
+          }
+        }
+
+  RLinuxScanOrchestrationStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub '${EnvironmentName}-r-ecs-linux-scan-orchestrator'
+      RoleArn: !GetAtt RScanOrchestrationRole.Arn
+      DefinitionString: !Sub |
+        {
+          "StartAt": "RunTasks",
+          "States": {
+            "RunTasks": {
+              "Type": "Parallel",
+              "Branches": [
+                {
+                  "StartAt": "RunLinuxAmd64",
+                  "States": {
+                    "RunLinuxAmd64": {
+                      "Type": "Task",
+                      "Resource": "arn:aws:states:::ecs:runTask.sync",
+                      "Parameters": {
+                        "Cluster": "${RLinuxCluster.Arn}",
+                        "TaskDefinition": "${RLinuxAmd64TaskDefinition}",
+                        "Overrides": {
+                          "ContainerOverrides": [
+                            {
+                              "Name": "scanner",
+                              "Environment": [
+                                { "Name": "INPUT_BUCKET", "Value.$": "$.input_bucket" },
+                                { "Name": "INPUT_OBJECT_KEY", "Value.$": "$.input_object_key" },
+                                { "Name": "EVIDENCE_BUCKET", "Value.$": "$.evidence_bucket" },
+                                { "Name": "EVIDENCE_PREFIX", "Value.$": "$.evidence_prefix" },
+                                { "Name": "EPHEMERAL_BUCKET", "Value.$": "$.ephemeral_bucket" },
+                                { "Name": "EPHEMERAL_PREFIX", "Value.$": "$.ephemeral_prefix" },
+                                { "Name": "REMEDIATE_MEDIUM", "Value.$": "$.remediate_medium" },
+                                { "Name": "FAIL_ON_MEDIUM", "Value.$": "$.fail_on_medium" },
+                                { "Name": "REMEDIATE_UNKNOWN", "Value.$": "$.remediate_unknown" },
+                                { "Name": "FAIL_ON_UNKNOWN", "Value.$": "$.fail_on_unknown" },
+                                { "Name": "SCAN_TIMESTAMP", "Value.$": "$.scan_timestamp" },
+                                { "Name": "SCAN_EXECUTION_ID", "Value.$": "$.scan_execution_id" }
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "ResultSelector": {
+                        "platform": "linux-amd64",
+                        "status": "SUCCEEDED",
+                        "taskArn.$": "$.Tasks[0].TaskArn",
+                        "clusterArn": "${RLinuxCluster.Arn}"
+                      },
+                      "Catch": [
+                        {
+                          "ErrorEquals": ["States.ALL"],
+                          "ResultPath": "$.error",
+                          "Next": "LinuxAmd64Failure"
+                        }
+                      ],
+                      "End": true
+                    },
+                    "LinuxAmd64Failure": {
+                      "Type": "Pass",
+                      "Parameters": {
+                        "platform": "linux-amd64",
+                        "status": "FAILED",
+                        "error.$": "$.error.Error",
+                        "cause.$": "$.error.Cause"
+                      },
+                      "End": true
+                    }
+                  }
+                },
+                {
+                  "StartAt": "RunLinuxArm64",
+                  "States": {
+                    "RunLinuxArm64": {
+                      "Type": "Task",
+                      "Resource": "arn:aws:states:::ecs:runTask.sync",
+                      "Parameters": {
+                        "Cluster": "${RLinuxCluster.Arn}",
+                        "TaskDefinition": "${RLinuxArm64TaskDefinition}",
+                        "Overrides": {
+                          "ContainerOverrides": [
+                            {
+                              "Name": "scanner",
+                              "Environment": [
+                                { "Name": "INPUT_BUCKET", "Value.$": "$.input_bucket" },
+                                { "Name": "INPUT_OBJECT_KEY", "Value.$": "$.input_object_key" },
+                                { "Name": "EVIDENCE_BUCKET", "Value.$": "$.evidence_bucket" },
+                                { "Name": "EVIDENCE_PREFIX", "Value.$": "$.evidence_prefix" },
+                                { "Name": "EPHEMERAL_BUCKET", "Value.$": "$.ephemeral_bucket" },
+                                { "Name": "EPHEMERAL_PREFIX", "Value.$": "$.ephemeral_prefix" },
+                                { "Name": "REMEDIATE_MEDIUM", "Value.$": "$.remediate_medium" },
+                                { "Name": "FAIL_ON_MEDIUM", "Value.$": "$.fail_on_medium" },
+                                { "Name": "REMEDIATE_UNKNOWN", "Value.$": "$.remediate_unknown" },
+                                { "Name": "FAIL_ON_UNKNOWN", "Value.$": "$.fail_on_unknown" },
+                                { "Name": "SCAN_TIMESTAMP", "Value.$": "$.scan_timestamp" },
+                                { "Name": "SCAN_EXECUTION_ID", "Value.$": "$.scan_execution_id" }
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "ResultSelector": {
+                        "platform": "linux-arm64",
+                        "status": "SUCCEEDED",
+                        "taskArn.$": "$.Tasks[0].TaskArn",
+                        "clusterArn": "${RLinuxCluster.Arn}"
+                      },
+                      "Catch": [
+                        {
+                          "ErrorEquals": ["States.ALL"],
+                          "ResultPath": "$.error",
+                          "Next": "LinuxArm64Failure"
+                        }
+                      ],
+                      "End": true
+                    },
+                    "LinuxArm64Failure": {
+                      "Type": "Pass",
+                      "Parameters": {
+                        "platform": "linux-arm64",
+                        "status": "FAILED",
+                        "error.$": "$.error.Error",
+                        "cause.$": "$.error.Cause"
+                      },
+                      "End": true
+                    }
+                  }
+                }
+              ],
+              "ResultPath": "$.results",
+              "Next": "ValidateArtifacts"
+            },
+            "ValidateArtifacts": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "OutputPath": "$.Payload",
+              "Parameters": {
+                "FunctionName": "${RScanSummaryFunction.Arn}",
+                "Payload": {
+                  "scan_execution_id.$": "$.scan_execution_id",
+                  "scan_timestamp.$": "$.scan_timestamp",
+                  "evidence_bucket.$": "$.evidence_bucket",
+                  "evidence_prefix.$": "$.evidence_prefix",
+                  "results.$": "$.results"
+                }
+              },
+              "Next": "ValidationResult"
+            },
+            "ValidationResult": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.overall_status",
+                  "StringEquals": "SUCCEEDED",
+                  "Next": "Done"
+                }
+              ],
+              "Default": "ValidationFailed"
+            },
+            "Done": { "Type": "Succeed" },
+            "ValidationFailed": {
+              "Type": "Fail",
+              "Error": "RScanValidationFailed",
+              "Cause": "One or more platform tasks failed or required artifacts were missing."
+            }
+          }
+        }
+
+Outputs:
+  InputBucketName:
+    Value: !If [CreateInputBucket, !Ref InputBucket, !Ref ExistingInputBucketName]
+  EvidenceBucketName:
+    Value: !If [CreateEvidenceBucket, !Ref EvidenceBucket, !Ref ExistingEvidenceBucketName]
+  EphemeralBucketName:
+    Value: !If [CreateEphemeralBucket, !Ref EphemeralBucket, !Ref ExistingEphemeralBucketName]
+  RScanOrchestrationStateMachineArn:
+    Value: !Ref RScanOrchestrationStateMachine
+  RLinuxScanOrchestrationStateMachineArn:
+    Value: !Ref RLinuxScanOrchestrationStateMachine
+  RLinuxRepositoryUri:
+    Value: !GetAtt RLinuxRepository.RepositoryUri
+  RWindowsRepositoryUri:
+    Value: !GetAtt RWindowsRepository.RepositoryUri
+  RLinuxClusterArn:
+    Value: !GetAtt RLinuxCluster.Arn
+  RWindowsClusterArn:
+    Value: !GetAtt RWindowsCluster.Arn

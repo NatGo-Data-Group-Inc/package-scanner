@@ -8,6 +8,7 @@ This folder is the operator guide for `package_scanner`.
 
 - Control plane: submit and track scan jobs (contract in `api/openapi.yaml`).
 - Data plane: execute scans in CodeBuild across platform variants, write evidence/governance artifacts to S3.
+- R ECS migration assets are also present for the ECS-on-EC2 worker plane cutover.
 - Ecosystems currently implemented:
   - Python (linux/amd64, linux/arm64, windows/amd64)
   - R (linux/amd64, linux/arm64, windows/amd64)
@@ -22,6 +23,7 @@ This folder is the operator guide for `package_scanner`.
 Full procedures and examples are in:
 
 - [handoff-runbook.md](./handoff-runbook.md)
+- [ecs-cutover-runbook.md](./ecs-cutover-runbook.md)
 - [workflow.md](./workflow.md)
 - [cli-switch-reference.md](./cli-switch-reference.md)
 - [troubleshooting.md](./troubleshooting.md)
