@@ -89,14 +89,14 @@ ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text "${AWS_A
 aws ecr get-login-password "${AWS_ARGS[@]}" | docker login --username AWS --password-stdin "${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
 
 docker buildx build \
-  --platform linux/amd64,linux/arm64 \
+  --platform linux/amd64 \
   -f docker/r-linux.Dockerfile \
   -t "${LINUX_REPO}:latest" \
   --push \
   .
 
 cat <<EOF
-Linux multi-arch image pushed: ${LINUX_REPO}:latest
+Linux amd64 image pushed: ${LINUX_REPO}:latest
 
 Windows image build must be run from a Windows Docker builder:
   docker build -f docker/r-windows.Dockerfile -t ${WINDOWS_REPO}:latest .

@@ -11,6 +11,7 @@ LIBRARY_DIR="${RUN_DIR}/library"
 CHECKPOINT_PREFIX="s3://${EPHEMERAL_BUCKET}/${EPHEMERAL_PREFIX}/checkpoints/r/${SCAN_EXECUTION_ID:-manual}/${TARGET_PLATFORM}"
 CHECKPOINT_INTERVAL_SECONDS="${CHECKPOINT_INTERVAL_SECONDS:-900}"
 SCRIPT_ROOT="${SCRIPT_ROOT:-/opt/package-scanner/scripts}"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 checkpoint_pid=""
 
@@ -27,13 +28,14 @@ upload_if_exists() {
   if [[ -f "${path}" ]]; then
     aws s3 cp "${path}" "${dest}" >/dev/null
   fi
+  return 0
 }
 
 publish_checkpoint() {
   local phase="${1:-restore}"
   write_state "${phase}"
   if [[ -d "${CACHE_DIR}" ]]; then
-    python "${SCRIPT_ROOT}/bundle-directory.py" \
+    "${PYTHON_BIN}" "${SCRIPT_ROOT}/bundle-directory.py" \
       --source-dir "${CACHE_DIR}" \
       --output-file "${RUN_DIR}/checkpoint-renv-cache.tar.gz" \
       --checksum-file "${RUN_DIR}/checkpoint-renv-cache.tar.gz.sha256"
@@ -41,7 +43,7 @@ publish_checkpoint() {
     aws s3 cp "${RUN_DIR}/checkpoint-renv-cache.tar.gz.sha256" "${CHECKPOINT_PREFIX}/latest/renv-cache.tar.gz.sha256" >/dev/null
   fi
   if [[ -d "${LIBRARY_DIR}" ]]; then
-    python "${SCRIPT_ROOT}/bundle-directory.py" \
+    "${PYTHON_BIN}" "${SCRIPT_ROOT}/bundle-directory.py" \
       --source-dir "${LIBRARY_DIR}" \
       --output-file "${RUN_DIR}/checkpoint-renv-library.tar.gz" \
       --checksum-file "${RUN_DIR}/checkpoint-renv-library.tar.gz.sha256"
@@ -85,14 +87,14 @@ cp /tmp/scan-input/renv.lock "${RUN_DIR}/renv.lock"
 
 if aws s3 ls "${CHECKPOINT_PREFIX}/latest/renv-cache.tar.gz" >/dev/null 2>&1; then
   aws s3 cp "${CHECKPOINT_PREFIX}/latest/renv-cache.tar.gz" "${RUN_DIR}/checkpoint-renv-cache.tar.gz" >/dev/null
-  python "${SCRIPT_ROOT}/extract-archive.py" --archive "${RUN_DIR}/checkpoint-renv-cache.tar.gz" --destination "${CACHE_DIR}"
+  "${PYTHON_BIN}" "${SCRIPT_ROOT}/extract-archive.py" --archive "${RUN_DIR}/checkpoint-renv-cache.tar.gz" --destination "${CACHE_DIR}"
 fi
 if aws s3 ls "${CHECKPOINT_PREFIX}/latest/renv-library.tar.gz" >/dev/null 2>&1; then
   aws s3 cp "${CHECKPOINT_PREFIX}/latest/renv-library.tar.gz" "${RUN_DIR}/checkpoint-renv-library.tar.gz" >/dev/null
-  python "${SCRIPT_ROOT}/extract-archive.py" --archive "${RUN_DIR}/checkpoint-renv-library.tar.gz" --destination "${LIBRARY_DIR}"
+  "${PYTHON_BIN}" "${SCRIPT_ROOT}/extract-archive.py" --archive "${RUN_DIR}/checkpoint-renv-library.tar.gz" --destination "${LIBRARY_DIR}"
 fi
 
-R_VERSION="$(python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8-sig"))["R"]["Version"])' "${RUN_DIR}/renv.lock")"
+R_VERSION="$("${PYTHON_BIN}" -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8-sig"))["R"]["Version"])' "${RUN_DIR}/renv.lock")"
 ACTUAL_R_VERSION="$(Rscript -e 'cat(as.character(getRversion()))')"
 if [[ "${ACTUAL_R_VERSION}" != "${R_VERSION}" ]]; then
   echo "R version mismatch. image=${ACTUAL_R_VERSION} lockfile=${R_VERSION}" >&2
@@ -115,14 +117,14 @@ stop_checkpoint_loop
 publish_checkpoint "restored"
 
 LIBRARY_PATH="$(cat "${RUN_DIR}/library-path.txt")"
-python "${SCRIPT_ROOT}/bundle-directory.py" --source-dir "${CACHE_DIR}" --output-file "${RUN_DIR}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz" --checksum-file "${RUN_DIR}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
-python "${SCRIPT_ROOT}/bundle-directory.py" --source-dir "${LIBRARY_PATH}" --output-file "${RUN_DIR}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz" --checksum-file "${RUN_DIR}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
-python "${SCRIPT_ROOT}/generate-r-materialization-summary.py" --run-dir "${RUN_DIR}" --platform "${TARGET_PLATFORM}" --r-version "${R_VERSION}" --cache-dir "${CACHE_DIR}" --library-path "${LIBRARY_PATH}"
-python "${SCRIPT_ROOT}/generate-r-sbom.py" --installed-packages-file "${RUN_DIR}/installed-packages.csv" --out-file "${RUN_DIR}/r-packages.cdx.json"
-python "${SCRIPT_ROOT}/scan-r-vulnerabilities.py" --installed-packages-file "${RUN_DIR}/installed-packages.csv" --lock-file "${RUN_DIR}/renv.lock" --out-file "${RUN_DIR}/osv-report.json"
+"${PYTHON_BIN}" "${SCRIPT_ROOT}/bundle-directory.py" --source-dir "${CACHE_DIR}" --output-file "${RUN_DIR}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz" --checksum-file "${RUN_DIR}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
+"${PYTHON_BIN}" "${SCRIPT_ROOT}/bundle-directory.py" --source-dir "${LIBRARY_PATH}" --output-file "${RUN_DIR}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz" --checksum-file "${RUN_DIR}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
+"${PYTHON_BIN}" "${SCRIPT_ROOT}/generate-r-materialization-summary.py" --run-dir "${RUN_DIR}" --platform "${TARGET_PLATFORM}" --r-version "${R_VERSION}" --cache-dir "${CACHE_DIR}" --library-path "${LIBRARY_PATH}"
+"${PYTHON_BIN}" "${SCRIPT_ROOT}/generate-r-sbom.py" --installed-packages-file "${RUN_DIR}/installed-packages.csv" --out-file "${RUN_DIR}/r-packages.cdx.json"
+"${PYTHON_BIN}" "${SCRIPT_ROOT}/scan-r-vulnerabilities.py" --installed-packages-file "${RUN_DIR}/installed-packages.csv" --lock-file "${RUN_DIR}/renv.lock" --out-file "${RUN_DIR}/osv-report.json"
 trivy sbom --format json --output "${RUN_DIR}/trivy-sbom-report.json" "${RUN_DIR}/r-packages.cdx.json" || true
 GOVERNANCE_EXIT=0
-python "${SCRIPT_ROOT}/generate-r-governance-artifacts.py" --run-dir "${RUN_DIR}" --platform "${TARGET_PLATFORM}" --remediate-medium "${REMEDIATE_MEDIUM:-true}" --fail-on-medium "${FAIL_ON_MEDIUM:-false}" --remediate-unknown "${REMEDIATE_UNKNOWN:-true}" --fail-on-unknown "${FAIL_ON_UNKNOWN:-false}" || GOVERNANCE_EXIT=$?
+"${PYTHON_BIN}" "${SCRIPT_ROOT}/generate-r-governance-artifacts.py" --run-dir "${RUN_DIR}" --platform "${TARGET_PLATFORM}" --remediate-medium "${REMEDIATE_MEDIUM:-true}" --fail-on-medium "${FAIL_ON_MEDIUM:-false}" --remediate-unknown "${REMEDIATE_UNKNOWN:-true}" --fail-on-unknown "${FAIL_ON_UNKNOWN:-false}" || GOVERNANCE_EXIT=$?
 tar -czf "${RUN_DIR}/environment-artifacts.tar.gz" -C "${RUN_DIR}" renv.lock installed-packages.csv session-info.txt renv-status.txt materialization-summary.json r-packages.cdx.json || true
 aws s3 cp "${RUN_DIR}/" "s3://${EPHEMERAL_BUCKET}/${EPHEMERAL_PREFIX}/${TARGET_PLATFORM}/${TS}/" --recursive >/dev/null
 aws s3 cp "${RUN_DIR}/renv.lock" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/r/${TARGET_PLATFORM}/${TS}/renv.lock" >/dev/null
@@ -154,3 +156,5 @@ if [[ "${GOVERNANCE_EXIT}" -ne 0 ]]; then
   echo "Governance gate failed with exit ${GOVERNANCE_EXIT}" >&2
   exit "${GOVERNANCE_EXIT}"
 fi
+
+exit 0

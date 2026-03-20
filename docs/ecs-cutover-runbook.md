@@ -17,7 +17,6 @@ from CodeBuild to ECS on EC2.
 
 - One ECS Linux cluster with:
   - one `linux-amd64` EC2 worker
-  - one `linux-arm64` EC2 worker
 - One ECS Windows cluster with:
   - one `windows-amd64` EC2 worker
 - One long-running ECS task per platform per R scan.
@@ -104,7 +103,7 @@ Run from Linux:
   --profile <aws-profile>
 ```
 
-This publishes the multi-arch Linux image to:
+This publishes the Linux amd64 image to:
 - `RLinuxRepositoryUri:latest`
 
 ### 4. Build and Push the Windows R Image
@@ -154,9 +153,8 @@ aws ecs list-container-instances \
 ```
 
 Expected:
-- Linux cluster has two instances total
+- Linux cluster has one instance total
   - one x86_64
-  - one arm64
 - Windows cluster has one instance
 
 ### 6. Start a Small Validation Run
@@ -181,7 +179,7 @@ Use the small R test lockfile first.
 
 Validate:
 - Step Functions execution succeeds
-- all three platforms publish evidence
+- Linux amd64 publishes evidence
 - offline bundle artifacts exist
 
 ### 7. Run the Full R Lockfile

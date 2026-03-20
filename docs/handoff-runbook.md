@@ -13,7 +13,9 @@ Use this document when the system is being operated by someone who did not build
 
 It produces:
 
-- platform-specific scan runs for `linux-amd64`, `linux-arm64`, and `windows-amd64`
+- platform-specific scan runs
+  - Python: `linux-amd64`, `linux-arm64`, `windows-amd64`
+  - R: `linux-amd64`, `windows-amd64`
 - long-term evidence in S3
 - governance outputs for cyber review
 - for R, enclave-transferable offline cache bundles per platform
@@ -70,7 +72,7 @@ There are two scan styles:
   - one CodeBuild job per platform
 - R
   - one Step Functions execution per scan
-  - that execution plans staged restore batches and runs multiple CodeBuild jobs per platform
+  - that execution runs long-lived ECS tasks per platform
 
 ## 5. Standard Deployment Procedure
 

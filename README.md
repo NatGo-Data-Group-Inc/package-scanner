@@ -24,9 +24,12 @@ Project policies:
 
 - Python package scans from a Conda `environment.yml`.
 - R package scans from an `renv.lock`.
-- Platform-native scan runs:
+- Python platform-native scan runs:
   - linux/amd64
   - linux/arm64
+  - windows/amd64
+- R platform-native scan runs:
+  - linux/amd64
   - windows/amd64
 - Scanners:
   - `trivy` (SBOM scan)

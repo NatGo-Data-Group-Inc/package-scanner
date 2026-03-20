@@ -11,7 +11,7 @@ This folder is the operator guide for `package_scanner`.
 - R ECS migration assets are also present for the ECS-on-EC2 worker plane cutover.
 - Ecosystems currently implemented:
   - Python (linux/amd64, linux/arm64, windows/amd64)
-  - R (linux/amd64, linux/arm64, windows/amd64)
+  - R (linux/amd64, windows/amd64)
 
 ## Workflow Summary
 

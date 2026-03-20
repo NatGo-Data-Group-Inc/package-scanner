@@ -49,6 +49,11 @@ RUN dnf install -y \
     xz-devel \
     zeromq-devel \
     zlib-devel && \
+    mkdir -p /usr/include/v8 && \
+    ln -sfn /usr/include/node/v8.h /usr/include/v8/v8.h && \
+    ln -sfn /usr/include/node/libplatform /usr/include/v8/libplatform && \
+    ln -sfn /usr/lib64/libv8.so.10 /usr/lib64/libv8.so && \
+    ln -sfn /usr/lib64/libv8_libplatform.so.10 /usr/lib64/libv8_libplatform.so && \
     dnf clean all
 
 RUN mkdir -p /tmp/r-build /opt/R && \
