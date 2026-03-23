@@ -1,0 +1,4 @@
+CXX11STD = -std=gnu++17
+CXX14STD = -std=gnu++17
+CXX17 = g++
+CXX17STD = -std=gnu++17

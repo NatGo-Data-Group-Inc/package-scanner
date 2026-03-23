@@ -33,7 +33,6 @@ RUN dnf install -y \
     libtiff-devel \
     libxml2-devel \
     make \
-    nodejs-devel \
     openssl-devel \
     pcre2-devel \
     pkgconfig \
@@ -49,10 +48,6 @@ RUN dnf install -y \
     xz-devel \
     zeromq-devel \
     zlib-devel && \
-    rm -rf /usr/include/v8 && \
-    ln -sfn /usr/include/node /usr/include/v8 && \
-    ln -sfn /usr/lib64/libv8.so.10 /usr/lib64/libv8.so && \
-    ln -sfn /usr/lib64/libv8_libplatform.so.10 /usr/lib64/libv8_libplatform.so && \
     dnf clean all
 
 RUN mkdir -p /tmp/r-build /opt/R && \
@@ -72,7 +67,10 @@ RUN python3 -m pip install --no-cache-dir boto3 && \
 
 ENV SCRIPT_ROOT=/opt/package-scanner/scripts
 ENV PATH=/opt/R/4.4.0/bin:$PATH
+ENV R_MAKEVARS_USER=/opt/package-scanner/config/Makevars
+ENV DOWNLOAD_STATIC_LIBV8=1
 
+COPY docker/r-linux.Makevars /opt/package-scanner/config/Makevars
 COPY scripts/materialize-r-environment.R /opt/package-scanner/scripts/materialize-r-environment.R
 COPY scripts/bundle-directory.py /opt/package-scanner/scripts/bundle-directory.py
 COPY scripts/extract-archive.py /opt/package-scanner/scripts/extract-archive.py
