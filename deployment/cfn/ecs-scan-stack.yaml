@@ -580,6 +580,14 @@ Resources:
                     "RunLinuxAmd64": {
                       "Type": "Task",
                       "Resource": "arn:aws:states:::ecs:runTask.sync",
+                      "Retry": [
+                        {
+                          "ErrorEquals": ["ECS.AmazonECSException", "ECS.ClientException", "States.TaskFailed"],
+                          "IntervalSeconds": 30,
+                          "BackoffRate": 2.0,
+                          "MaxAttempts": 6
+                        }
+                      ],
                       "Parameters": {
                         "Cluster": "${RLinuxCluster.Arn}",
                         "TaskDefinition": "${RLinuxAmd64TaskDefinition}",
@@ -638,6 +646,14 @@ Resources:
                     "RunWindowsAmd64": {
                       "Type": "Task",
                       "Resource": "arn:aws:states:::ecs:runTask.sync",
+                      "Retry": [
+                        {
+                          "ErrorEquals": ["ECS.AmazonECSException", "ECS.ClientException", "States.TaskFailed"],
+                          "IntervalSeconds": 30,
+                          "BackoffRate": 2.0,
+                          "MaxAttempts": 6
+                        }
+                      ],
                       "Parameters": {
                         "Cluster": "${RWindowsCluster.Arn}",
                         "TaskDefinition": "${RWindowsTaskDefinition}",
@@ -748,6 +764,14 @@ Resources:
                     "RunLinuxAmd64": {
                       "Type": "Task",
                       "Resource": "arn:aws:states:::ecs:runTask.sync",
+                      "Retry": [
+                        {
+                          "ErrorEquals": ["ECS.AmazonECSException", "ECS.ClientException", "States.TaskFailed"],
+                          "IntervalSeconds": 30,
+                          "BackoffRate": 2.0,
+                          "MaxAttempts": 6
+                        }
+                      ],
                       "Parameters": {
                         "Cluster": "${RLinuxCluster.Arn}",
                         "TaskDefinition": "${RLinuxAmd64TaskDefinition}",
