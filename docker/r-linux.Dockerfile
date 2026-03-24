@@ -30,6 +30,7 @@ RUN dnf install -y \
     libicu-devel \
     libjpeg-turbo-devel \
     libpng-devel \
+    libwebp-devel \
     libtiff-devel \
     libxml2-devel \
     make \

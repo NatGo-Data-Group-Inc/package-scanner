@@ -2,6 +2,7 @@
 set -euo pipefail
 
 EXECUTION_ARN=""
+EXECUTION_NAME=""
 STACK_NAME=""
 EVIDENCE_BUCKET=""
 EVIDENCE_PREFIX="evidence"
@@ -14,13 +15,17 @@ LINUX_CLUSTER_NAME="package-scanner-dev-r-linux"
 WINDOWS_CLUSTER_NAME="package-scanner-dev-r-windows"
 CHECK_LINUX_CLUSTER="true"
 CHECK_WINDOWS_CLUSTER="false"
+PLATFORM_SET="linux-only"
+LATEST="false"
 
 usage() {
   cat <<'EOF'
-Usage: poll-r-scan.sh --execution-arn <arn> [options]
+Usage: poll-r-scan.sh [--execution-arn <arn> | --latest --stack-name <name>] [options]
 
-Required:
+Selection:
   --execution-arn <arn>                 Step Functions execution ARN to poll
+  --latest                              Resolve the current/latest execution automatically
+  --platform-set <all|linux-only>       Which R state machine to inspect for --latest (default: linux-only)
 
 Optional:
   --stack-name <name>                   Resolve EvidenceBucketName from stack output
@@ -43,8 +48,9 @@ Examples:
     --profile AdministratorAccess-123456789012
 
   ./scripts/poll-r-scan.sh \
-    --execution-arn arn:aws:states:us-east-1:123456789012:execution:sm:r-scan-20260324T000135Z-0ec08ba8 \
-    --evidence-bucket my-evidence-bucket \
+    --latest \
+    --stack-name cyber-scanner-dev-r-ecs \
+    --profile AdministratorAccess-123456789012 \
     --once
 EOF
 }
@@ -52,6 +58,8 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --execution-arn) EXECUTION_ARN="$2"; shift 2 ;;
+    --latest) LATEST="true"; shift 1 ;;
+    --platform-set) PLATFORM_SET="$2"; shift 2 ;;
     --stack-name) STACK_NAME="$2"; shift 2 ;;
     --evidence-bucket) EVIDENCE_BUCKET="$2"; shift 2 ;;
     --evidence-prefix) EVIDENCE_PREFIX="$2"; shift 2 ;;
@@ -69,9 +77,17 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "${EXECUTION_ARN}" ]]; then
-  echo "--execution-arn is required." >&2
+if [[ "${PLATFORM_SET}" != "all" && "${PLATFORM_SET}" != "linux-only" ]]; then
+  echo "--platform-set must be one of: all, linux-only" >&2
+  exit 1
+fi
+if [[ "${LATEST}" != "true" && -z "${EXECUTION_ARN}" ]]; then
+  echo "Provide either --execution-arn or --latest." >&2
   usage >&2
+  exit 1
+fi
+if [[ "${LATEST}" == "true" && -z "${STACK_NAME}" ]]; then
+  echo "--latest requires --stack-name." >&2
   exit 1
 fi
 if [[ "${ALLOW_DEFAULT_PROFILE}" != "true" && -z "${PROFILE}" ]]; then
@@ -102,6 +118,48 @@ execution_name_from_arn() {
 import sys
 print(sys.argv[1].rsplit(":", 1)[-1])
 PY
+}
+
+resolve_execution_arn() {
+  local state_machine_key="RScanOrchestrationStateMachineArn"
+  if [[ "${PLATFORM_SET}" == "linux-only" ]]; then
+    state_machine_key="RLinuxScanOrchestrationStateMachineArn"
+  fi
+  local state_machine_arn
+  state_machine_arn="$(stack_output "${state_machine_key}")"
+  if [[ -z "${state_machine_arn}" || "${state_machine_arn}" == "None" ]]; then
+    echo "Missing stack output: ${state_machine_key}" >&2
+    exit 1
+  fi
+
+  local execution_arn
+  execution_arn="$(
+    aws stepfunctions list-executions \
+      --state-machine-arn "${state_machine_arn}" \
+      --status-filter RUNNING \
+      --max-results 1 \
+      --query 'executions[0].executionArn' \
+      --output text \
+      "${AWS_ARGS[@]}"
+  )"
+
+  if [[ -z "${execution_arn}" || "${execution_arn}" == "None" ]]; then
+    execution_arn="$(
+      aws stepfunctions list-executions \
+        --state-machine-arn "${state_machine_arn}" \
+        --max-results 1 \
+        --query 'executions[0].executionArn' \
+        --output text \
+        "${AWS_ARGS[@]}"
+    )"
+  fi
+
+  if [[ -z "${execution_arn}" || "${execution_arn}" == "None" ]]; then
+    echo "No executions found for ${state_machine_arn}" >&2
+    exit 1
+  fi
+
+  printf '%s\n' "${execution_arn}"
 }
 
 json_field() {
@@ -146,13 +204,37 @@ print_summary_if_present() {
   echo "SummaryPath: ${summary_uri}"
   if aws s3api head-object --bucket "${EVIDENCE_BUCKET}" --key "${summary_key}" "${AWS_ARGS[@]}" >/dev/null 2>&1; then
     echo "SummaryObject: present"
-    aws s3 cp "${summary_uri}" - "${AWS_ARGS[@]}" || true
+    local summary_json
+    if summary_json="$(aws s3 cp "${summary_uri}" - "${AWS_ARGS[@]}")"; then
+      printf '%s\n' "${summary_json}"
+      SUMMARY_JSON="${summary_json}" python - <<'PY'
+import json
+import os
+
+data = json.loads(os.environ["SUMMARY_JSON"])
+for platform in data.get("platforms", []):
+    print(f"Platform: {platform.get('platform')}")
+    print(f"  Status: {platform.get('status')}")
+    if platform.get("error"):
+        print(f"  Error: {platform.get('error')}")
+    if platform.get("cause"):
+        print(f"  Cause: {platform.get('cause')}")
+    missing = platform.get("missing") or []
+    if missing:
+        print("  Missing:")
+        for item in missing:
+            print(f"    - {item}")
+PY
+    fi
   else
     echo "SummaryObject: missing"
   fi
 }
 
-EXECUTION_NAME="$(execution_name_from_arn "${EXECUTION_ARN}")"
+if [[ "${LATEST}" == "true" ]]; then
+  EXECUTION_ARN="$(resolve_execution_arn)"
+fi
+EXECUTION_NAME="${EXECUTION_NAME:-$(execution_name_from_arn "${EXECUTION_ARN}")}"
 
 while true; do
   NOW="$(date '+%Y-%m-%d %H:%M:%S %Z')"
