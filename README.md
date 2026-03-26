@@ -2,7 +2,8 @@
 
 Redeployable AWS infrastructure for package scanning across Python and R with
 platform-specific execution paths:
-- Python currently runs on CodeBuild.
+- Python currently runs on CodeBuild for all-platform scans and can run on ECS
+  on EC2 for Linux-only scans.
 - R is migrating to ECS on EC2 for long-running materialization and scan work.
 
 Operator documentation:
@@ -75,11 +76,14 @@ Project policies:
 ## Project Layout
 
 - `deployment/cfn/python-scan-stack.yaml`: Python scan infrastructure and the preserved CodeBuild-based path.
+- `deployment/cfn/python-ecs-scan-stack.yaml`: Python ECS infrastructure for Linux amd64/arm64 scanning.
 - `deployment/cfn/ecs-scan-stack.yaml`: R ECS infrastructure and orchestration.
 - `api/openapi.yaml`: control-plane API contract for UI/backend integration.
 - `scripts/deploy-cfn.sh`: canonical deploy/update entrypoint.
+- `scripts/deploy-python-ecs-cfn.sh`: deploy/update entrypoint for the Python ECS stack.
 - `scripts/deploy-r-ecs-cfn.sh`: deploy/update entrypoint for the R ECS stack.
 - `scripts/start-python-scan.sh`: canonical scan start entrypoint.
+- `scripts/build-python-ecs-images.sh`: build/push entrypoint for the Python ECS Linux image.
 - `scripts/start-r-scan.sh`: canonical R scan start entrypoint. Starts the Step Functions orchestration for the ECS R workflow.
 - `scripts/deploy-cfn.ps1`: PowerShell wrapper for `deploy-cfn.sh`.
 - `scripts/start-python-scan.ps1`: PowerShell wrapper for `start-python-scan.sh`.
@@ -93,6 +97,10 @@ Project policies:
 - Shared S3 input/evidence/ephemeral buckets (optional, created if not supplied).
 - Python stack:
   - CodeBuild projects for Python platform scans
+- Python ECS stack:
+  - ECS clusters for Linux Python workers
+  - ECR repository for Linux Python image
+  - Step Functions state machine for Linux-only Python ECS scans
 - R ECS stack:
   - ECS clusters for Linux and Windows R workers
   - ECR repositories for Linux and Windows R images
@@ -124,7 +132,7 @@ and passes its SHA-256 into CloudFormation for runtime integrity verification.
 aws s3 cp .\environment.yml s3://<input-bucket>/inputs/python/environment.yml --region us-east-1 --profile <aws-profile>
 ```
 
-3. Start all Python platform scans (canonical bash):
+3. Start all-platform Python scans on CodeBuild (canonical bash):
 
 ```bash
 ./scripts/start-python-scan.sh \
@@ -137,7 +145,7 @@ aws s3 cp .\environment.yml s3://<input-bucket>/inputs/python/environment.yml --
   --region us-east-1 \
   --profile <aws-profile> \
   --expected-account-id <12-digit-account-id> \
-  --deployment-lock-token <env-lock-token>
+ --deployment-lock-token <env-lock-token>
 ```
 
 `EvidenceBucket` and `EphemeralBucket` are auto-resolved from stack outputs by default.
@@ -145,7 +153,48 @@ Only include `--safety-api-key` when supplying your licensed Safety token; omit 
 flag to run without authenticated Safety.
 Pass them only when overriding to alternate buckets.
 
-4. Review Python evidence outputs:
+Linux-only Python ECS path:
+
+4. Deploy the Python ECS stack:
+
+```bash
+./scripts/deploy-python-ecs-cfn.sh \
+  --stack-name cyber-scanner-dev-python-ecs \
+  --environment-name package-scanner-dev \
+  --region us-east-1 \
+  --profile <aws-profile> \
+  --expected-account-id <12-digit-account-id> \
+  --deployment-lock-token <env-lock-token> \
+  --existing-input-bucket-name <input-bucket> \
+  --existing-evidence-bucket-name <evidence-bucket> \
+  --existing-ephemeral-bucket-name <ephemeral-bucket> \
+  --s3-bucket <evidence-bucket>
+```
+
+5. Build and push the Python ECS Linux image:
+
+```bash
+./scripts/build-python-ecs-images.sh \
+  --stack-name cyber-scanner-dev-python-ecs \
+  --region us-east-1 \
+  --profile <aws-profile>
+```
+
+6. Start a Linux-only Python ECS scan:
+
+```bash
+./scripts/start-python-scan.sh \
+  --stack-name cyber-scanner-dev-python-ecs \
+  --input-bucket <input-bucket> \
+  --source-environment-file ./environment.yml \
+  --region us-east-1 \
+  --profile <aws-profile> \
+  --expected-account-id <12-digit-account-id> \
+  --deployment-lock-token <env-lock-token> \
+  --platform-set linux-only
+```
+
+7. Review Python evidence outputs:
 
 - `s3://<evidence-bucket>/evidence/requirements/python/<platform>/<timestamp>/...`
 - `s3://<evidence-bucket>/evidence/model-results/python/<platform>/<timestamp>/...`

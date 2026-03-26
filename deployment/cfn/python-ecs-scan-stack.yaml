@@ -1,0 +1,726 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  ECS on EC2 infrastructure for Linux Python package scanning. This stack
+  provisions ECS-backed worker pools for linux/amd64 and linux/arm64 Python
+  package scanning, along with Step Functions orchestration and reusable
+  evidence publication.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: pkgscan-dev
+
+  ExistingInputBucketName:
+    Type: String
+    Default: ''
+
+  ExistingEvidenceBucketName:
+    Type: String
+    Default: ''
+
+  ExistingEphemeralBucketName:
+    Type: String
+    Default: ''
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+
+  LinuxSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+
+  LinuxAmd64InstanceType:
+    Type: String
+    Default: m7i.xlarge
+
+  LinuxArm64InstanceType:
+    Type: String
+    Default: m7g.xlarge
+
+  LinuxRootVolumeSize:
+    Type: Number
+    Default: 250
+    MinValue: 80
+    MaxValue: 1000
+
+Conditions:
+  CreateInputBucket: !Equals [!Ref ExistingInputBucketName, '']
+  CreateEvidenceBucket: !Equals [!Ref ExistingEvidenceBucketName, '']
+  CreateEphemeralBucket: !Equals [!Ref ExistingEphemeralBucketName, '']
+
+Resources:
+  InputBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateInputBucket
+    Properties:
+      BucketName: !Sub '${EnvironmentName}-scan-input-${AWS::AccountId}-${AWS::Region}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+
+  EvidenceBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateEvidenceBucket
+    Properties:
+      BucketName: !Sub '${EnvironmentName}-scan-evidence-${AWS::AccountId}-${AWS::Region}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+
+  EphemeralBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateEphemeralBucket
+    Properties:
+      BucketName: !Sub '${EnvironmentName}-scan-ephemeral-${AWS::AccountId}-${AWS::Region}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireDeployArtifacts
+            Status: Enabled
+            Prefix: deploy/tmp/
+            ExpirationInDays: 3
+
+  PythonWorkerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub '${EnvironmentName} ECS python scanner workers'
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  ECSInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-python-ecs-instance-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  ECSInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub '${EnvironmentName}-python-ecs-instance-profile'
+      Roles:
+        - !Ref ECSInstanceRole
+
+  PythonTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-python-task-execution-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  PythonTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-python-task-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: BucketList
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource:
+                  - !If [CreateInputBucket, !GetAtt InputBucket.Arn, !Sub 'arn:aws:s3:::${ExistingInputBucketName}']
+                  - !If [CreateEvidenceBucket, !GetAtt EvidenceBucket.Arn, !Sub 'arn:aws:s3:::${ExistingEvidenceBucketName}']
+                  - !If [CreateEphemeralBucket, !GetAtt EphemeralBucket.Arn, !Sub 'arn:aws:s3:::${ExistingEphemeralBucketName}']
+        - PolicyName: BucketObjects
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !If [CreateInputBucket, !Sub '${InputBucket.Arn}/*', !Sub 'arn:aws:s3:::${ExistingInputBucketName}/*']
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource:
+                  - !If [CreateEvidenceBucket, !Sub '${EvidenceBucket.Arn}/*', !Sub 'arn:aws:s3:::${ExistingEvidenceBucketName}/*']
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:DeleteObject
+                Resource:
+                  - !If [CreateEphemeralBucket, !Sub '${EphemeralBucket.Arn}/*', !Sub 'arn:aws:s3:::${ExistingEphemeralBucketName}/*']
+
+  PythonLinuxAmd64Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub '${EnvironmentName}-python-linux-amd64'
+
+  PythonLinuxArm64Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub '${EnvironmentName}-python-linux-arm64'
+
+  PythonLinuxAmd64LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub '${EnvironmentName}-python-linux-amd64'
+      LaunchTemplateData:
+        IamInstanceProfile:
+          Arn: !GetAtt ECSInstanceProfile.Arn
+        ImageId: !Sub '{{resolve:ssm:/aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_id}}'
+        InstanceType: !Ref LinuxAmd64InstanceType
+        SecurityGroupIds:
+          - !Ref PythonWorkerSecurityGroup
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              VolumeSize: !Ref LinuxRootVolumeSize
+              VolumeType: gp3
+              DeleteOnTermination: true
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            echo "ECS_CLUSTER=${PythonLinuxAmd64Cluster}" >> /etc/ecs/ecs.config
+            echo "ECS_ENABLE_TASK_IAM_ROLE=true" >> /etc/ecs/ecs.config
+            echo "ECS_ENABLE_TASK_IAM_ROLE_NETWORK_HOST=true" >> /etc/ecs/ecs.config
+            mkdir -p /var/lib/package-scanner
+
+  PythonLinuxArm64LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub '${EnvironmentName}-python-linux-arm64'
+      LaunchTemplateData:
+        IamInstanceProfile:
+          Arn: !GetAtt ECSInstanceProfile.Arn
+        ImageId: !Sub '{{resolve:ssm:/aws/service/ecs/optimized-ami/amazon-linux-2023/arm64/recommended/image_id}}'
+        InstanceType: !Ref LinuxArm64InstanceType
+        SecurityGroupIds:
+          - !Ref PythonWorkerSecurityGroup
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              VolumeSize: !Ref LinuxRootVolumeSize
+              VolumeType: gp3
+              DeleteOnTermination: true
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            echo "ECS_CLUSTER=${PythonLinuxArm64Cluster}" >> /etc/ecs/ecs.config
+            echo "ECS_ENABLE_TASK_IAM_ROLE=true" >> /etc/ecs/ecs.config
+            echo "ECS_ENABLE_TASK_IAM_ROLE_NETWORK_HOST=true" >> /etc/ecs/ecs.config
+            mkdir -p /var/lib/package-scanner
+
+  PythonLinuxAmd64ASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub '${EnvironmentName}-python-linux-amd64'
+      MinSize: '1'
+      MaxSize: '1'
+      DesiredCapacity: '1'
+      VPCZoneIdentifier: !Ref LinuxSubnetIds
+      LaunchTemplate:
+        LaunchTemplateId: !Ref PythonLinuxAmd64LaunchTemplate
+        Version: !GetAtt PythonLinuxAmd64LaunchTemplate.LatestVersionNumber
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-python-linux-amd64'
+          PropagateAtLaunch: true
+
+  PythonLinuxArm64ASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub '${EnvironmentName}-python-linux-arm64'
+      MinSize: '1'
+      MaxSize: '1'
+      DesiredCapacity: '1'
+      VPCZoneIdentifier: !Ref LinuxSubnetIds
+      LaunchTemplate:
+        LaunchTemplateId: !Ref PythonLinuxArm64LaunchTemplate
+        Version: !GetAtt PythonLinuxArm64LaunchTemplate.LatestVersionNumber
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-python-linux-arm64'
+          PropagateAtLaunch: true
+
+  PythonLinuxRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub '${EnvironmentName}/python-scan-linux'
+      ImageScanningConfiguration:
+        ScanOnPush: true
+
+  PythonLinuxAmd64LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/${EnvironmentName}/python/linux-amd64'
+      RetentionInDays: 30
+
+  PythonLinuxArm64LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/${EnvironmentName}/python/linux-arm64'
+      RetentionInDays: 30
+
+  PythonLinuxAmd64TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${EnvironmentName}-python-linux-amd64'
+      Cpu: '4096'
+      Memory: '8192'
+      NetworkMode: bridge
+      RequiresCompatibilities: [EC2]
+      ExecutionRoleArn: !GetAtt PythonTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt PythonTaskRole.Arn
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      ContainerDefinitions:
+        - Name: scanner
+          Image: !Sub '${PythonLinuxRepository.RepositoryUri}:latest'
+          Essential: true
+          Command: ['linux-amd64']
+          Environment:
+            - Name: SCRIPT_ROOT
+              Value: /opt/package-scanner/scripts
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref PythonLinuxAmd64LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: scanner
+
+  PythonLinuxArm64TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${EnvironmentName}-python-linux-arm64'
+      Cpu: '4096'
+      Memory: '8192'
+      NetworkMode: bridge
+      RequiresCompatibilities: [EC2]
+      ExecutionRoleArn: !GetAtt PythonTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt PythonTaskRole.Arn
+      RuntimePlatform:
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      ContainerDefinitions:
+        - Name: scanner
+          Image: !Sub '${PythonLinuxRepository.RepositoryUri}:latest'
+          Essential: true
+          Command: ['linux-arm64']
+          Environment:
+            - Name: SCRIPT_ROOT
+              Value: /opt/package-scanner/scripts
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref PythonLinuxArm64LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: scanner
+
+  PythonScanSummaryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-python-ecs-scan-summary-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: Logs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents]
+                Resource: '*'
+        - PolicyName: EvidenceAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [s3:ListBucket]
+                Resource:
+                  - !If [CreateEvidenceBucket, !GetAtt EvidenceBucket.Arn, !Sub 'arn:aws:s3:::${ExistingEvidenceBucketName}']
+              - Effect: Allow
+                Action: [s3:GetObject, s3:PutObject]
+                Resource:
+                  - !If [CreateEvidenceBucket, !Sub '${EvidenceBucket.Arn}/*', !Sub 'arn:aws:s3:::${ExistingEvidenceBucketName}/*']
+
+  PythonScanSummaryFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${EnvironmentName}-python-ecs-scan-summary'
+      Runtime: python3.12
+      Handler: index.handler
+      Timeout: 60
+      Role: !GetAtt PythonScanSummaryRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          from botocore.exceptions import ClientError
+
+          s3 = boto3.client("s3")
+
+          def head_exists(bucket, key):
+              try:
+                  s3.head_object(Bucket=bucket, Key=key)
+                  return True
+              except ClientError as exc:
+                  if exc.response["Error"]["Code"] in {"404", "NoSuchKey", "NotFound"}:
+                      return False
+                  raise
+
+          def list_keys(bucket, prefix):
+              paginator = s3.get_paginator("list_objects_v2")
+              keys = []
+              for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+                  keys.extend(obj["Key"] for obj in page.get("Contents", []))
+              return keys
+
+          def handler(event, _context):
+              bucket = event["evidence_bucket"]
+              prefix = event.get("evidence_prefix", "evidence").rstrip("/")
+              timestamp = event["scan_timestamp"]
+              execution_id = event["scan_execution_id"]
+              platforms = []
+              overall = "SUCCEEDED"
+              for result in event["results"]:
+                  platform = result["platform"]
+                  status = result["status"]
+                  platform_summary = {
+                      "platform": platform,
+                      "status": status,
+                      "task_arn": result.get("taskArn"),
+                      "cluster_arn": result.get("clusterArn"),
+                      "validated": False,
+                  }
+                  if status == "SUCCEEDED":
+                      required = [
+                          f"{prefix}/requirements/python/{platform}/{timestamp}/environment.yml",
+                          f"{prefix}/requirements/python/{platform}/{timestamp}/requirements.lock.txt",
+                          f"{prefix}/traceability/python/{platform}/{timestamp}/materialization-summary.json",
+                          f"{prefix}/traceability/python/{platform}/{timestamp}/run-metadata.json",
+                      ]
+                      missing = [key for key in required if not head_exists(bucket, key)]
+                      bundle_prefix = f"{prefix}/packages/offline/python/{platform}/{timestamp}/"
+                      bundle_keys = list_keys(bucket, bundle_prefix)
+                      tarballs = [key for key in bundle_keys if key.endswith(".tar.gz")]
+                      checksums = [key for key in bundle_keys if key.endswith(".tar.gz.sha256")]
+                      if not tarballs:
+                          missing.append(f"{bundle_prefix}*.tar.gz")
+                      if not checksums:
+                          missing.append(f"{bundle_prefix}*.tar.gz.sha256")
+                      platform_summary["bundle_keys"] = bundle_keys
+                      platform_summary["missing"] = missing
+                      platform_summary["validated"] = not missing
+                      if missing:
+                          overall = "FAILED"
+                  else:
+                      overall = "FAILED"
+                      platform_summary["error"] = result.get("error")
+                      platform_summary["cause"] = result.get("cause")
+                  platforms.append(platform_summary)
+              summary = {
+                  "scan_execution_id": execution_id,
+                  "scan_timestamp": timestamp,
+                  "overall_status": overall,
+                  "platforms": platforms,
+              }
+              summary_key = f"{prefix}/orchestration/python/{execution_id}/orchestration-summary.json"
+              s3.put_object(Bucket=bucket, Key=summary_key, Body=json.dumps(summary, indent=2).encode("utf-8"), ContentType="application/json")
+              summary["summary_key"] = summary_key
+              return summary
+
+  PythonScanOrchestrationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-python-ecs-scan-orchestrator-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ECSExecution
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecs:RunTask
+                  - ecs:StopTask
+                  - ecs:DescribeTasks
+                Resource:
+                  - !Ref PythonLinuxAmd64TaskDefinition
+                  - !Ref PythonLinuxArm64TaskDefinition
+              - Effect: Allow
+                Action: ecs:RunTask
+                Resource:
+                  - !GetAtt PythonLinuxAmd64Cluster.Arn
+                  - !GetAtt PythonLinuxArm64Cluster.Arn
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  - !GetAtt PythonTaskExecutionRole.Arn
+                  - !GetAtt PythonTaskRole.Arn
+              - Effect: Allow
+                Action:
+                  - events:PutTargets
+                  - events:PutRule
+                  - events:DescribeRule
+                Resource: !Sub 'arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/StepFunctionsGetEventsForECSTaskRule'
+        - PolicyName: InvokeSummary
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt PythonScanSummaryFunction.Arn
+
+  PythonLinuxScanOrchestrationStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub '${EnvironmentName}-python-ecs-linux-scan-orchestrator'
+      RoleArn: !GetAtt PythonScanOrchestrationRole.Arn
+      DefinitionString: !Sub |
+        {
+          "StartAt": "RunTasks",
+          "States": {
+            "RunTasks": {
+              "Type": "Parallel",
+              "Branches": [
+                {
+                  "StartAt": "RunLinuxAmd64",
+                  "States": {
+                    "RunLinuxAmd64": {
+                      "Type": "Task",
+                      "Resource": "arn:aws:states:::ecs:runTask.sync",
+                      "Retry": [
+                        {
+                          "ErrorEquals": ["ECS.AmazonECSException", "ECS.ClientException", "States.TaskFailed"],
+                          "IntervalSeconds": 30,
+                          "BackoffRate": 2.0,
+                          "MaxAttempts": 6
+                        }
+                      ],
+                      "Parameters": {
+                        "Cluster": "${PythonLinuxAmd64Cluster.Arn}",
+                        "TaskDefinition": "${PythonLinuxAmd64TaskDefinition}",
+                        "Overrides": {
+                          "ContainerOverrides": [
+                            {
+                              "Name": "scanner",
+                              "Environment": [
+                                { "Name": "INPUT_BUCKET", "Value.$": "$.input_bucket" },
+                                { "Name": "INPUT_OBJECT_KEY", "Value.$": "$.input_object_key" },
+                                { "Name": "EVIDENCE_BUCKET", "Value.$": "$.evidence_bucket" },
+                                { "Name": "EVIDENCE_PREFIX", "Value.$": "$.evidence_prefix" },
+                                { "Name": "EPHEMERAL_BUCKET", "Value.$": "$.ephemeral_bucket" },
+                                { "Name": "EPHEMERAL_PREFIX", "Value.$": "$.ephemeral_prefix" },
+                                { "Name": "REMEDIATE_MEDIUM", "Value.$": "$.remediate_medium" },
+                                { "Name": "FAIL_ON_MEDIUM", "Value.$": "$.fail_on_medium" },
+                                { "Name": "SCAN_TIMESTAMP", "Value.$": "$.scan_timestamp" },
+                                { "Name": "SCAN_EXECUTION_ID", "Value.$": "$.scan_execution_id" }
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "ResultSelector": {
+                        "platform": "linux-amd64",
+                        "status": "SUCCEEDED",
+                        "taskArn.$": "$.TaskArn",
+                        "clusterArn": "${PythonLinuxAmd64Cluster.Arn}"
+                      },
+                      "Catch": [
+                        {
+                          "ErrorEquals": ["States.ALL"],
+                          "ResultPath": "$.error",
+                          "Next": "LinuxAmd64Failure"
+                        }
+                      ],
+                      "End": true
+                    },
+                    "LinuxAmd64Failure": {
+                      "Type": "Pass",
+                      "Parameters": {
+                        "platform": "linux-amd64",
+                        "status": "FAILED",
+                        "error.$": "$.error.Error",
+                        "cause.$": "$.error.Cause"
+                      },
+                      "End": true
+                    }
+                  }
+                },
+                {
+                  "StartAt": "RunLinuxArm64",
+                  "States": {
+                    "RunLinuxArm64": {
+                      "Type": "Task",
+                      "Resource": "arn:aws:states:::ecs:runTask.sync",
+                      "Retry": [
+                        {
+                          "ErrorEquals": ["ECS.AmazonECSException", "ECS.ClientException", "States.TaskFailed"],
+                          "IntervalSeconds": 30,
+                          "BackoffRate": 2.0,
+                          "MaxAttempts": 6
+                        }
+                      ],
+                      "Parameters": {
+                        "Cluster": "${PythonLinuxArm64Cluster.Arn}",
+                        "TaskDefinition": "${PythonLinuxArm64TaskDefinition}",
+                        "Overrides": {
+                          "ContainerOverrides": [
+                            {
+                              "Name": "scanner",
+                              "Environment": [
+                                { "Name": "INPUT_BUCKET", "Value.$": "$.input_bucket" },
+                                { "Name": "INPUT_OBJECT_KEY", "Value.$": "$.input_object_key" },
+                                { "Name": "EVIDENCE_BUCKET", "Value.$": "$.evidence_bucket" },
+                                { "Name": "EVIDENCE_PREFIX", "Value.$": "$.evidence_prefix" },
+                                { "Name": "EPHEMERAL_BUCKET", "Value.$": "$.ephemeral_bucket" },
+                                { "Name": "EPHEMERAL_PREFIX", "Value.$": "$.ephemeral_prefix" },
+                                { "Name": "REMEDIATE_MEDIUM", "Value.$": "$.remediate_medium" },
+                                { "Name": "FAIL_ON_MEDIUM", "Value.$": "$.fail_on_medium" },
+                                { "Name": "SCAN_TIMESTAMP", "Value.$": "$.scan_timestamp" },
+                                { "Name": "SCAN_EXECUTION_ID", "Value.$": "$.scan_execution_id" }
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "ResultSelector": {
+                        "platform": "linux-arm64",
+                        "status": "SUCCEEDED",
+                        "taskArn.$": "$.TaskArn",
+                        "clusterArn": "${PythonLinuxArm64Cluster.Arn}"
+                      },
+                      "Catch": [
+                        {
+                          "ErrorEquals": ["States.ALL"],
+                          "ResultPath": "$.error",
+                          "Next": "LinuxArm64Failure"
+                        }
+                      ],
+                      "End": true
+                    },
+                    "LinuxArm64Failure": {
+                      "Type": "Pass",
+                      "Parameters": {
+                        "platform": "linux-arm64",
+                        "status": "FAILED",
+                        "error.$": "$.error.Error",
+                        "cause.$": "$.error.Cause"
+                      },
+                      "End": true
+                    }
+                  }
+                }
+              ],
+              "ResultPath": "$.results",
+              "Next": "ValidateArtifacts"
+            },
+            "ValidateArtifacts": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "OutputPath": "$.Payload",
+              "Parameters": {
+                "FunctionName": "${PythonScanSummaryFunction.Arn}",
+                "Payload": {
+                  "scan_execution_id.$": "$.scan_execution_id",
+                  "scan_timestamp.$": "$.scan_timestamp",
+                  "evidence_bucket.$": "$.evidence_bucket",
+                  "evidence_prefix.$": "$.evidence_prefix",
+                  "results.$": "$.results"
+                }
+              },
+              "Next": "ValidationResult"
+            },
+            "ValidationResult": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.overall_status",
+                  "StringEquals": "SUCCEEDED",
+                  "Next": "Done"
+                }
+              ],
+              "Default": "ValidationFailed"
+            },
+            "Done": { "Type": "Succeed" },
+            "ValidationFailed": {
+              "Type": "Fail",
+              "Error": "PythonScanValidationFailed",
+              "Cause": "One or more platform tasks failed or required artifacts were missing."
+            }
+          }
+        }
+
+Outputs:
+  InputBucketName:
+    Value: !If [CreateInputBucket, !Ref InputBucket, !Ref ExistingInputBucketName]
+  EvidenceBucketName:
+    Value: !If [CreateEvidenceBucket, !Ref EvidenceBucket, !Ref ExistingEvidenceBucketName]
+  EphemeralBucketName:
+    Value: !If [CreateEphemeralBucket, !Ref EphemeralBucket, !Ref ExistingEphemeralBucketName]
+  PythonLinuxScanOrchestrationStateMachineArn:
+    Value: !Ref PythonLinuxScanOrchestrationStateMachine
+  PythonLinuxRepositoryUri:
+    Value: !GetAtt PythonLinuxRepository.RepositoryUri
+  PythonLinuxAmd64ClusterArn:
+    Value: !GetAtt PythonLinuxAmd64Cluster.Arn
+  PythonLinuxArm64ClusterArn:
+    Value: !GetAtt PythonLinuxArm64Cluster.Arn

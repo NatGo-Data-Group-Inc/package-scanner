@@ -4,6 +4,7 @@ set -euo pipefail
 STACK_NAME=""
 INPUT_BUCKET=""
 INPUT_OBJECT_KEY="inputs/python/environment.yml"
+SOURCE_ENVIRONMENT_FILE=""
 EVIDENCE_BUCKET=""
 EVIDENCE_PREFIX="evidence"
 EPHEMERAL_BUCKET=""
@@ -18,6 +19,7 @@ FORTIFY_COMMAND=""
 REMEDIATE_MEDIUM="true"
 FAIL_ON_MEDIUM="false"
 SAFETY_API_KEY=""
+PLATFORM_SET="all"
 
 usage() {
   cat <<'EOF'
@@ -29,6 +31,7 @@ Required:
 
 Optional:
   --input-object-key <key>                (default: inputs/python/environment.yml)
+  --source-environment-file <path>        (default: no upload; use existing S3 object)
   --evidence-bucket <bucket>              (default: auto from stack output)
   --evidence-prefix <prefix>              (default: evidence)
   --ephemeral-bucket <bucket>             (default: auto from stack output)
@@ -43,6 +46,7 @@ Optional:
   --remediate-medium <true|false>         (default: true)
   --fail-on-medium <true|false>           (default: false)
   --safety-api-key <key>                  (default: empty/unauthenticated)
+  --platform-set <all|linux-only>         (default: all)
 EOF
 }
 
@@ -51,6 +55,7 @@ while [[ $# -gt 0 ]]; do
     --stack-name) STACK_NAME="$2"; shift 2 ;;
     --input-bucket) INPUT_BUCKET="$2"; shift 2 ;;
     --input-object-key) INPUT_OBJECT_KEY="$2"; shift 2 ;;
+    --source-environment-file) SOURCE_ENVIRONMENT_FILE="$2"; shift 2 ;;
     --evidence-bucket) EVIDENCE_BUCKET="$2"; shift 2 ;;
     --evidence-prefix) EVIDENCE_PREFIX="$2"; shift 2 ;;
     --ephemeral-bucket) EPHEMERAL_BUCKET="$2"; shift 2 ;;
@@ -65,6 +70,7 @@ while [[ $# -gt 0 ]]; do
     --remediate-medium) REMEDIATE_MEDIUM="$2"; shift 2 ;;
     --fail-on-medium) FAIL_ON_MEDIUM="$2"; shift 2 ;;
     --safety-api-key) SAFETY_API_KEY="$2"; shift 2 ;;
+    --platform-set) PLATFORM_SET="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
   esac
@@ -81,6 +87,14 @@ if [[ "${ALLOW_DEFAULT_PROFILE}" != "true" && -z "${PROFILE}" ]]; then
 fi
 if [[ -z "${DEPLOYMENT_LOCK_TOKEN}" ]]; then
   echo "Guardrail: --deployment-lock-token is required." >&2
+  exit 1
+fi
+if [[ "${PLATFORM_SET}" != "all" && "${PLATFORM_SET}" != "linux-only" ]]; then
+  echo "Guardrail: --platform-set must be one of: all, linux-only" >&2
+  exit 1
+fi
+if [[ -n "${SOURCE_ENVIRONMENT_FILE}" && ! -f "${SOURCE_ENVIRONMENT_FILE}" ]]; then
+  echo "Source environment file not found: ${SOURCE_ENVIRONMENT_FILE}" >&2
   exit 1
 fi
 
@@ -129,6 +143,11 @@ stack_output() {
     --output text \
     "${AWS_ARGS[@]}"
 }
+
+if [[ -n "${SOURCE_ENVIRONMENT_FILE}" ]]; then
+  echo "Uploading ${SOURCE_ENVIRONMENT_FILE} to s3://${INPUT_BUCKET}/${INPUT_OBJECT_KEY}"
+  aws s3 cp "${SOURCE_ENVIRONMENT_FILE}" "s3://${INPUT_BUCKET}/${INPUT_OBJECT_KEY}" "${AWS_ARGS[@]}" >/dev/null
+fi
 
 if [[ -z "${EVIDENCE_BUCKET}" ]]; then
   EVIDENCE_BUCKET="$(stack_output EvidenceBucketName)"
@@ -180,7 +199,40 @@ start_build() {
   printf '%-16s %-48s %s\n' "${platform}" "${project_name}" "${build_id}"
 }
 
-printf '%-16s %-48s %s\n' "Platform" "ProjectName" "BuildId"
-start_build "linux-amd64" "LinuxAmd64ProjectName"
-start_build "linux-arm64" "LinuxArm64ProjectName"
-start_build "windows-amd64" "WindowsAmd64ProjectName"
+start_linux_ecs_scan() {
+  local state_machine_arn execution_name execution_arn timestamp
+
+  state_machine_arn="$(stack_output PythonLinuxScanOrchestrationStateMachineArn)"
+  if [[ -z "${state_machine_arn}" || "${state_machine_arn}" == "None" ]]; then
+    echo "Missing stack output: PythonLinuxScanOrchestrationStateMachineArn" >&2
+    exit 1
+  fi
+
+  timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  execution_name="python-scan-${timestamp}-$(openssl rand -hex 4)"
+  echo "Starting linux-only Python ECS scan: ${state_machine_arn}"
+  execution_arn="$(
+    aws stepfunctions start-execution \
+      --state-machine-arn "${state_machine_arn}" \
+      --name "${execution_name}" \
+      --input "$(cat <<EOF
+{"input_bucket":"${INPUT_BUCKET}","input_object_key":"${INPUT_OBJECT_KEY}","evidence_bucket":"${EVIDENCE_BUCKET}","evidence_prefix":"${EVIDENCE_PREFIX}","ephemeral_bucket":"${EPHEMERAL_BUCKET}","ephemeral_prefix":"${EPHEMERAL_PREFIX}","remediate_medium":"${REMEDIATE_MEDIUM}","fail_on_medium":"${FAIL_ON_MEDIUM}","scan_timestamp":"${timestamp}","scan_execution_id":"${execution_name}"}
+EOF
+)" \
+      --query "executionArn" \
+      --output text \
+      "${AWS_ARGS[@]}"
+  )"
+  printf '%-18s %s\n' "ExecutionName" "${execution_name}"
+  printf '%-18s %s\n' "ExecutionArn" "${execution_arn}"
+  printf '%-18s s3://%s/%s/orchestration/python/%s/orchestration-summary.json\n' "SummaryPath" "${EVIDENCE_BUCKET}" "${EVIDENCE_PREFIX}" "${execution_name}"
+}
+
+if [[ "${PLATFORM_SET}" == "linux-only" ]]; then
+  start_linux_ecs_scan
+else
+  printf '%-16s %-48s %s\n' "Platform" "ProjectName" "BuildId"
+  start_build "linux-amd64" "LinuxAmd64ProjectName"
+  start_build "linux-arm64" "LinuxArm64ProjectName"
+  start_build "windows-amd64" "WindowsAmd64ProjectName"
+fi
