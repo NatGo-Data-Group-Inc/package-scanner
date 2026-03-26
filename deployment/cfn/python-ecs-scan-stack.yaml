@@ -571,6 +571,7 @@ Resources:
                                 { "Name": "EPHEMERAL_PREFIX", "Value.$": "$.ephemeral_prefix" },
                                 { "Name": "REMEDIATE_MEDIUM", "Value.$": "$.remediate_medium" },
                                 { "Name": "FAIL_ON_MEDIUM", "Value.$": "$.fail_on_medium" },
+                                { "Name": "SAFETY_API_KEY", "Value.$": "$.safety_api_key" },
                                 { "Name": "SCAN_TIMESTAMP", "Value.$": "$.scan_timestamp" },
                                 { "Name": "SCAN_EXECUTION_ID", "Value.$": "$.scan_execution_id" }
                               ]
@@ -635,6 +636,7 @@ Resources:
                                 { "Name": "EPHEMERAL_PREFIX", "Value.$": "$.ephemeral_prefix" },
                                 { "Name": "REMEDIATE_MEDIUM", "Value.$": "$.remediate_medium" },
                                 { "Name": "FAIL_ON_MEDIUM", "Value.$": "$.fail_on_medium" },
+                                { "Name": "SAFETY_API_KEY", "Value.$": "$.safety_api_key" },
                                 { "Name": "SCAN_TIMESTAMP", "Value.$": "$.scan_timestamp" },
                                 { "Name": "SCAN_EXECUTION_ID", "Value.$": "$.scan_execution_id" }
                               ]

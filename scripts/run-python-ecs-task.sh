@@ -123,9 +123,12 @@ printf '%s\n' "${ENV_PREFIX}" > "${RUN_DIR}/env-prefix.txt"
   --root-prefix "${ROOT_PREFIX}" \
   --env-prefix "${ENV_PREFIX}"
 
-python -m cyclonedx_py requirements "${RUN_DIR}/requirements.lock.txt" -o "${RUN_DIR}/python-packages.cdx.json" || true
+"${PYTHON_BIN}" -m cyclonedx_py requirements "${RUN_DIR}/requirements.lock.txt" -o "${RUN_DIR}/python-packages.cdx.json" || true
 trivy sbom --format json --output "${RUN_DIR}/trivy-sbom-report.json" "${RUN_DIR}/python-packages.cdx.json" || true
-safety scan --file "${RUN_DIR}/requirements.lock.txt" --output json > "${RUN_DIR}/safety-report.json" || true
+printf '[]\n' > "${RUN_DIR}/safety-report.json"
+if [[ -n "${SAFETY_API_KEY:-}" ]]; then
+  safety --key "${SAFETY_API_KEY}" scan --file "${RUN_DIR}/requirements.lock.txt" --output json > "${RUN_DIR}/safety-report.json" || true
+fi
 GOVERNANCE_EXIT=0
 "${PYTHON_BIN}" "${SCRIPT_ROOT}/generate-governance-artifacts.py" \
   --run-dir "${RUN_DIR}" \

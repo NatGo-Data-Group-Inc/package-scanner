@@ -216,7 +216,7 @@ start_linux_ecs_scan() {
       --state-machine-arn "${state_machine_arn}" \
       --name "${execution_name}" \
       --input "$(cat <<EOF
-{"input_bucket":"${INPUT_BUCKET}","input_object_key":"${INPUT_OBJECT_KEY}","evidence_bucket":"${EVIDENCE_BUCKET}","evidence_prefix":"${EVIDENCE_PREFIX}","ephemeral_bucket":"${EPHEMERAL_BUCKET}","ephemeral_prefix":"${EPHEMERAL_PREFIX}","remediate_medium":"${REMEDIATE_MEDIUM}","fail_on_medium":"${FAIL_ON_MEDIUM}","scan_timestamp":"${timestamp}","scan_execution_id":"${execution_name}"}
+{"input_bucket":"${INPUT_BUCKET}","input_object_key":"${INPUT_OBJECT_KEY}","evidence_bucket":"${EVIDENCE_BUCKET}","evidence_prefix":"${EVIDENCE_PREFIX}","ephemeral_bucket":"${EPHEMERAL_BUCKET}","ephemeral_prefix":"${EPHEMERAL_PREFIX}","remediate_medium":"${REMEDIATE_MEDIUM}","fail_on_medium":"${FAIL_ON_MEDIUM}","safety_api_key":"${SAFETY_API_KEY}","scan_timestamp":"${timestamp}","scan_execution_id":"${execution_name}"}
 EOF
 )" \
       --query "executionArn" \

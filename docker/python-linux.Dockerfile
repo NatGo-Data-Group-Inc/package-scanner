@@ -6,7 +6,6 @@ ARG TARGETARCH
 RUN dnf install -y \
     awscli \
     bzip2 \
-    curl \
     file \
     findutils \
     git \
@@ -29,8 +28,13 @@ RUN case "${TARGETARCH}" in \
       | tar -xvj -C /usr/local/bin --strip-components=1 bin/micromamba && \
     chmod +x /usr/local/bin/micromamba
 
-RUN python3 -m pip install --no-cache-dir boto3 cyclonedx-bom safety && \
-    curl --retry 5 --retry-delay 2 --retry-connrefused -fsSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" -o /tmp/trivy.tar.gz && \
+RUN python3 -m pip install --no-cache-dir --ignore-installed boto3 cyclonedx-bom safety && \
+    case "${TARGETARCH}" in \
+      amd64) TRIVY_ARCH="64bit" ;; \
+      arm64) TRIVY_ARCH="ARM64" ;; \
+      *) echo "Unsupported TARGETARCH for Trivy: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac && \
+    curl --retry 5 --retry-delay 2 --retry-connrefused -fsSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-${TRIVY_ARCH}.tar.gz" -o /tmp/trivy.tar.gz && \
     tar -xzf /tmp/trivy.tar.gz -C /usr/local/bin trivy
 
 ENV SCRIPT_ROOT=/opt/package-scanner/scripts
