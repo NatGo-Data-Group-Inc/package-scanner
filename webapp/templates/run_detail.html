@@ -20,6 +20,20 @@
     <li><a href="/download?bucket={{ record.evidence_bucket }}&key={{ platform.paths.governance_summary_key|urlencode }}">governance summary</a></li>
     <li><a href="/download?bucket={{ record.evidence_bucket }}&key={{ platform.paths.run_metadata_key|urlencode }}">run metadata</a></li>
   </ul>
+  <p>Findings and Reports:</p>
+  <ul>
+    <li><a href="/download?bucket={{ record.evidence_bucket }}&key={{ platform.paths.vulnerability_findings_key|urlencode }}">vulnerability findings</a></li>
+    <li><a href="/download?bucket={{ record.evidence_bucket }}&key={{ platform.paths.remediation_required_key|urlencode }}">remediation required</a></li>
+    <li><a href="/download?bucket={{ record.evidence_bucket }}&key={{ platform.paths.remediation_exceptions_key|urlencode }}">remediation exceptions</a></li>
+    <li><a href="/download?bucket={{ record.evidence_bucket }}&key={{ platform.paths.remediation_spreadsheet_key|urlencode }}">remediation spreadsheet</a></li>
+    <li><a href="/download?bucket={{ record.evidence_bucket }}&key={{ platform.paths.trivy_report_key|urlencode }}">trivy report</a></li>
+    {% if platform.paths.safety_report_key %}
+    <li><a href="/download?bucket={{ record.evidence_bucket }}&key={{ platform.paths.safety_report_key|urlencode }}">safety report</a></li>
+    {% endif %}
+    {% if platform.paths.osv_report_key %}
+    <li><a href="/download?bucket={{ record.evidence_bucket }}&key={{ platform.paths.osv_report_key|urlencode }}">osv report</a></li>
+    {% endif %}
+  </ul>
   <p>Offline Prefix: <code>{{ platform.paths.offline_bundle_prefix }}</code></p>
   {% if platform.bundle_keys %}
   <ul>

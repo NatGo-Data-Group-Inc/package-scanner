@@ -67,6 +67,13 @@ def build_catalog_record(
                     "materialization_summary_key": f"{paths['traceability_prefix']}materialization-summary.json",
                     "governance_summary_key": f"{paths['traceability_prefix']}governance-summary.json",
                     "run_metadata_key": f"{paths['traceability_prefix']}run-metadata.json",
+                    "vulnerability_findings_key": f"{paths['governance_prefix']}vulnerability-findings.csv",
+                    "remediation_required_key": f"{paths['governance_prefix']}remediation-required.csv",
+                    "remediation_exceptions_key": f"{paths['governance_prefix']}remediation-exceptions.csv",
+                    "remediation_spreadsheet_key": f"{paths['governance_prefix']}remediation-spreadsheet.csv",
+                    "trivy_report_key": f"{paths['model_results_prefix']}trivy-sbom-report.json",
+                    "safety_report_key": f"{paths['model_results_prefix']}safety-report.json" if ecosystem == "python" else None,
+                    "osv_report_key": f"{paths['model_results_prefix']}osv-report.json" if ecosystem == "r" else None,
                 },
             }
         )
@@ -105,4 +112,3 @@ def put_s3_json(s3_client: Any, bucket: str, key: str, payload: dict[str, Any]) 
         Body=json.dumps(payload, indent=2).encode("utf-8"),
         ContentType="application/json",
     )
-

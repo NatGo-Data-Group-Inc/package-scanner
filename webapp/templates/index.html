@@ -9,8 +9,7 @@
 </ul>
 <h2>Current Approved</h2>
 <ul>
-  <li>R: {% if approved_r %}<a href="/runs/r/{{ approved_r.execution_id }}">{{ approved_r.execution_id }}</a>{% else %}<span class="muted">none</span>{% endif %}</li>
-  <li>Python: {% if approved_python %}<a href="/runs/python/{{ approved_python.execution_id }}">{{ approved_python.execution_id }}</a>{% else %}<span class="muted">none</span>{% endif %}</li>
+  <li>R: {% if approved_r %}<a href="/runs/r/{{ approved_r.execution_id }}">{{ approved_r.execution_id }}</a>{% else %}<span class="muted">No approved run selected</span>{% endif %}</li>
+  <li>Python: {% if approved_python %}<a href="/runs/python/{{ approved_python.execution_id }}">{{ approved_python.execution_id }}</a>{% else %}<span class="muted">No approved run selected</span>{% endif %}</li>
 </ul>
 {% endblock %}
-

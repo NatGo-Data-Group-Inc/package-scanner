@@ -4,14 +4,37 @@
     <meta charset="utf-8">
     <title>Package Scanner Catalog</title>
     <style>
-      body { font-family: sans-serif; margin: 2rem; color: #111; }
-      a { color: #0b57d0; text-decoration: none; }
+      :root {
+        color-scheme: light dark;
+        --bg: #fcfcfb;
+        --fg: #161616;
+        --link: #0b57d0;
+        --border: #dddddd;
+        --ok: #0a7d28;
+        --bad: #b42318;
+        --muted: #666666;
+        --code-bg: #f5f5f5;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #121417;
+          --fg: #e8eaed;
+          --link: #8ab4f8;
+          --border: #3c4043;
+          --ok: #7bd88f;
+          --bad: #ff8a80;
+          --muted: #aeb4bb;
+          --code-bg: #1e2227;
+        }
+      }
+      body { font-family: sans-serif; margin: 2rem; color: var(--fg); background: var(--bg); }
+      a { color: var(--link); text-decoration: none; }
       table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
-      th, td { border-bottom: 1px solid #ddd; padding: 0.5rem; text-align: left; vertical-align: top; }
-      .ok { color: #0a7d28; }
-      .bad { color: #b42318; }
-      .muted { color: #666; }
-      code { background: #f5f5f5; padding: 0.1rem 0.3rem; }
+      th, td { border-bottom: 1px solid var(--border); padding: 0.5rem; text-align: left; vertical-align: top; }
+      .ok { color: var(--ok); }
+      .bad { color: var(--bad); }
+      .muted { color: var(--muted); }
+      code { background: var(--code-bg); padding: 0.1rem 0.3rem; border-radius: 0.2rem; }
     </style>
   </head>
   <body>
@@ -19,4 +42,3 @@
     {% block body %}{% endblock %}
   </body>
   </html>
-

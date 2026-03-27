@@ -24,6 +24,24 @@ def create_app() -> Flask:
         rows.sort(key=lambda row: row.get("scan_timestamp", ""), reverse=True)
         return rows
 
+    def enrich_record(record: dict, ecosystem: str) -> dict:
+        for platform in record.get("platforms", []):
+            paths = platform.setdefault("paths", {})
+            governance_prefix = paths.get("governance_prefix")
+            model_results_prefix = paths.get("model_results_prefix")
+            if governance_prefix:
+                paths.setdefault("vulnerability_findings_key", f"{governance_prefix}vulnerability-findings.csv")
+                paths.setdefault("remediation_required_key", f"{governance_prefix}remediation-required.csv")
+                paths.setdefault("remediation_exceptions_key", f"{governance_prefix}remediation-exceptions.csv")
+                paths.setdefault("remediation_spreadsheet_key", f"{governance_prefix}remediation-spreadsheet.csv")
+            if model_results_prefix:
+                paths.setdefault("trivy_report_key", f"{model_results_prefix}trivy-sbom-report.json")
+                if ecosystem == "python":
+                    paths.setdefault("safety_report_key", f"{model_results_prefix}safety-report.json")
+                if ecosystem == "r":
+                    paths.setdefault("osv_report_key", f"{model_results_prefix}osv-report.json")
+        return record
+
     def load_pointer(ecosystem: str, name: str) -> dict | None:
         try:
             return s3_get_json(
@@ -64,7 +82,7 @@ def create_app() -> Flask:
             )
         except Exception:
             abort(404)
-        return render_template("run_detail.html", ecosystem=ecosystem, record=record)
+        return render_template("run_detail.html", ecosystem=ecosystem, record=enrich_record(record, ecosystem))
 
     @app.route("/download")
     def download():

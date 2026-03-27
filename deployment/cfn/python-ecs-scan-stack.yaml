@@ -528,6 +528,13 @@ Resources:
                               "materialization_summary_key": f"{traceability_prefix}materialization-summary.json",
                               "governance_summary_key": f"{traceability_prefix}governance-summary.json",
                               "run_metadata_key": f"{traceability_prefix}run-metadata.json",
+                              "vulnerability_findings_key": f"{prefix}/governance/python/{platform}/{timestamp}/vulnerability-findings.csv",
+                              "remediation_required_key": f"{prefix}/governance/python/{platform}/{timestamp}/remediation-required.csv",
+                              "remediation_exceptions_key": f"{prefix}/governance/python/{platform}/{timestamp}/remediation-exceptions.csv",
+                              "remediation_spreadsheet_key": f"{prefix}/governance/python/{platform}/{timestamp}/remediation-spreadsheet.csv",
+                              "trivy_report_key": f"{prefix}/model-results/python/{platform}/{timestamp}/trivy-sbom-report.json",
+                              "safety_report_key": f"{prefix}/model-results/python/{platform}/{timestamp}/safety-report.json",
+                              "osv_report_key": None,
                           },
                       }
                   )
