@@ -59,3 +59,38 @@ def s3_presign(bucket: str, key: str, *, region: str, profile: str | None, expir
     ]
     out = subprocess.run(cmd, check=True, capture_output=True, text=True)
     return out.stdout.strip()
+
+
+def stepfunctions_list_executions(
+    state_machine_arn: str,
+    *,
+    region: str,
+    profile: str | None,
+    status_filter: str | None = None,
+    max_results: int = 10,
+) -> list[dict[str, Any]]:
+    args = [
+        "stepfunctions",
+        "list-executions",
+        "--state-machine-arn",
+        state_machine_arn,
+        "--max-results",
+        str(max_results),
+    ]
+    if status_filter:
+        args.extend(["--status-filter", status_filter])
+    data = aws_json(args, region=region, profile=profile)
+    return data.get("executions", [])
+
+
+def stepfunctions_describe_execution(
+    execution_arn: str,
+    *,
+    region: str,
+    profile: str | None,
+) -> dict[str, Any]:
+    return aws_json(
+        ["stepfunctions", "describe-execution", "--execution-arn", execution_arn],
+        region=region,
+        profile=profile,
+    )

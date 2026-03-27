@@ -5,7 +5,13 @@ import os
 from flask import Flask, abort, redirect, render_template, request
 
 from package_scanner.catalog import catalog_pointer_key, catalog_run_key
-from package_scanner.catalog_awscli import s3_get_json, s3_list_keys, s3_presign
+from package_scanner.catalog_awscli import (
+    s3_get_json,
+    s3_list_keys,
+    s3_presign,
+    stepfunctions_describe_execution,
+    stepfunctions_list_executions,
+)
 
 
 def create_app() -> Flask:
@@ -14,6 +20,14 @@ def create_app() -> Flask:
     app.config["CATALOG_PREFIX"] = os.environ.get("CATALOG_PREFIX", "evidence")
     app.config["AWS_REGION"] = os.environ.get("AWS_REGION", "us-east-1")
     app.config["AWS_PROFILE"] = os.environ.get("AWS_PROFILE")
+    app.config["PYTHON_STATE_MACHINE_ARN"] = os.environ.get(
+        "PYTHON_STATE_MACHINE_ARN",
+        "arn:aws:states:us-east-1:807497180525:stateMachine:package-scanner-dev-python-ecs-linux-scan-orchestrator",
+    )
+    app.config["R_STATE_MACHINE_ARN"] = os.environ.get(
+        "R_STATE_MACHINE_ARN",
+        "arn:aws:states:us-east-1:807497180525:stateMachine:package-scanner-dev-r-ecs-linux-scan-orchestrator",
+    )
 
     def list_runs(ecosystem: str) -> list[dict]:
         prefix = f"{app.config['CATALOG_PREFIX'].rstrip('/')}/catalog/{ecosystem}/runs/"
@@ -53,6 +67,46 @@ def create_app() -> Flask:
         except Exception:
             return None
 
+    def active_runs() -> list[dict]:
+        configs = [
+            ("python", app.config["PYTHON_STATE_MACHINE_ARN"]),
+            ("r", app.config["R_STATE_MACHINE_ARN"]),
+        ]
+        active: list[dict] = []
+        for ecosystem, arn in configs:
+            if not arn:
+                continue
+            try:
+                executions = stepfunctions_list_executions(
+                    arn,
+                    region=app.config["AWS_REGION"],
+                    profile=app.config["AWS_PROFILE"],
+                    status_filter="RUNNING",
+                    max_results=10,
+                )
+            except Exception:
+                continue
+            for execution in executions:
+                item = {
+                    "ecosystem": ecosystem,
+                    "name": execution.get("name"),
+                    "executionArn": execution.get("executionArn"),
+                    "startDate": execution.get("startDate"),
+                    "status": execution.get("status"),
+                }
+                try:
+                    detail = stepfunctions_describe_execution(
+                        execution["executionArn"],
+                        region=app.config["AWS_REGION"],
+                        profile=app.config["AWS_PROFILE"],
+                    )
+                    item["input"] = detail.get("input")
+                except Exception:
+                    item["input"] = None
+                active.append(item)
+        active.sort(key=lambda row: str(row.get("startDate", "")), reverse=True)
+        return active
+
     @app.route("/")
     def index():
         return render_template(
@@ -61,6 +115,7 @@ def create_app() -> Flask:
             latest_python=load_pointer("python", "latest-successful"),
             approved_r=load_pointer("r", "current-approved"),
             approved_python=load_pointer("python", "current-approved"),
+            active_runs=active_runs(),
         )
 
     @app.route("/runs/<ecosystem>")

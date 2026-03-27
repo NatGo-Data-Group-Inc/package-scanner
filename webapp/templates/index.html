@@ -1,5 +1,10 @@
 {% extends "base.html" %}
 {% block body %}
+<script>
+  window.setTimeout(function () {
+    window.location.reload();
+  }, 300000);
+</script>
 <h1>Package Scanner Catalog</h1>
 <p class="muted">Catalog-backed browser for successful and promoted scan artifacts.</p>
 <h2>Latest Successful</h2>
@@ -12,4 +17,24 @@
   <li>R: {% if approved_r %}<a href="/runs/r/{{ approved_r.execution_id }}">{{ approved_r.execution_id }}</a>{% else %}<span class="muted">No approved run selected</span>{% endif %}</li>
   <li>Python: {% if approved_python %}<a href="/runs/python/{{ approved_python.execution_id }}">{{ approved_python.execution_id }}</a>{% else %}<span class="muted">No approved run selected</span>{% endif %}</li>
 </ul>
+<h2>Active Runs</h2>
+{% if active_runs %}
+<table>
+  <thead>
+    <tr><th>Ecosystem</th><th>Execution</th><th>Status</th><th>Started</th></tr>
+  </thead>
+  <tbody>
+    {% for run in active_runs %}
+    <tr>
+      <td>{{ run.ecosystem|upper }}</td>
+      <td><code>{{ run.name }}</code></td>
+      <td>{{ run.status }}</td>
+      <td><code>{{ run.startDate }}</code></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No active runs detected.</p>
+{% endif %}
 {% endblock %}
