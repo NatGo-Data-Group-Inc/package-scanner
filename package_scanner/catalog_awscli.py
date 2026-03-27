@@ -47,3 +47,15 @@ def s3_list_keys(bucket: str, prefix: str, *, region: str, profile: str | None) 
     ]
     data = aws_json(paginator_args, region=region, profile=profile)
     return [obj["Key"] for obj in data.get("Contents", [])]
+
+
+def s3_presign(bucket: str, key: str, *, region: str, profile: str | None, expires_in: int = 3600) -> str:
+    cmd = _base_cmd(region, profile) + [
+        "s3",
+        "presign",
+        f"s3://{bucket}/{key}",
+        "--expires-in",
+        str(expires_in),
+    ]
+    out = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    return out.stdout.strip()

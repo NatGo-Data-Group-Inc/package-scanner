@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import os
 
-from flask import Flask, abort, render_template
+from flask import Flask, abort, redirect, render_template, request
 
 from package_scanner.catalog import catalog_pointer_key, catalog_run_key
-from package_scanner.catalog_awscli import s3_get_json, s3_list_keys
+from package_scanner.catalog_awscli import s3_get_json, s3_list_keys, s3_presign
 
 
 def create_app() -> Flask:
@@ -65,6 +65,23 @@ def create_app() -> Flask:
         except Exception:
             abort(404)
         return render_template("run_detail.html", ecosystem=ecosystem, record=record)
+
+    @app.route("/download")
+    def download():
+        bucket = request.args.get("bucket") or app.config["CATALOG_BUCKET"]
+        key = request.args.get("key")
+        if not key:
+            abort(400)
+        try:
+            url = s3_presign(
+                bucket,
+                key,
+                region=app.config["AWS_REGION"],
+                profile=app.config["AWS_PROFILE"],
+            )
+        except Exception:
+            abort(500)
+        return redirect(url, code=302)
 
     return app
 

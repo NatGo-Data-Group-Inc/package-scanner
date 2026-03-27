@@ -3,16 +3,28 @@
 <h1>{{ ecosystem|upper }} Run {{ record.execution_id }}</h1>
 <p>Status: <span class="{{ 'ok' if record.status == 'SUCCEEDED' else 'bad' }}">{{ record.status }}</span></p>
 <p>Timestamp: <code>{{ record.scan_timestamp }}</code></p>
-<p>Summary: <a href="{{ record.summary_uri }}">{{ record.summary_uri }}</a></p>
+<p>Summary:
+  <a href="/download?bucket={{ record.evidence_bucket }}&key={{ record.summary_key|urlencode }}">download</a>
+  <span class="muted"><code>{{ record.summary_key }}</code></span>
+</p>
+{% if record.input_uri %}
+<p>Input: <a href="{{ record.input_uri }}">{{ record.input_uri }}</a></p>
+{% endif %}
 {% for platform in record.platforms %}
   <h2>{{ platform.platform }}</h2>
   <p>Status: <span class="{{ 'ok' if platform.status == 'SUCCEEDED' else 'bad' }}">{{ platform.status }}</span></p>
   <p>Validated: {{ platform.validated }}</p>
+  <p>Downloads:</p>
+  <ul>
+    <li><a href="/download?bucket={{ record.evidence_bucket }}&key={{ platform.paths.materialization_summary_key|urlencode }}">materialization summary</a></li>
+    <li><a href="/download?bucket={{ record.evidence_bucket }}&key={{ platform.paths.governance_summary_key|urlencode }}">governance summary</a></li>
+    <li><a href="/download?bucket={{ record.evidence_bucket }}&key={{ platform.paths.run_metadata_key|urlencode }}">run metadata</a></li>
+  </ul>
   <p>Offline Prefix: <code>{{ platform.paths.offline_bundle_prefix }}</code></p>
   {% if platform.bundle_keys %}
   <ul>
     {% for key in platform.bundle_keys %}
-      <li><code>{{ key }}</code></li>
+      <li><a href="/download?bucket={{ record.evidence_bucket }}&key={{ key|urlencode }}">download</a> <code>{{ key }}</code></li>
     {% endfor %}
   </ul>
   {% endif %}
@@ -26,4 +38,3 @@
   {% endif %}
 {% endfor %}
 {% endblock %}
-
