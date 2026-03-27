@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>{{ ecosystem|upper }} Run {{ record.execution_id }}</h1>
+<p>Status: <span class="{{ 'ok' if record.status == 'SUCCEEDED' else 'bad' }}">{{ record.status }}</span></p>
+<p>Timestamp: <code>{{ record.scan_timestamp }}</code></p>
+<p>Summary: <a href="{{ record.summary_uri }}">{{ record.summary_uri }}</a></p>
+{% for platform in record.platforms %}
+  <h2>{{ platform.platform }}</h2>
+  <p>Status: <span class="{{ 'ok' if platform.status == 'SUCCEEDED' else 'bad' }}">{{ platform.status }}</span></p>
+  <p>Validated: {{ platform.validated }}</p>
+  <p>Offline Prefix: <code>{{ platform.paths.offline_bundle_prefix }}</code></p>
+  {% if platform.bundle_keys %}
+  <ul>
+    {% for key in platform.bundle_keys %}
+      <li><code>{{ key }}</code></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if platform.missing %}
+  <p class="bad">Missing:</p>
+  <ul>
+    {% for key in platform.missing %}
+      <li><code>{{ key }}</code></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+{% endfor %}
+{% endblock %}
+

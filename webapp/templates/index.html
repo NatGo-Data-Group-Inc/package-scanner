@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Package Scanner Catalog</h1>
+<p class="muted">Catalog-backed browser for successful and promoted scan artifacts.</p>
+<h2>Latest Successful</h2>
+<ul>
+  <li>R: {% if latest_r %}<a href="/runs/r/{{ latest_r.execution_id }}">{{ latest_r.execution_id }}</a>{% else %}<span class="muted">none</span>{% endif %}</li>
+  <li>Python: {% if latest_python %}<a href="/runs/python/{{ latest_python.execution_id }}">{{ latest_python.execution_id }}</a>{% else %}<span class="muted">none</span>{% endif %}</li>
+</ul>
+<h2>Current Approved</h2>
+<ul>
+  <li>R: {% if approved_r %}<a href="/runs/r/{{ approved_r.execution_id }}">{{ approved_r.execution_id }}</a>{% else %}<span class="muted">none</span>{% endif %}</li>
+  <li>Python: {% if approved_python %}<a href="/runs/python/{{ approved_python.execution_id }}">{{ approved_python.execution_id }}</a>{% else %}<span class="muted">none</span>{% endif %}</li>
+</ul>
+{% endblock %}
+

@@ -29,6 +29,7 @@ Full procedures and examples are in:
 - [cli-switch-reference.md](./cli-switch-reference.md)
 - [troubleshooting.md](./troubleshooting.md)
 - [architecture.md](./architecture.md)
+- [catalog-and-ui.md](./catalog-and-ui.md)
 - [operations-runbook.md](./operations-runbook.md)
 - [security-and-governance.md](./security-and-governance.md)
 - [testing-and-quality.md](./testing-and-quality.md)

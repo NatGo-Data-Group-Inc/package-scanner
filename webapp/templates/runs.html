@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>{{ ecosystem|upper }} Runs</h1>
+<table>
+  <thead>
+    <tr><th>Execution</th><th>Timestamp</th><th>Status</th><th>Platforms</th><th>Validated</th></tr>
+  </thead>
+  <tbody>
+    {% for run in runs %}
+    <tr>
+      <td><a href="/runs/{{ ecosystem }}/{{ run.execution_id }}">{{ run.execution_id }}</a></td>
+      <td><code>{{ run.scan_timestamp }}</code></td>
+      <td class="{{ 'ok' if run.status == 'SUCCEEDED' else 'bad' }}">{{ run.status }}</td>
+      <td>{{ run.platform_count }}</td>
+      <td>{{ run.validated_platforms }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
+

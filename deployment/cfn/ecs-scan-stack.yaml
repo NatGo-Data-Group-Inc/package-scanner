@@ -436,12 +436,16 @@ Resources:
       Role: !GetAtt RScanSummaryRole.Arn
       Code:
         ZipFile: |
+          import datetime
           import json
           import boto3
           from botocore.exceptions import ClientError
 
           s3 = boto3.client("s3")
           events = boto3.client("events")
+
+          def put_json(bucket, key, payload):
+              s3.put_object(Bucket=bucket, Key=key, Body=json.dumps(payload, indent=2).encode("utf-8"), ContentType="application/json")
 
           def head_exists(bucket, key):
               try:
@@ -509,8 +513,61 @@ Resources:
                   "platforms": platforms,
               }
               summary_key = f"{prefix}/orchestration/r/{execution_id}/orchestration-summary.json"
-              s3.put_object(Bucket=bucket, Key=summary_key, Body=json.dumps(summary, indent=2).encode("utf-8"), ContentType="application/json")
+              put_json(bucket, summary_key, summary)
               summary["summary_key"] = summary_key
+              record = {
+                  "schema_version": 1,
+                  "ecosystem": "r",
+                  "execution_id": execution_id,
+                  "scan_timestamp": timestamp,
+                  "status": overall,
+                  "summary_key": summary_key,
+                  "summary_uri": f"s3://{bucket}/{summary_key}",
+                  "evidence_bucket": bucket,
+                  "evidence_prefix": prefix,
+                  "input_bucket": event.get("input_bucket"),
+                  "input_object_key": event.get("input_object_key"),
+                  "input_uri": f"s3://{event['input_bucket']}/{event['input_object_key']}" if event.get("input_bucket") and event.get("input_object_key") else None,
+                  "platforms": [],
+                  "platform_count": len(platforms),
+                  "validated_platforms": len([p for p in platforms if p.get("validated")]),
+                  "created_at": datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+                  "approved": False,
+                  "approved_at": None,
+                  "approved_by": None,
+              }
+              for platform_summary in platforms:
+                  platform = platform_summary["platform"]
+                  traceability_prefix = f"{prefix}/traceability/r/{platform}/{timestamp}/"
+                  record["platforms"].append(
+                      {
+                          "platform": platform,
+                          "status": platform_summary.get("status"),
+                          "validated": platform_summary.get("validated", False),
+                          "task_arn": platform_summary.get("task_arn"),
+                          "cluster_arn": platform_summary.get("cluster_arn"),
+                          "bundle_keys": platform_summary.get("bundle_keys", []),
+                          "missing": platform_summary.get("missing", []),
+                          "error": platform_summary.get("error"),
+                          "cause": platform_summary.get("cause"),
+                          "paths": {
+                              "requirements_prefix": f"{prefix}/requirements/r/{platform}/{timestamp}/",
+                              "env_artifacts_prefix": f"{prefix}/env-artifacts/r/{platform}/{timestamp}/",
+                              "model_results_prefix": f"{prefix}/model-results/r/{platform}/{timestamp}/",
+                              "governance_prefix": f"{prefix}/governance/r/{platform}/{timestamp}/",
+                              "traceability_prefix": traceability_prefix,
+                              "offline_bundle_prefix": f"{prefix}/packages/offline/r/{platform}/{timestamp}/",
+                              "materialization_summary_key": f"{traceability_prefix}materialization-summary.json",
+                              "governance_summary_key": f"{traceability_prefix}governance-summary.json",
+                              "run_metadata_key": f"{traceability_prefix}run-metadata.json",
+                          },
+                      }
+                  )
+              record_key = f"{prefix}/catalog/r/runs/{execution_id}.json"
+              put_json(bucket, record_key, record)
+              put_json(bucket, f"{prefix}/catalog/r/pointers/latest-run.json", record)
+              if overall == "SUCCEEDED":
+                  put_json(bucket, f"{prefix}/catalog/r/pointers/latest-successful.json", record)
               events.put_events(Entries=[{"Source": "package-scanner.r", "DetailType": f"R Materialization Orchestration {overall}", "Detail": json.dumps(summary)}])
               return summary
 

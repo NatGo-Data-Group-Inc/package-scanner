@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Package Scanner Catalog</title>
+    <style>
+      body { font-family: sans-serif; margin: 2rem; color: #111; }
+      a { color: #0b57d0; text-decoration: none; }
+      table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+      th, td { border-bottom: 1px solid #ddd; padding: 0.5rem; text-align: left; vertical-align: top; }
+      .ok { color: #0a7d28; }
+      .bad { color: #b42318; }
+      .muted { color: #666; }
+      code { background: #f5f5f5; padding: 0.1rem 0.3rem; }
+    </style>
+  </head>
+  <body>
+    <p><a href="/">Dashboard</a> | <a href="/runs/r">R Runs</a> | <a href="/runs/python">Python Runs</a></p>
+    {% block body %}{% endblock %}
+  </body>
+  </html>
+

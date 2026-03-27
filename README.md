@@ -9,6 +9,7 @@ platform-specific execution paths:
 Operator documentation:
 - `docs/handoff-runbook.md`
 - `docs/README.md`
+- `docs/catalog-and-ui.md`
 - `docs/workflow.md`
 - `docs/cli-switch-reference.md`
 - `docs/troubleshooting.md`
@@ -78,6 +79,7 @@ Project policies:
 - `deployment/cfn/python-scan-stack.yaml`: Python scan infrastructure and the preserved CodeBuild-based path.
 - `deployment/cfn/python-ecs-scan-stack.yaml`: Python ECS infrastructure for Linux amd64/arm64 scanning.
 - `deployment/cfn/ecs-scan-stack.yaml`: R ECS infrastructure and orchestration.
+- `webapp/app.py`: read-only Flask browser for the scan catalog.
 - `api/openapi.yaml`: control-plane API contract for UI/backend integration.
 - `scripts/deploy-cfn.sh`: canonical deploy/update entrypoint.
 - `scripts/deploy-python-ecs-cfn.sh`: deploy/update entrypoint for the Python ECS stack.
@@ -201,6 +203,8 @@ Linux-only Python ECS path:
 - `s3://<evidence-bucket>/evidence/env-artifacts/python/<platform>/<timestamp>/...`
 - `s3://<evidence-bucket>/evidence/governance/python/<platform>/<timestamp>/...`
 - `s3://<evidence-bucket>/evidence/traceability/python/<platform>/<timestamp>/run-metadata.json`
+- `s3://<evidence-bucket>/evidence/catalog/python/...`
+- `s3://<evidence-bucket>/evidence/catalog/r/...`
 
 5. Deploy the R ECS stack:
 
