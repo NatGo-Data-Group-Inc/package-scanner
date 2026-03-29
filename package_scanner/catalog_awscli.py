@@ -6,6 +6,10 @@ import tempfile
 from typing import Any
 
 
+class AwsAuthExpiredError(RuntimeError):
+    pass
+
+
 def _base_cmd(region: str, profile: str | None) -> list[str]:
     cmd = ["aws", "--region", region]
     if profile:
@@ -15,13 +19,25 @@ def _base_cmd(region: str, profile: str | None) -> list[str]:
 
 def aws_json(args: list[str], *, region: str, profile: str | None) -> Any:
     cmd = _base_cmd(region, profile) + args
-    out = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    try:
+        out = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr or ""
+        if "Error when retrieving token from sso" in stderr or "Token has expired" in stderr:
+            raise AwsAuthExpiredError("AWS SSO session expired. Reauthenticate and refresh the page.") from exc
+        raise
     return json.loads(out.stdout)
 
 
 def s3_get_json(bucket: str, key: str, *, region: str, profile: str | None) -> dict[str, Any]:
     cmd = _base_cmd(region, profile) + ["s3", "cp", f"s3://{bucket}/{key}", "-"]
-    out = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    try:
+        out = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr or ""
+        if "Error when retrieving token from sso" in stderr or "Token has expired" in stderr:
+            raise AwsAuthExpiredError("AWS SSO session expired. Reauthenticate and refresh the page.") from exc
+        raise
     return json.loads(out.stdout)
 
 
@@ -32,6 +48,11 @@ def s3_put_json(bucket: str, key: str, payload: dict[str, Any], *, region: str, 
     cmd = _base_cmd(region, profile) + ["s3api", "put-object", "--bucket", bucket, "--key", key, "--content-type", "application/json", "--body", temp_path]
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr or ""
+        if "Error when retrieving token from sso" in stderr or "Token has expired" in stderr:
+            raise AwsAuthExpiredError("AWS SSO session expired. Reauthenticate and refresh the page.") from exc
+        raise
     finally:
         subprocess.run(["rm", "-f", temp_path], check=False)
 

@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Download Unavailable</h1>
+<p class="muted">The requested artifact could not be downloaded right now.</p>
+{% if key %}
+<p><code>{{ key }}</code></p>
+{% endif %}
+{% endblock %}

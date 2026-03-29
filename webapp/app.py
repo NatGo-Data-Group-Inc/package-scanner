@@ -6,6 +6,7 @@ from flask import Flask, abort, redirect, render_template, request
 
 from package_scanner.catalog import catalog_pointer_key, catalog_run_key
 from package_scanner.catalog_awscli import (
+    AwsAuthExpiredError,
     s3_get_json,
     s3_list_keys,
     s3_presign,
@@ -28,6 +29,9 @@ def create_app() -> Flask:
         "R_STATE_MACHINE_ARN",
         "arn:aws:states:us-east-1:807497180525:stateMachine:package-scanner-dev-r-ecs-linux-scan-orchestrator",
     )
+
+    def auth_message() -> str | None:
+        return None
 
     def list_runs(ecosystem: str) -> list[dict]:
         prefix = f"{app.config['CATALOG_PREFIX'].rstrip('/')}/catalog/{ecosystem}/runs/"
@@ -109,25 +113,47 @@ def create_app() -> Flask:
 
     @app.route("/")
     def index():
+        auth_error = None
+        try:
+            latest_r = load_pointer("r", "latest-successful")
+            latest_python = load_pointer("python", "latest-successful")
+            approved_r = load_pointer("r", "current-approved")
+            approved_python = load_pointer("python", "current-approved")
+            active = active_runs()
+        except AwsAuthExpiredError as exc:
+            auth_error = str(exc)
+            latest_r = None
+            latest_python = None
+            approved_r = None
+            approved_python = None
+            active = []
         return render_template(
             "index.html",
-            latest_r=load_pointer("r", "latest-successful"),
-            latest_python=load_pointer("python", "latest-successful"),
-            approved_r=load_pointer("r", "current-approved"),
-            approved_python=load_pointer("python", "current-approved"),
-            active_runs=active_runs(),
+            latest_r=latest_r,
+            latest_python=latest_python,
+            approved_r=approved_r,
+            approved_python=approved_python,
+            active_runs=active,
+            auth_error=auth_error,
         )
 
     @app.route("/runs/<ecosystem>")
     def runs(ecosystem: str):
         if ecosystem not in {"r", "python"}:
             abort(404)
-        return render_template("runs.html", ecosystem=ecosystem, runs=list_runs(ecosystem))
+        auth_error = None
+        try:
+            rows = list_runs(ecosystem)
+        except AwsAuthExpiredError as exc:
+            auth_error = str(exc)
+            rows = []
+        return render_template("runs.html", ecosystem=ecosystem, runs=rows, auth_error=auth_error)
 
     @app.route("/runs/<ecosystem>/<execution_id>")
     def run_detail(ecosystem: str, execution_id: str):
         if ecosystem not in {"r", "python"}:
             abort(404)
+        auth_error = None
         try:
             record = s3_get_json(
                 app.config["CATALOG_BUCKET"],
@@ -135,9 +161,12 @@ def create_app() -> Flask:
                 region=app.config["AWS_REGION"],
                 profile=app.config["AWS_PROFILE"],
             )
+        except AwsAuthExpiredError as exc:
+            auth_error = str(exc)
+            record = None
         except Exception:
             abort(404)
-        return render_template("run_detail.html", ecosystem=ecosystem, record=enrich_record(record, ecosystem))
+        return render_template("run_detail.html", ecosystem=ecosystem, record=enrich_record(record, ecosystem) if record else None, auth_error=auth_error)
 
     @app.route("/download")
     def download():
@@ -152,6 +181,8 @@ def create_app() -> Flask:
                 region=app.config["AWS_REGION"],
                 profile=app.config["AWS_PROFILE"],
             )
+        except AwsAuthExpiredError as exc:
+            return render_template("download_error.html", auth_error=str(exc), key=key), 401
         except Exception:
             abort(500)
         return redirect(url, code=302)

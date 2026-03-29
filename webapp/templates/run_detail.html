@@ -1,5 +1,9 @@
 {% extends "base.html" %}
 {% block body %}
+{% if not record %}
+<h1>{{ ecosystem|upper }} Run</h1>
+<p class="muted">Run details are unavailable until AWS authentication is restored.</p>
+{% else %}
 <h1>{{ ecosystem|upper }} Run {{ record.execution_id }}</h1>
 <p>Status: <span class="{{ 'ok' if record.status == 'SUCCEEDED' else 'bad' }}">{{ record.status }}</span></p>
 <p>Timestamp: <code>{{ record.scan_timestamp }}</code></p>
@@ -51,4 +55,5 @@
   </ul>
   {% endif %}
 {% endfor %}
+{% endif %}
 {% endblock %}
