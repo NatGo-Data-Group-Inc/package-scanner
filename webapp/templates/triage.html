@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Triage: {{ ecosystem|upper }} {{ execution_id }}</h1>
+{% if auth_error %}
+<div style="margin:1rem 0; padding:0.75rem 1rem; border:1px solid var(--bad); border-radius:0.35rem; color:var(--bad);">
+  {{ auth_error }}
+</div>
+{% endif %}
+{% if not record %}
+<p class="bad">Run record not found.</p>
+{% else %}
+<div class="card">
+  <h3>Summary</h3>
+  <p><strong>Status:</strong> {{ record.status }}</p>
+  <p><strong>Platforms:</strong>
+    {% for p in record.platforms %}
+      <span class="chip badge-{{ architecture_label(p.platform) }}">{{ p.platform }}</span> {{ p.status }}{% if not loop.last %}, {% endif %}
+    {% endfor %}
+  </p>
+  <p><strong>Orchestration Summary:</strong> <code>{{ record.summary_key }}</code></p>
+  {% if triage_platform %}
+  <p><strong>Triage Platform:</strong> {{ triage_platform.platform }} ({{ triage_platform.status }})</p>
+  {% endif %}
+  <p><strong>Input Lockfile:</strong> {% if record.input_uri %}<code>{{ record.input_uri }}</code>{% else %}<span class="muted">n/a</span>{% endif %}</p>
+</div>
+
+{% if summary %}
+<div class="card">
+  <h3>Missing / Errors</h3>
+  {% for p in summary.platforms %}
+    <p><strong>{{ p.platform }}</strong>: {{ p.status }}{% if p.validation_error %} – {{ p.validation_error }}{% endif %}</p>
+    {% if p.missing %}
+    <ul>
+      {% for m in p.missing %}<li>{{ m }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="card">
+  <h3>Checkpoint Logs</h3>
+  {% if checkpoint_keys %}
+    <ul>
+    {% for key in checkpoint_keys %}
+      <li><code>{{ key }}</code></li>
+    {% endfor %}
+    </ul>
+  {% else %}
+    <p class="muted">No checkpoint keys listed. Ensure EPHEMERAL_BUCKET is configured.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3>Downloads</h3>
+  <ul>
+    <li><a href="/download-triage/{{ ecosystem }}/{{ execution_id }}/{{ triage_platform.platform if triage_platform else 'linux-amd64' }}">Download triage bundle (summary + restore/stage logs)</a></li>
+  </ul>
+</div>
+{% endif %}
+{% endblock %}

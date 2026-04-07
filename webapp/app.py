@@ -21,8 +21,8 @@ from package_scanner.catalog_awscli import (
     aws_json,
     s3_get_bytes,
     s3_get_json,
-    s3_head_object,
     s3_list_page,
+    s3_head_object,
     s3_put_bytes,
     s3_put_json,
     s3_presign,
@@ -184,6 +184,7 @@ def create_app() -> Flask:
     app.config["AWS_PROFILE"] = os.environ.get("AWS_PROFILE")
     app.config["R_STACK_NAME"] = os.environ.get("R_STACK_NAME", "cyber-scanner-dev-r-ecs")
     app.config["PYTHON_STACK_NAME"] = os.environ.get("PYTHON_STACK_NAME", "cyber-scanner-dev-python-ecs")
+    app.config["EPHEMERAL_BUCKET"] = os.environ.get("EPHEMERAL_BUCKET", "")
     app.config["PYTHON_STATE_MACHINE_ARN"] = os.environ.get(
         "PYTHON_STATE_MACHINE_ARN",
         "arn:aws:states:us-east-1:807497180525:stateMachine:package-scanner-dev-python-ecs-linux-scan-orchestrator",
@@ -1086,6 +1087,108 @@ def create_app() -> Flask:
         except Exception:
             abort(404)
         return render_template("run_detail.html", ecosystem=ecosystem, record=enrich_record(record, ecosystem) if record else None, auth_error=auth_error)
+
+    def triage_checkpoint_prefix(ecosystem: str, execution_id: str, platform: str) -> tuple[str | None, str | None]:
+        bucket = app.config.get("EPHEMERAL_BUCKET") or None
+        if not bucket:
+            return None, None
+        prefix = f"deploy/tmp/{ecosystem}/checkpoints/{ecosystem}/{execution_id}/{platform}/"
+        return bucket, prefix
+
+    def list_checkpoint_keys(bucket: str, prefix: str, limit: int = 50) -> list[str]:
+        keys: list[str] = []
+        token = None
+        while len(keys) < limit:
+            page = s3_list_page(
+                bucket,
+                prefix,
+                region=app.config["AWS_REGION"],
+                profile=app.config["AWS_PROFILE"],
+                max_keys=100,
+                continuation_token=token,
+            )
+            keys.extend(page["keys"])
+            if not page["is_truncated"] or len(keys) >= limit:
+                break
+            token = page["next_continuation_token"]
+        return keys[:limit]
+
+    @app.route("/runs/<ecosystem>/<execution_id>/triage")
+    def triage_view(ecosystem: str, execution_id: str):
+        if ecosystem not in {"r", "python"}:
+            abort(404)
+        auth_error = None
+        record = None
+        summary = None
+        triage_platform = None
+        checkpoint_keys = []
+        try:
+            record = load_record(ecosystem, execution_id)
+            summary = s3_get_json(
+                record["evidence_bucket"],
+                record["summary_key"],
+                region=app.config["AWS_REGION"],
+                profile=app.config["AWS_PROFILE"],
+            )
+            platforms = record.get("platforms", [])
+            triage_platform = next((p for p in platforms if p.get("status") == "FAILED"), platforms[0] if platforms else None)
+            bucket, prefix = (triage_checkpoint_prefix(ecosystem, execution_id, triage_platform.get("platform", "")) if triage_platform else (None, None))
+            if bucket and prefix:
+                checkpoint_keys = list_checkpoint_keys(bucket, prefix)
+        except AwsAuthExpiredError as exc:
+            auth_error = str(exc)
+        return render_template(
+            "triage.html",
+            ecosystem=ecosystem,
+            execution_id=execution_id,
+            record=record,
+            summary=summary,
+            triage_platform=triage_platform,
+            checkpoint_keys=checkpoint_keys,
+            auth_error=auth_error,
+        )
+
+    @app.route("/download-triage/<ecosystem>/<execution_id>/<platform_name>")
+    def download_triage_bundle(ecosystem: str, execution_id: str, platform_name: str):
+        if ecosystem not in {"r", "python"}:
+            abort(404)
+        try:
+            record = load_record(ecosystem, execution_id)
+            summary = s3_get_json(
+                record["evidence_bucket"],
+                record["summary_key"],
+                region=app.config["AWS_REGION"],
+                profile=app.config["AWS_PROFILE"],
+            )
+        except AwsAuthExpiredError as exc:
+            return render_template("download_error.html", auth_error=str(exc), key=execution_id), 401
+        except Exception:
+            abort(404)
+
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+            bundle.writestr("orchestration-summary.json", json.dumps(summary, indent=2))
+            checkpoint_bucket, checkpoint_prefix = triage_checkpoint_prefix(ecosystem, execution_id, platform_name)
+            if checkpoint_bucket and checkpoint_prefix:
+                for name in ["failures/restore.log", "failures/stage-state.json", "latest/stage-state.json"]:
+                    key = f"{checkpoint_prefix}{name}"
+                    try:
+                        payload = s3_get_bytes(
+                            checkpoint_bucket,
+                            key,
+                            region=app.config["AWS_REGION"],
+                            profile=app.config["AWS_PROFILE"],
+                        )
+                        bundle.writestr(name.split("/")[-1], payload)
+                    except Exception:
+                        continue
+        archive.seek(0)
+        return send_file(
+            archive,
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name=f"{execution_id}-{platform_name}-triage.zip",
+        )
 
     @app.route("/download-bundle/<ecosystem>/<execution_id>/<platform_name>")
     def download_bundle(ecosystem: str, execution_id: str, platform_name: str):

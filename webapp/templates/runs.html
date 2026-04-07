@@ -59,6 +59,11 @@
       <td><span class="chip badge-{{ run.selected_platform_label }}">{{ run.selected_platform_label }}</span></td>
       <td>{{ 'yes' if run.selected_platform_validated else 'no' }}</td>
       <td>{% if run.package_count is not none %}{{ run.package_count }}{% else %}<span class="muted">n/a</span>{% endif %}</td>
+      {% if run.selected_platform_status == "FAILED" %}
+      <td><a href="/runs/{{ ecosystem }}/{{ run.execution_id }}/triage">Triage</a></td>
+      {% else %}
+      <td class="muted">—</td>
+      {% endif %}
     </tr>
     {% endfor %}
   </tbody>
