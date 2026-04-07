@@ -90,6 +90,7 @@ Project policies:
 - `scripts/deploy-cfn.ps1`: PowerShell wrapper for `deploy-cfn.sh`.
 - `scripts/start-python-scan.ps1`: PowerShell wrapper for `start-python-scan.sh`.
 - `scripts/start-r-scan.ps1`: PowerShell wrapper for `start-r-scan.sh`.
+- `scripts/register-r-task-def.sh`: register a new R linux task definition revision with an immutable image tag.
 - `scripts/r-lockfile-tools.sh`: helper to snapshot `renv.lock` files and bundle per-platform caches for offline/enclave delivery.
 - `deployment/buildspecs/python-scan-buildspec.yml`: legacy buildspec (not used by matrix stack).
 - `scripts/upload-buildspec.ps1`: legacy helper (not required by matrix stack).

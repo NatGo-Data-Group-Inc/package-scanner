@@ -38,6 +38,24 @@ Use [handoff-runbook.md](./handoff-runbook.md) as the primary day-to-day operato
   - emits materialization evidence
   - publishes the cache archive + `.sha256` file to `evidence/packages/offline/r/<platform>/<timestamp>/`
 
+### Refreshing R ECS image without cache issues
+
+- Build/push with an immutable tag (timestamp or commit hash).
+- Register a new task-definition revision pointing at that tag so ECS won’t reuse a cached `:latest`:
+
+```bash
+IMAGE_TAG=$(date -u +%Y%m%dT%H%M%SZ)
+docker build -t 807497180525.dkr.ecr.us-east-1.amazonaws.com/package-scanner-dev/r-scan-linux:${IMAGE_TAG} -f docker/r-linux.Dockerfile .
+docker push 807497180525.dkr.ecr.us-east-1.amazonaws.com/package-scanner-dev/r-scan-linux:${IMAGE_TAG}
+
+scripts/register-r-task-def.sh \
+  --image 807497180525.dkr.ecr.us-east-1.amazonaws.com/package-scanner-dev/r-scan-linux:${IMAGE_TAG} \
+  --region us-east-1 \
+  --profile AdministratorAccess-807497180525
+```
+
+The R orchestrator targets the latest revision of the `package-scanner-dev-r-linux-amd64` family, so the next run pulls the new image. Ensure the ECS instance role retains `ecr:GetAuthorizationToken` so pulls succeed.
+
 ## Incident Procedure
 
 If scans fail unexpectedly:
