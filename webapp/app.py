@@ -293,6 +293,17 @@ def create_app() -> Flask:
         }
         return keys
 
+    def list_runs(ecosystem: str) -> list[dict]:
+        prefix = f"{app.config['CATALOG_PREFIX'].rstrip('/')}/catalog/{ecosystem}/runs/"
+        rows = []
+        for key in get_listing_keys(ecosystem):
+            try:
+                rows.append(load_record(ecosystem, key.rsplit("/", 1)[-1].replace(".json", "")))
+            except Exception:
+                continue
+        rows.sort(key=lambda row: row.get("scan_timestamp", ""), reverse=True)
+        return rows
+
     def load_record_by_key(key: str) -> dict:
         now = time.time()
         cached = record_cache.get(key)
@@ -886,6 +897,8 @@ def create_app() -> Flask:
         )
 
     def load_pointer(ecosystem: str, name: str) -> dict | None:
+        if name == "current-approved":
+            return None
         try:
             return s3_get_json(
                 app.config["CATALOG_BUCKET"],
@@ -999,6 +1012,24 @@ def create_app() -> Flask:
             approved_r = load_pointer("r", "current-approved")
             approved_python = load_pointer("python", "current-approved")
             active = active_runs()
+            def latest_failed(ecosystem: str, *, max_checks: int = 50) -> dict | None:
+                """
+                Find the most recent failed run without walking the entire catalog.
+                We stream listing keys (already sorted newest-first) and stop early
+                after the first failure or after max_checks records.
+                """
+                for idx, key in enumerate(get_listing_keys(ecosystem)):
+                    if idx >= max_checks:
+                        break
+                    try:
+                        row = load_record_by_key(key)
+                    except Exception:
+                        continue
+                    if any(p.get("status") == "FAILED" for p in row.get("platforms", [])):
+                        return row
+                return None
+            failed_r = latest_failed("r")
+            failed_python = latest_failed("python")
         except AwsAuthExpiredError as exc:
             auth_error = str(exc)
             latest_r = None
@@ -1006,12 +1037,16 @@ def create_app() -> Flask:
             approved_r = None
             approved_python = None
             active = []
+            failed_r = None
+            failed_python = None
         return render_template(
             "index.html",
             latest_r=latest_r,
             latest_python=latest_python,
             approved_r=approved_r,
             approved_python=approved_python,
+            failed_r=failed_r,
+            failed_python=failed_python,
             active_runs=active,
             auth_error=auth_error,
         )
@@ -1122,6 +1157,8 @@ def create_app() -> Flask:
         summary = None
         triage_platform = None
         checkpoint_keys = []
+        restore_log_tail = None
+        restore_log_key = None
         try:
             record = load_record(ecosystem, execution_id)
             summary = s3_get_json(
@@ -1135,6 +1172,21 @@ def create_app() -> Flask:
             bucket, prefix = (triage_checkpoint_prefix(ecosystem, execution_id, triage_platform.get("platform", "")) if triage_platform else (None, None))
             if bucket and prefix:
                 checkpoint_keys = list_checkpoint_keys(bucket, prefix)
+                for candidate in ["failures/restore.log", "latest/restore.log"]:
+                    key = f"{prefix}{candidate}"
+                    try:
+                        payload = s3_get_bytes(
+                            bucket,
+                            key,
+                            region=app.config["AWS_REGION"],
+                            profile=app.config["AWS_PROFILE"],
+                        ).decode("utf-8", errors="ignore")
+                        lines = payload.strip().splitlines()
+                        restore_log_tail = "\n".join(lines[-120:])
+                        restore_log_key = key
+                        break
+                    except Exception:
+                        continue
         except AwsAuthExpiredError as exc:
             auth_error = str(exc)
         return render_template(
@@ -1145,7 +1197,10 @@ def create_app() -> Flask:
             summary=summary,
             triage_platform=triage_platform,
             checkpoint_keys=checkpoint_keys,
+            restore_log_tail=restore_log_tail,
+            restore_log_key=restore_log_key,
             auth_error=auth_error,
+            architecture_label=architecture_label,
         )
 
     @app.route("/download-triage/<ecosystem>/<execution_id>/<platform_name>")

@@ -34,6 +34,7 @@ RUN dnf install -y \
     libicu-devel \
     libjpeg-turbo-devel \
     libpng-devel \
+    libuv-devel \
     mpfr-devel \
     libwebp-devel \
     libtiff-devel \

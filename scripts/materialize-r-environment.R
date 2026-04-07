@@ -34,7 +34,11 @@ on.exit({
   close(log_con)
 }, add = TRUE)
 
-options(repos = c(CRAN = "https://cloud.r-project.org"))
+# Prefer CRAN but fall back to Posit Public Package Manager to reduce “not available” mirror glitches.
+options(repos = c(
+  CRAN = "https://cloud.r-project.org",
+  RSPM = "https://packagemanager.posit.co/all/latest"
+))
 Sys.setenv(
   RENV_PATHS_CACHE = cache_dir,
   RENV_CONFIG_CACHE_SYMLINKS = "FALSE",

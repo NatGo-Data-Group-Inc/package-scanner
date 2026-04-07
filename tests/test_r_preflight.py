@@ -74,6 +74,13 @@ class RPreflightTests(unittest.TestCase):
         self.assertEqual(report["status"], "failed")
         self.assertEqual(report["missing_requirements"][0]["id"], "mpfr")
 
+    def test_preflight_flags_missing_libuv_header(self):
+        lockfile = self.write_lockfile({"fs": "1.6.4"})
+        with mock.patch.object(self.mod.os.path, "exists", return_value=False):
+            report = self.mod.build_report(lockfile, "linux-amd64")
+        self.assertEqual(report["status"], "failed")
+        self.assertEqual(report["missing_requirements"][0]["id"], "libuv")
+
 
 if __name__ == "__main__":
     unittest.main()

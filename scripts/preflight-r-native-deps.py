@@ -55,6 +55,19 @@ LINUX_RULES = [
         ],
     },
     {
+        "id": "libuv",
+        "description": "libuv headers required by fs and dependent packages.",
+        "packages": ["fs"],
+        "checks": [
+            {
+                "type": "header",
+                "paths": ["/usr/include/uv.h", "/usr/local/include/uv.h"],
+                "label": "uv.h",
+                "install_hint": "Install the distro libuv development package, such as libuv-devel.",
+            }
+        ],
+    },
+    {
         "id": "udunits2",
         "description": "UDUNITS-2 configuration required by spatial/time packages (e.g., spData, terra).",
         "packages": ["spData", "terra"],

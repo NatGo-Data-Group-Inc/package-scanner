@@ -56,6 +56,21 @@ scripts/register-r-task-def.sh \
 
 The R orchestrator targets the latest revision of the `package-scanner-dev-r-linux-amd64` family, so the next run pulls the new image. Ensure the ECS instance role retains `ecr:GetAuthorizationToken` so pulls succeed.
 
+### Enclave handoff (R)
+
+For an approved run, collect these artifacts from the evidence bucket:
+- `renv.lock` used for the run.
+- Offline cache tarball + checksum: `evidence/packages/offline/r/<platform>/<ts>/renv-cache.tar.gz` and `.sha256`.
+- Requirements snapshot: `installed-packages.csv`.
+- Governance outputs: `vulnerability-findings.csv`, `remediation-required.csv`, `remediation-exceptions.csv`, `remediation-spreadsheet.csv`, `governance-summary.json`.
+- Model reports: `osv-report.json`, `trivy-sbom-report.json`.
+- Run metadata and materialization summary: `run-metadata.json`, `materialization-summary.json`.
+
+Enclave steps (offline):
+- Verify the `.sha256`, place cache, set `RENV_PATHS_CACHE`.
+- Ensure R 4.4.0 matches scanner; run `renv::restore()` using the approved `renv.lock`.
+- Provide governance/model artifacts to cyber for evidence and sign-off.
+
 ## Incident Procedure
 
 If scans fail unexpectedly:

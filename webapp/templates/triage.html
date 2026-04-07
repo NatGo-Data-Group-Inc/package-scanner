@@ -52,6 +52,16 @@
 </div>
 
 <div class="card">
+  <h3>Restore Log (tail)</h3>
+  {% if restore_log_tail %}
+    <p class="muted">Source: <code>{{ restore_log_key }}</code></p>
+    <pre><code>{{ restore_log_tail }}</code></pre>
+  {% else %}
+    <p class="muted">No restore log available. Check EPHEMERAL_BUCKET and checkpoint paths.</p>
+  {% endif %}
+</div>
+
+<div class="card">
   <h3>Downloads</h3>
   <ul>
     <li><a href="/download-triage/{{ ecosystem }}/{{ execution_id }}/{{ triage_platform.platform if triage_platform else 'linux-amd64' }}">Download triage bundle (summary + restore/stage logs)</a></li>

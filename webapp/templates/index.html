@@ -12,6 +12,11 @@
   <li>R: {% if latest_r %}<a href="/runs/r/{{ latest_r.execution_id }}">{{ latest_r.execution_id }}</a>{% else %}<span class="muted">none</span>{% endif %}</li>
   <li>Python: {% if latest_python %}<a href="/runs/python/{{ latest_python.execution_id }}">{{ latest_python.execution_id }}</a>{% else %}<span class="muted">none</span>{% endif %}</li>
 </ul>
+<h2>Latest Failed</h2>
+<ul>
+  <li>R: {% if failed_r %}<a href="/runs/r/{{ failed_r.execution_id }}">{{ failed_r.execution_id }}</a>{% else %}<span class="muted">none</span>{% endif %}</li>
+  <li>Python: {% if failed_python %}<a href="/runs/python/{{ failed_python.execution_id }}">{{ failed_python.execution_id }}</a>{% else %}<span class="muted">none</span>{% endif %}</li>
+</ul>
 <h2>Current Approved</h2>
 <ul>
   <li>R: {% if approved_r %}<a href="/runs/r/{{ approved_r.execution_id }}">{{ approved_r.execution_id }}</a>{% else %}<span class="muted">No approved run selected</span>{% endif %}</li>
