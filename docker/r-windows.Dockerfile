@@ -40,6 +40,7 @@ COPY scripts\extract-archive.py C:\package-scanner\scripts\extract-archive.py
 COPY scripts\generate-r-materialization-summary.py C:\package-scanner\scripts\generate-r-materialization-summary.py
 COPY scripts\generate-r-sbom.py C:\package-scanner\scripts\generate-r-sbom.py
 COPY scripts\scan-r-vulnerabilities.py C:\package-scanner\scripts\scan-r-vulnerabilities.py
+COPY scripts\preflight-r-native-deps.py C:\package-scanner\scripts\preflight-r-native-deps.py
 COPY scripts\generate-r-governance-artifacts.py C:\package-scanner\scripts\generate-r-governance-artifacts.py
 COPY scripts\run-r-ecs-task.ps1 C:\package-scanner\scripts\run-r-ecs-task.ps1
 

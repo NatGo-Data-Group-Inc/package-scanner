@@ -12,8 +12,17 @@
         --border: #dddddd;
         --ok: #0a7d28;
         --bad: #b42318;
+        --warn: #b54708;
         --muted: #666666;
         --code-bg: #f5f5f5;
+        --chip-r-bg: #dff3e4;
+        --chip-r-fg: #165b33;
+        --chip-python-bg: #e4efff;
+        --chip-python-fg: #1b4d9b;
+        --chip-linux-bg: #e8f7eb;
+        --chip-linux-fg: #1f6f43;
+        --chip-windows-bg: #eef3ff;
+        --chip-windows-fg: #2453a6;
       }
       @media (prefers-color-scheme: dark) {
         :root {
@@ -23,17 +32,45 @@
           --border: #3c4043;
           --ok: #7bd88f;
           --bad: #ff8a80;
+          --warn: #f6c177;
           --muted: #aeb4bb;
           --code-bg: #1e2227;
+          --chip-r-bg: #173025;
+          --chip-r-fg: #95d5a7;
+          --chip-python-bg: #18263b;
+          --chip-python-fg: #9dc2ff;
+          --chip-linux-bg: #173025;
+          --chip-linux-fg: #95d5a7;
+          --chip-windows-bg: #1a2440;
+          --chip-windows-fg: #a8c4ff;
         }
       }
       body { font-family: sans-serif; margin: 2rem; color: var(--fg); background: var(--bg); }
       a { color: var(--link); text-decoration: none; }
       table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
       th, td { border-bottom: 1px solid var(--border); padding: 0.5rem; text-align: left; vertical-align: top; }
+      form { display: flex; gap: 0.75rem; align-items: end; flex-wrap: wrap; margin-top: 1rem; }
+      label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.95rem; }
+      input, select, button { padding: 0.35rem 0.5rem; border: 1px solid var(--border); border-radius: 0.25rem; background: var(--bg); color: var(--fg); }
+      button { cursor: pointer; }
+      button[disabled] { cursor: not-allowed; opacity: 0.55; }
+      .card { border: 1px solid var(--border); border-radius: 0.45rem; padding: 1rem; margin-top: 1rem; }
+      .chip-row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 0.75rem 0; }
+      .chip { display: inline-block; padding: 0.2rem 0.45rem; border: 1px solid var(--border); border-radius: 999px; }
+      .chip.checkbox-chip { background: rgba(11, 87, 208, 0.08); border-color: var(--link); font-weight: 600; }
+      .chip.badge-r { background: var(--chip-r-bg); color: var(--chip-r-fg); border-color: transparent; }
+      .chip.badge-python { background: var(--chip-python-bg); color: var(--chip-python-fg); border-color: transparent; }
+      .chip.badge-linux-amd64, .chip.badge-linux-arm64 { background: var(--chip-linux-bg); color: var(--chip-linux-fg); border-color: transparent; }
+      .chip.badge-windows { background: var(--chip-windows-bg); color: var(--chip-windows-fg); border-color: transparent; }
+      .callout { border: 1px solid var(--link); border-radius: 0.45rem; padding: 0.85rem 1rem; margin: 1rem 0; background: rgba(11, 87, 208, 0.06); }
+      .step-table td, .step-table th { font-size: 0.95rem; }
       .ok { color: var(--ok); }
       .bad { color: var(--bad); }
+      .warn { color: var(--warn); }
       .muted { color: var(--muted); }
+      .inline-filters { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+      .pager { display: flex; gap: 0.75rem; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-top: 1rem; }
+      .pager-links { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
       code { background: var(--code-bg); padding: 0.1rem 0.3rem; border-radius: 0.2rem; }
     </style>
   </head>

@@ -18,6 +18,10 @@
   <h2>{{ platform.platform }}</h2>
   <p>Status: <span class="{{ 'ok' if platform.status == 'SUCCEEDED' else 'bad' }}">{{ platform.status }}</span></p>
   <p>Validated: {{ platform.validated }}</p>
+  <p><a href="/download-bundle/{{ ecosystem }}/{{ record.execution_id }}/{{ platform.platform }}">download review bundle</a></p>
+  {% if platform.unknown_findings_count %}
+  <p><a href="/runs/{{ ecosystem }}/{{ record.execution_id }}/{{ platform.platform }}/unknown-findings">review UNKNOWN findings ({{ platform.unknown_findings_count }})</a> | <a href="/download-unknown-bundle/{{ ecosystem }}/{{ record.execution_id }}/{{ platform.platform }}">download UNKNOWN analyst bundle</a></p>
+  {% endif %}
   <p>Downloads:</p>
   <ul>
     <li><a href="/download?bucket={{ record.evidence_bucket }}&key={{ platform.paths.materialization_summary_key|urlencode }}">materialization summary</a></li>

@@ -21,15 +21,17 @@
 {% if active_runs %}
 <table>
   <thead>
-    <tr><th>Ecosystem</th><th>Execution</th><th>Status</th><th>Started</th></tr>
+    <tr><th>Ecosystem</th><th>Platform</th><th>Execution</th><th>Status</th><th>Started</th><th>Elapsed</th></tr>
   </thead>
   <tbody>
     {% for run in active_runs %}
     <tr>
-      <td>{{ run.ecosystem|upper }}</td>
+      <td><span class="chip badge-{{ run.ecosystem }}">{{ run.ecosystem|upper }}</span></td>
+      <td><span class="chip badge-{{ run.platform_label }}">{{ run.platform_label }}</span></td>
       <td><code>{{ run.name }}</code></td>
-      <td>{{ run.status }}</td>
-      <td><code>{{ run.startDate }}</code></td>
+      <td class="{{ run.status_class }}">{{ run.status }}</td>
+      <td>{{ run.started_display }}</td>
+      <td>{{ run.duration_display or 'n/a' }}</td>
     </tr>
     {% endfor %}
   </tbody>

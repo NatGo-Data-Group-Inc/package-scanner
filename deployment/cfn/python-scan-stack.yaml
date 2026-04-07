@@ -1091,6 +1091,8 @@ Resources:
                       platform_summary["missing"] = missing
                       platform_summary["validated"] = not missing
                       if missing:
+                          platform_summary["status"] = "FAILED"
+                          platform_summary["validation_error"] = "required artifacts missing"
                           overall = "FAILED"
                   else:
                       overall = "FAILED"

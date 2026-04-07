@@ -237,6 +237,7 @@ Resources:
             echo "ECS_CLUSTER=${RLinuxCluster}" >> /etc/ecs/ecs.config
             echo "ECS_ENABLE_TASK_IAM_ROLE=true" >> /etc/ecs/ecs.config
             echo "ECS_ENABLE_TASK_IAM_ROLE_NETWORK_HOST=true" >> /etc/ecs/ecs.config
+            echo "ECS_IMAGE_PULL_BEHAVIOR=always" >> /etc/ecs/ecs.config
             mkdir -p /var/lib/package-scanner
 
   RWindowsLaunchTemplate:
@@ -261,6 +262,7 @@ Resources:
             <powershell>
             Import-Module ECSTools
             Initialize-ECSAgent -Cluster '${RWindowsCluster}' -EnableTaskIAMRole -LoggingDrivers '["json-file","awslogs"]'
+            [Environment]::SetEnvironmentVariable("ECS_IMAGE_PULL_BEHAVIOR", "always", "Machine")
             New-Item -ItemType Directory -Force -Path C:\package-scanner-data | Out-Null
             </powershell>
 
@@ -468,6 +470,8 @@ Resources:
               prefix = event.get("evidence_prefix", "evidence").rstrip("/")
               timestamp = event["scan_timestamp"]
               execution_id = event["scan_execution_id"]
+              started_at = datetime.datetime.strptime(timestamp, "%Y%m%dT%H%M%SZ").replace(tzinfo=datetime.timezone.utc)
+              completed_at = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
               platforms = []
               overall = "SUCCEEDED"
               for result in event["results"]:
@@ -500,6 +504,8 @@ Resources:
                       platform_summary["missing"] = missing
                       platform_summary["validated"] = not missing
                       if missing:
+                          platform_summary["status"] = "FAILED"
+                          platform_summary["validation_error"] = "required artifacts missing"
                           overall = "FAILED"
                   else:
                       overall = "FAILED"
@@ -509,6 +515,9 @@ Resources:
               summary = {
                   "scan_execution_id": execution_id,
                   "scan_timestamp": timestamp,
+                  "started_at": started_at.isoformat().replace("+00:00", "Z"),
+                  "completed_at": completed_at.isoformat().replace("+00:00", "Z"),
+                  "duration_seconds": max(0, int((completed_at - started_at).total_seconds())),
                   "overall_status": overall,
                   "platforms": platforms,
               }
@@ -520,6 +529,9 @@ Resources:
                   "ecosystem": "r",
                   "execution_id": execution_id,
                   "scan_timestamp": timestamp,
+                  "started_at": summary["started_at"],
+                  "completed_at": summary["completed_at"],
+                  "duration_seconds": summary["duration_seconds"],
                   "status": overall,
                   "summary_key": summary_key,
                   "summary_uri": f"s3://{bucket}/{summary_key}",
@@ -560,6 +572,7 @@ Resources:
                               "materialization_summary_key": f"{traceability_prefix}materialization-summary.json",
                               "governance_summary_key": f"{traceability_prefix}governance-summary.json",
                               "run_metadata_key": f"{traceability_prefix}run-metadata.json",
+                              "preflight_native_deps_key": f"{traceability_prefix}preflight-native-deps.json",
                               "vulnerability_findings_key": f"{prefix}/governance/r/{platform}/{timestamp}/vulnerability-findings.csv",
                               "remediation_required_key": f"{prefix}/governance/r/{platform}/{timestamp}/remediation-required.csv",
                               "remediation_exceptions_key": f"{prefix}/governance/r/{platform}/{timestamp}/remediation-exceptions.csv",

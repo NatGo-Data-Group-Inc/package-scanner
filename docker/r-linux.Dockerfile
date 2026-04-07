@@ -8,6 +8,7 @@ RUN dnf install -y \
     bzip2 \
     bzip2-devel \
     cairo-devel \
+    cmake \
     file \
     findutils \
     fontconfig-devel \
@@ -16,7 +17,10 @@ RUN dnf install -y \
     gcc \
     gcc-c++ \
     gcc-gfortran \
+    gdal310-devel \
+    geos-devel \
     git \
+    gmp-devel \
     gzip \
     harfbuzz-devel \
     ImageMagick-c++-devel \
@@ -37,9 +41,11 @@ RUN dnf install -y \
     openssl-devel \
     pcre2-devel \
     pkgconfig \
+    proj-devel \
     python3 \
     python3-pip \
     readline-devel \
+    sqlite-devel \
     tar \
     tk-devel \
     unixODBC-devel \
@@ -78,6 +84,7 @@ COPY scripts/extract-archive.py /opt/package-scanner/scripts/extract-archive.py
 COPY scripts/generate-r-materialization-summary.py /opt/package-scanner/scripts/generate-r-materialization-summary.py
 COPY scripts/generate-r-sbom.py /opt/package-scanner/scripts/generate-r-sbom.py
 COPY scripts/scan-r-vulnerabilities.py /opt/package-scanner/scripts/scan-r-vulnerabilities.py
+COPY scripts/preflight-r-native-deps.py /opt/package-scanner/scripts/preflight-r-native-deps.py
 COPY scripts/generate-r-governance-artifacts.py /opt/package-scanner/scripts/generate-r-governance-artifacts.py
 COPY scripts/run-r-ecs-task.sh /opt/package-scanner/scripts/run-r-ecs-task.sh
 

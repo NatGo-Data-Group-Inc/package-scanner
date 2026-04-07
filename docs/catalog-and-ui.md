@@ -51,11 +51,19 @@ python scripts/promote-scan-run.py \
 The Flask browser is a read-only view over the catalog:
 
 ```bash
-export FLASK_APP=webapp/app.py
-export AWS_REGION=us-east-1
-export CATALOG_BUCKET=<evidence-bucket>
-export CATALOG_PREFIX=evidence
-flask run --debug
+./scripts/start-webapp.sh \
+  --profile <aws-profile> \
+  --catalog-bucket <evidence-bucket>
+```
+
+This wrapper starts the local webapp without the Flask debugger or reloader and
+uses a dedicated writable AWS home under `/tmp` so refreshed SSO credentials can
+be copied in cleanly.
+
+Stop it with:
+
+```bash
+./scripts/stop-webapp.sh
 ```
 
 Routes:
@@ -65,3 +73,111 @@ Routes:
 - `/runs/python`
 - `/runs/r/<execution-id>`
 - `/runs/python/<execution-id>`
+- `/runs/<ecosystem>/<execution-id>/<platform>/unknown-findings`
+
+## Field Definitions
+
+The runs page is intended to help operators choose a scan artifact set for
+review, approval, or enclave transfer.
+
+### Status
+
+- `SUCCEEDED`: the selected platform execution completed successfully.
+- `FAILED`: the selected platform execution failed.
+- `RUNNING`: the selected platform execution is still in progress.
+- `TIMED_OUT`: the selected platform execution exceeded its allowed runtime.
+- `ABORTED`: the selected platform execution was stopped before normal completion.
+
+On the runs page, `Status` is shown for the selected platform row, not as a
+count across all platforms in the run.
+
+### Platform
+
+`Platform` is the architecture view used for artifact selection:
+
+- `linux-amd64`
+- `linux-arm64` for Python ECS scans
+- `windows`
+
+The UI normalizes Windows platform labels to `windows` for selection purposes.
+For example, a catalog record stored as `windows-amd64` is displayed and filtered
+as `windows`.
+
+### Validated
+
+`Validated` means the platform produced a complete, expected artifact set in S3.
+It is an artifact-completeness check, not a business approval.
+
+A platform is marked `validated: true` only when:
+
+- the platform status is `SUCCEEDED`
+- the required traceability and requirements artifacts exist
+- the required offline bundle artifacts exist
+
+For R, this includes the expected package list, traceability summaries, and the
+offline bundle tarball plus checksum. For Python, the same principle applies to
+the Python traceability and evidence artifacts.
+
+`Validated` does not mean:
+
+- PMO approved the run
+- vulnerabilities were accepted or resolved
+- every platform in the broader run succeeded
+
+### Severity `UNKNOWN`
+
+When findings or remediation artifacts show severity `UNKNOWN`, interpret that
+as:
+
+- a finding exists
+- the scanner could not determine a reliable severity
+- Cyber analyst review is required to assign severity or disposition
+
+`UNKNOWN` should not be interpreted as:
+
+- no issue found
+- safe to ignore
+- automatically equivalent to `HIGH` or `CRITICAL`
+
+For R workflows, `UNKNOWN` findings may still appear in remediation-required
+outputs when the run is started with `--remediate-unknown true`.
+
+The run detail page exposes two operator aids for `UNKNOWN` findings:
+
+- an `UNKNOWN` review page that joins installed-package evidence, scanner
+  outputs, external reference links, known fixed versions, and an analyst
+  checklist
+- an `UNKNOWN` analyst bundle zip containing the enriched finding export and
+  source artifacts used to support severity/disposition review
+
+### Package Count
+
+`Package Count` is shown for the selected platform and is read from that
+platform's `materialization-summary.json`.
+
+- For R, it is `counts.restored_packages`.
+- For Python, it is the sum of `counts.pip_package_count` and
+  `counts.conda_package_count` when both are present.
+
+This value is intended to support package-volume comparison during run
+selection.
+
+### Offline Bundle
+
+For R, the offline bundle is the enclave-transfer artifact set under:
+
+- `evidence/packages/offline/r/<platform>/<timestamp>/`
+
+The primary transfer artifact is the offline `.tar.gz` bundle together with its
+`.sha256` checksum file.
+
+### Default Filters
+
+The runs page defaults are:
+
+- `Status = SUCCEEDED`
+- `Platform = linux-amd64`
+- `Validated = yes`
+
+These defaults are intended to surface the most immediately usable Linux scan
+artifacts first.

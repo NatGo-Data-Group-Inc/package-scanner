@@ -75,6 +75,8 @@ publish_failure_diagnostics() {
   set +e
   stop_checkpoint_loop
   write_state "failed"
+  upload_if_exists "${RUN_DIR}/preflight-native-deps.txt" "${CHECKPOINT_PREFIX}/failures/preflight-native-deps.txt"
+  upload_if_exists "${RUN_DIR}/preflight-native-deps.json" "${CHECKPOINT_PREFIX}/failures/preflight-native-deps.json"
   upload_if_exists "${RUN_DIR}/restore.log" "${CHECKPOINT_PREFIX}/failures/restore.log"
   upload_if_exists "${RUN_DIR}/stage-state.json" "${CHECKPOINT_PREFIX}/failures/stage-state.json"
   publish_checkpoint "failed"
@@ -100,6 +102,15 @@ if [[ "${ACTUAL_R_VERSION}" != "${R_VERSION}" ]]; then
   echo "R version mismatch. image=${ACTUAL_R_VERSION} lockfile=${R_VERSION}" >&2
   exit 1
 fi
+
+write_state "preflight"
+"${PYTHON_BIN}" "${SCRIPT_ROOT}/preflight-r-native-deps.py" \
+  --lock-file "${RUN_DIR}/renv.lock" \
+  --platform "${TARGET_PLATFORM}" \
+  --output-json "${RUN_DIR}/preflight-native-deps.json" \
+  --output-text "${RUN_DIR}/preflight-native-deps.txt"
+upload_if_exists "${RUN_DIR}/preflight-native-deps.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/r/${TARGET_PLATFORM}/${TS}/preflight-native-deps.json"
+upload_if_exists "${RUN_DIR}/preflight-native-deps.txt" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/preflight-native-deps.txt"
 
 write_state "restore"
 start_checkpoint_loop
@@ -133,8 +144,10 @@ upload_if_exists "${RUN_DIR}/installed-packages.csv" "s3://${EVIDENCE_BUCKET}/${
 upload_if_exists "${RUN_DIR}/r-packages.cdx.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/r-packages.cdx.json"
 upload_if_exists "${RUN_DIR}/session-info.txt" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/session-info.txt"
 upload_if_exists "${RUN_DIR}/renv-status.txt" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/renv-status.txt"
+upload_if_exists "${RUN_DIR}/preflight-native-deps.txt" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/preflight-native-deps.txt"
 upload_if_exists "${RUN_DIR}/restore.log" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/restore.log"
 upload_if_exists "${RUN_DIR}/materialization-summary.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/r/${TARGET_PLATFORM}/${TS}/materialization-summary.json"
+upload_if_exists "${RUN_DIR}/preflight-native-deps.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/r/${TARGET_PLATFORM}/${TS}/preflight-native-deps.json"
 upload_if_exists "${RUN_DIR}/environment-artifacts.tar.gz" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/environment-artifacts.tar.gz"
 upload_if_exists "${RUN_DIR}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz"
 upload_if_exists "${RUN_DIR}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz.sha256" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"

@@ -1,26 +1,189 @@
 from __future__ import annotations
 
+import csv
+import io
+import json
+import logging
 import os
+import time
+import uuid
+import zipfile
+from collections.abc import Iterator
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+from urllib.parse import quote_plus
 
-from flask import Flask, abort, redirect, render_template, request
+from flask import Flask, abort, g, jsonify, redirect, render_template, request, send_file
 
 from package_scanner.catalog import catalog_pointer_key, catalog_run_key
 from package_scanner.catalog_awscli import (
     AwsAuthExpiredError,
+    aws_json,
+    s3_get_bytes,
     s3_get_json,
-    s3_list_keys,
+    s3_head_object,
+    s3_list_page,
+    s3_put_bytes,
+    s3_put_json,
     s3_presign,
     stepfunctions_describe_execution,
     stepfunctions_list_executions,
 )
 
 
+def architecture_label(platform: str) -> str:
+    if platform.startswith("windows"):
+        return "windows"
+    return platform
+
+
+def artifact_bundle_entries(platform: dict) -> list[tuple[str, str]]:
+    paths = platform.get("paths", {})
+    entries = [
+        ("materialization-summary.json", paths.get("materialization_summary_key")),
+        ("governance-summary.json", paths.get("governance_summary_key")),
+        ("run-metadata.json", paths.get("run_metadata_key")),
+        ("vulnerability-findings.csv", paths.get("vulnerability_findings_key")),
+        ("remediation-required.csv", paths.get("remediation_required_key")),
+        ("remediation-exceptions.csv", paths.get("remediation_exceptions_key")),
+        ("remediation-spreadsheet.csv", paths.get("remediation_spreadsheet_key")),
+        ("trivy-sbom-report.json", paths.get("trivy_report_key")),
+        ("osv-report.json", paths.get("osv_report_key")),
+    ]
+    return [(filename, key) for filename, key in entries if key]
+
+
+def parse_csv_bytes(payload: bytes) -> list[dict[str, str]]:
+    text = payload.decode("utf-8-sig", errors="ignore")
+    return list(csv.DictReader(io.StringIO(text)))
+
+
+def first_cve(aliases: list[str]) -> str:
+    return next((alias for alias in aliases if alias.upper().startswith("CVE-")), "")
+
+
+def osv_advisory_url(vulnerability_id: str) -> str:
+    if vulnerability_id.upper().startswith(("RSEC-", "GHSA-", "MAL-")):
+        return f"https://osv.dev/vulnerability/{vulnerability_id}"
+    return ""
+
+
+def cran_package_url(package_name: str) -> str:
+    return f"https://cran.r-project.org/package={quote_plus(package_name)}"
+
+
+def bioconductor_package_url(package_name: str) -> str:
+    return f"https://bioconductor.org/packages/{quote_plus(package_name)}"
+
+
+def utc_compact_timestamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def parse_datetime(value) -> datetime | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, (int, float)):
+        timestamp = float(value)
+        if timestamp > 1_000_000_000_000:
+            timestamp /= 1000.0
+        return datetime.fromtimestamp(timestamp, tz=timezone.utc)
+    text = str(value).strip()
+    if not text:
+        return None
+    for parser in (
+        lambda item: datetime.strptime(item, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc),
+        lambda item: datetime.fromisoformat(item.replace("Z", "+00:00")),
+        lambda item: parsedate_to_datetime(item),
+    ):
+        try:
+            parsed = parser(text)
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        except (TypeError, IndexError):
+            continue
+    return None
+
+
+def format_display_datetime(value) -> str:
+    parsed = parse_datetime(value)
+    if not parsed:
+        return str(value or "")
+    return parsed.astimezone().strftime("%Y-%m-%d %I:%M:%S %p")
+
+
+def format_duration(start, stop=None) -> str | None:
+    started_at = parse_datetime(start)
+    stopped_at = parse_datetime(stop) or datetime.now(timezone.utc)
+    if not started_at or not stopped_at:
+        return None
+    seconds = max(0, int((stopped_at - started_at).total_seconds()))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes}m {secs}s"
+    if minutes:
+        return f"{minutes}m {secs}s"
+    return f"{secs}s"
+
+
+def format_duration_seconds(duration_seconds: int | float | None) -> str | None:
+    if duration_seconds is None:
+        return None
+    seconds = max(0, int(duration_seconds))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes}m {secs}s"
+    if minutes:
+        return f"{minutes}m {secs}s"
+    return f"{secs}s"
+
+
+def status_class(status: str) -> str:
+    normalized = str(status or "").upper()
+    if normalized in {"SUCCEEDED", "RUNNING"}:
+        return "ok"
+    if normalized in {"FAILED", "TIMED_OUT", "ABORTED"}:
+        return "bad"
+    return "muted"
+
+
+def ecosystem_platform_badge(ecosystem: str, platform: str) -> str:
+    return f"{ecosystem}-{architecture_label(platform or 'unknown')}"
+
+
+LISTING_CACHE_TTL_SECONDS = 120
+RECORD_CACHE_TTL_SECONDS = 300
+CURSOR_CACHE_TTL_SECONDS = 1800
+
+
 def create_app() -> Flask:
     app = Flask(__name__)
+    listing_cache: dict[str, dict] = {}
+    record_cache: dict[str, dict] = {}
+    cursor_cache: dict[str, dict] = {}
+    head_cache: dict[str, dict] = {}
+    log_path = os.environ.get("WEBAPP_LOG_PATH", "/tmp/package-scanner-webapp.log")
+    if not app.logger.handlers:
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+        app.logger.addHandler(stream_handler)
+    if not any(isinstance(handler, logging.FileHandler) and getattr(handler, "baseFilename", "") == log_path for handler in app.logger.handlers):
+        file_handler = logging.FileHandler(log_path)
+        file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+        app.logger.addHandler(file_handler)
+    app.logger.setLevel(logging.INFO)
+    app.logger.propagate = False
     app.config["CATALOG_BUCKET"] = os.environ.get("CATALOG_BUCKET", "")
     app.config["CATALOG_PREFIX"] = os.environ.get("CATALOG_PREFIX", "evidence")
     app.config["AWS_REGION"] = os.environ.get("AWS_REGION", "us-east-1")
     app.config["AWS_PROFILE"] = os.environ.get("AWS_PROFILE")
+    app.config["R_STACK_NAME"] = os.environ.get("R_STACK_NAME", "cyber-scanner-dev-r-ecs")
+    app.config["PYTHON_STACK_NAME"] = os.environ.get("PYTHON_STACK_NAME", "cyber-scanner-dev-python-ecs")
     app.config["PYTHON_STATE_MACHINE_ARN"] = os.environ.get(
         "PYTHON_STATE_MACHINE_ARN",
         "arn:aws:states:us-east-1:807497180525:stateMachine:package-scanner-dev-python-ecs-linux-scan-orchestrator",
@@ -30,17 +193,276 @@ def create_app() -> Flask:
         "arn:aws:states:us-east-1:807497180525:stateMachine:package-scanner-dev-r-ecs-linux-scan-orchestrator",
     )
 
+    @app.before_request
+    def log_request_start() -> None:
+        g.request_started_at = time.monotonic()
+        app.logger.info("request start %s %s from=%s", request.method, request.full_path, request.remote_addr)
+
+    @app.after_request
+    def log_request_end(response):
+        started_at = getattr(g, "request_started_at", None)
+        elapsed_ms = int((time.monotonic() - started_at) * 1000) if started_at is not None else -1
+        app.logger.info(
+            "request end %s %s status=%s elapsed_ms=%s",
+            request.method,
+            request.full_path,
+            response.status_code,
+            elapsed_ms,
+        )
+        return response
+
+    @app.teardown_request
+    def log_request_exception(exc: BaseException | None) -> None:
+        if exc is not None:
+            app.logger.exception("request exception %s %s", request.method, request.full_path, exc_info=exc)
+
     def auth_message() -> str | None:
         return None
 
-    def list_runs(ecosystem: str) -> list[dict]:
+    def package_count_for_platform(record: dict, platform: dict, ecosystem: str) -> int | None:
+        try:
+            summary = s3_get_json(
+                app.config["CATALOG_BUCKET"],
+                platform["paths"]["materialization_summary_key"],
+                region=app.config["AWS_REGION"],
+                profile=app.config["AWS_PROFILE"],
+            )
+        except Exception:
+            return None
+        counts = summary.get("counts", {})
+        if ecosystem == "r":
+            return counts.get("restored_packages")
+        if ecosystem == "python":
+            pip_count = counts.get("pip_package_count")
+            conda_count = counts.get("conda_package_count")
+            if isinstance(pip_count, int) and isinstance(conda_count, int):
+                return pip_count + conda_count
+            return pip_count if isinstance(pip_count, int) else conda_count
+        return None
+
+    def s3_get_rows(bucket: str, key: str) -> list[dict[str, str]]:
+        return parse_csv_bytes(
+            s3_get_bytes(
+                bucket,
+                key,
+                region=app.config["AWS_REGION"],
+                profile=app.config["AWS_PROFILE"],
+            )
+        )
+
+    def s3_get_json_optional(bucket: str, key: str) -> dict | None:
+        try:
+            return s3_get_json(
+                bucket,
+                key,
+                region=app.config["AWS_REGION"],
+                profile=app.config["AWS_PROFILE"],
+            )
+        except Exception:
+            return None
+
+    def get_listing_keys(ecosystem: str) -> list[str]:
+        now = time.time()
+        cache_key = ecosystem
+        cached = listing_cache.get(cache_key)
+        if cached and cached["expires_at"] > now:
+            return cached["keys"]
+
         prefix = f"{app.config['CATALOG_PREFIX'].rstrip('/')}/catalog/{ecosystem}/runs/"
-        rows = []
-        for key in s3_list_keys(app.config["CATALOG_BUCKET"], prefix, region=app.config["AWS_REGION"], profile=app.config["AWS_PROFILE"]):
-            if key.endswith(".json"):
-                rows.append(s3_get_json(app.config["CATALOG_BUCKET"], key, region=app.config["AWS_REGION"], profile=app.config["AWS_PROFILE"]))
-        rows.sort(key=lambda row: row.get("scan_timestamp", ""), reverse=True)
-        return rows
+        continuation_token = None
+        keys: list[str] = []
+        while True:
+            page = s3_list_page(
+                app.config["CATALOG_BUCKET"],
+                prefix,
+                region=app.config["AWS_REGION"],
+                profile=app.config["AWS_PROFILE"],
+                max_keys=200,
+                continuation_token=continuation_token,
+            )
+            keys.extend(key for key in page["keys"] if key.endswith(".json"))
+            if not page["is_truncated"]:
+                break
+            continuation_token = page["next_continuation_token"]
+
+        keys.sort(reverse=True)
+        listing_cache[cache_key] = {
+            "expires_at": now + LISTING_CACHE_TTL_SECONDS,
+            "keys": keys,
+        }
+        return keys
+
+    def load_record_by_key(key: str) -> dict:
+        now = time.time()
+        cached = record_cache.get(key)
+        if cached and cached["expires_at"] > now:
+            return cached["record"]
+        record = s3_get_json(
+            app.config["CATALOG_BUCKET"],
+            key,
+            region=app.config["AWS_REGION"],
+            profile=app.config["AWS_PROFILE"],
+        )
+        record_cache[key] = {
+            "expires_at": now + RECORD_CACHE_TTL_SECONDS,
+            "record": record,
+        }
+        return record
+
+    def head_object(bucket: str, key: str) -> dict:
+        cache_key = f"{bucket}/{key}"
+        now = time.time()
+        cached = head_cache.get(cache_key)
+        if cached and cached["expires_at"] > now:
+            return cached["head"]
+        head = s3_head_object(
+            bucket,
+            key,
+            region=app.config["AWS_REGION"],
+            profile=app.config["AWS_PROFILE"],
+        )
+        head_cache[cache_key] = {
+            "expires_at": now + RECORD_CACHE_TTL_SECONDS,
+            "head": head,
+        }
+        return head
+
+    def completed_at_for_row(row: dict) -> str | None:
+        completed_at = row.get("completed_at")
+        if completed_at:
+            return str(completed_at)
+        summary_key = str(row.get("summary_key") or "").strip()
+        bucket = str(row.get("evidence_bucket") or "").strip()
+        if not summary_key or not bucket:
+            return None
+        try:
+            head = head_object(bucket, summary_key)
+        except Exception:
+            return None
+        return str(head.get("LastModified") or "")
+
+    def duration_for_row(row: dict) -> str | None:
+        duration_seconds = row.get("duration_seconds")
+        if isinstance(duration_seconds, (int, float)):
+            return format_duration_seconds(duration_seconds)
+        completed_at = completed_at_for_row(row)
+        if not completed_at:
+            return None
+        return format_duration(row.get("started_at") or row.get("scan_timestamp"), completed_at)
+
+    def platform_matches(platform_name: str, selected_platform: str) -> bool:
+        return selected_platform == "all" or architecture_label(platform_name) == selected_platform
+
+    def normalize_filters(ecosystem: str) -> tuple[str, str, str, list[str]]:
+        platform_options = ["all", "linux-amd64", "windows"]
+        if ecosystem == "python":
+            platform_options.insert(2, "linux-arm64")
+        selected_status = request.args.get("status", "SUCCEEDED").upper()
+        if selected_status not in {"SUCCEEDED", "FAILED", "RUNNING", "TIMED_OUT", "ABORTED", "ANY"}:
+            selected_status = "SUCCEEDED"
+        selected_platform = request.args.get("platform", "linux-amd64")
+        if selected_platform not in platform_options:
+            selected_platform = "linux-amd64"
+        selected_validated = request.args.get("validated", "yes").lower()
+        if selected_validated not in {"yes", "no", "any"}:
+            selected_validated = "yes"
+        return selected_status, selected_platform, selected_validated, platform_options
+
+    def select_run_row(
+        ecosystem: str,
+        row: dict,
+        *,
+        selected_status: str,
+        selected_platform: str,
+        selected_validated: str,
+    ) -> dict | None:
+        matching_platforms = [
+            platform
+            for platform in row.get("platforms", [])
+            if platform_matches(platform.get("platform", ""), selected_platform)
+        ]
+        if not matching_platforms:
+            return None
+        matching_statuses = {platform.get("status") for platform in matching_platforms}
+        if selected_status != "ANY" and selected_status not in matching_statuses:
+            return None
+        if selected_validated != "any":
+            required = selected_validated == "yes"
+            if not any(bool(platform.get("validated")) is required for platform in matching_platforms):
+                return None
+        preferred_platform = next(
+            (
+                platform
+                for platform in matching_platforms
+                if (selected_status == "ANY" or platform.get("status") == selected_status)
+                and (
+                    selected_validated == "any"
+                    or bool(platform.get("validated")) is (selected_validated == "yes")
+                )
+            ),
+            matching_platforms[0],
+        )
+        row = dict(row)
+        row["selected_platform"] = preferred_platform
+        row["selected_platform_label"] = architecture_label(preferred_platform.get("platform", ""))
+        row["selected_platform_status"] = preferred_platform.get("status")
+        row["selected_platform_validated"] = bool(preferred_platform.get("validated"))
+        row["scan_timestamp_display"] = format_display_datetime(row.get("started_at") or row.get("scan_timestamp"))
+        row["duration_display"] = duration_for_row(row)
+        row["selected_platform_status_class"] = status_class(str(row.get("selected_platform_status") or ""))
+        row["ecosystem_platform_badge"] = ecosystem_platform_badge(ecosystem, row.get("selected_platform_label", ""))
+        return row
+
+    def normalize_cursor_state(ecosystem: str, cursor_id: str | None, filters: tuple[str, str, str, int]) -> tuple[int, str | None]:
+        now = time.time()
+        expired = [key for key, value in cursor_cache.items() if value["expires_at"] <= now]
+        for key in expired:
+            cursor_cache.pop(key, None)
+        if not cursor_id:
+            return 0, None
+        state = cursor_cache.get(cursor_id)
+        if not state:
+            return 0, None
+        if state["ecosystem"] != ecosystem or state["filters"] != filters:
+            return 0, None
+        return int(state["offset"]), state.get("prev_cursor")
+
+    def save_cursor_state(
+        ecosystem: str,
+        filters: tuple[str, str, str, int],
+        *,
+        offset: int,
+        prev_cursor: str | None,
+    ) -> str:
+        cursor_id = uuid.uuid4().hex
+        cursor_cache[cursor_id] = {
+            "ecosystem": ecosystem,
+            "filters": filters,
+            "offset": offset,
+            "prev_cursor": prev_cursor,
+            "expires_at": time.time() + CURSOR_CACHE_TTL_SECONDS,
+        }
+        return cursor_id
+
+    def iter_filtered_rows(
+        ecosystem: str,
+        *,
+        selected_status: str,
+        selected_platform: str,
+        selected_validated: str,
+        offset: int,
+    ) -> Iterator[tuple[int, dict]]:
+        keys = get_listing_keys(ecosystem)
+        for index, key in enumerate(keys[offset:], start=offset):
+            row = select_run_row(
+                ecosystem,
+                load_record_by_key(key),
+                selected_status=selected_status,
+                selected_platform=selected_platform,
+                selected_validated=selected_validated,
+            )
+            if row is not None:
+                yield index, row
 
     def enrich_record(record: dict, ecosystem: str) -> dict:
         for platform in record.get("platforms", []):
@@ -58,7 +480,409 @@ def create_app() -> Flask:
                     paths.setdefault("safety_report_key", f"{model_results_prefix}safety-report.json")
                 if ecosystem == "r":
                     paths.setdefault("osv_report_key", f"{model_results_prefix}osv-report.json")
+            try:
+                platform["unknown_findings_count"] = len(unknown_findings_for_platform(record, platform, ecosystem))
+            except Exception:
+                platform["unknown_findings_count"] = None
         return record
+
+    def unknown_findings_for_platform(record: dict, platform: dict, ecosystem: str) -> list[dict]:
+        findings_rows = s3_get_rows(record["evidence_bucket"], platform["paths"]["vulnerability_findings_key"])
+        unknown_rows = [row for row in findings_rows if str(row.get("severity") or "").strip().upper() == "UNKNOWN"]
+
+        installed_index: dict[tuple[str, str], dict[str, str]] = {}
+        requirements_key = (
+            f"{platform['paths']['requirements_prefix']}installed-packages.csv"
+            if ecosystem == "r"
+            else f"{platform['paths']['requirements_prefix']}requirements.lock.txt"
+        )
+        if ecosystem == "r":
+            for row in s3_get_rows(record["evidence_bucket"], requirements_key):
+                name = str(row.get("package_name") or row.get("Package") or "").strip()
+                version = str(row.get("package_version") or row.get("Version") or "").strip()
+                if name and version:
+                    installed_index[(name, version)] = row
+
+        osv_findings_index: dict[tuple[str, str, str], dict] = {}
+        queried_packages_index: dict[str, dict] = {}
+        if ecosystem == "r" and platform["paths"].get("osv_report_key"):
+            osv_report = s3_get_json_optional(record["evidence_bucket"], platform["paths"]["osv_report_key"])
+            if isinstance(osv_report, dict):
+                for item in osv_report.get("findings", []) or []:
+                    if not isinstance(item, dict):
+                        continue
+                    key = (
+                        str(item.get("package_name") or "").strip(),
+                        str(item.get("package_version") or "").strip(),
+                        str(item.get("vulnerability_id") or "").strip(),
+                    )
+                    osv_findings_index[key] = item
+                for item in osv_report.get("queried_packages", []) or []:
+                    if isinstance(item, dict):
+                        queried_packages_index[str(item.get("package_name") or "").strip()] = item
+
+        enriched: list[dict] = []
+        for row in unknown_rows:
+            package_name = str(row.get("package_name") or "").strip()
+            package_version = str(row.get("package_version") or "").strip()
+            vulnerability_id = str(row.get("vulnerability_id") or "").strip()
+            osv_match = osv_findings_index.get((package_name, package_version, vulnerability_id), {})
+            queried_package = queried_packages_index.get(package_name, {})
+            aliases = [
+                alias.strip()
+                for alias in str(row.get("aliases") or osv_match.get("aliases") or "").split(";")
+                if alias.strip()
+            ]
+            cve_id = first_cve(aliases)
+            reference_url = str(row.get("reference_url") or osv_match.get("reference_url") or "").strip()
+            nvd_url = str(row.get("nvd_url") or osv_match.get("nvd_url") or "").strip()
+            if not nvd_url and cve_id:
+                nvd_url = f"https://nvd.nist.gov/vuln/detail/{cve_id}"
+            package_repo = str(
+                queried_package.get("repository")
+                or installed_index.get((package_name, package_version), {}).get("repository")
+                or ""
+            ).strip()
+            ecosystem_name = str(queried_package.get("ecosystem") or "").strip()
+            package_home = ""
+            if package_repo.upper() == "CRAN" or ecosystem_name == "CRAN":
+                package_home = cran_package_url(package_name)
+            elif ecosystem_name == "Bioconductor":
+                package_home = bioconductor_package_url(package_name)
+
+            fixed_versions = [
+                version.strip()
+                for version in str(row.get("fixed_versions") or osv_match.get("fixed_versions") or "").split(";")
+                if version.strip()
+            ]
+            fixed_available = str(row.get("fixed_available") or osv_match.get("fixed_available") or "").strip().lower() == "yes"
+            materialized = (package_name, package_version) in installed_index if ecosystem == "r" else True
+            analysis_steps = [
+                {
+                    "name": "Confirm package is materialized",
+                    "status": "complete" if materialized else "needs-review",
+                    "evidence": (
+                        f"Installed package inventory contains {package_name} {package_version}."
+                        if materialized
+                        else "Package/version not confirmed in installed inventory."
+                    ),
+                    "analyst_action": "Verify the package is present in the delivered environment and not only declared in the lockfile.",
+                },
+                {
+                    "name": "Confirm advisory identity",
+                    "status": "complete" if vulnerability_id else "needs-review",
+                    "evidence": f"Vulnerability ID: {vulnerability_id or 'missing'}. Aliases: {', '.join(aliases) or 'none'}",
+                    "analyst_action": "Validate the advisory maps to this package/version and record any CVE aliases.",
+                },
+                {
+                    "name": "Enrich severity from external sources",
+                    "status": "ready" if reference_url or nvd_url or osv_advisory_url(vulnerability_id) else "needs-review",
+                    "evidence": "Reference links were prepared for NVD/OSV/vendor sources where available.",
+                    "analyst_action": "Review NVD, OSV, vendor advisories, and upstream issue trackers to determine exploitability and severity.",
+                },
+                {
+                    "name": "Assess remediation path",
+                    "status": "complete" if fixed_available else "needs-review",
+                    "evidence": (
+                        f"Fixed versions identified: {', '.join(fixed_versions)}."
+                        if fixed_available
+                        else "No fixed version was identified by the scanner outputs."
+                    ),
+                    "analyst_action": "Decide whether upgrade is available now or whether an exception/monitor path is required.",
+                },
+                {
+                    "name": "Assess deployment relevance",
+                    "status": "needs-review",
+                    "evidence": "Scanner artifacts do not encode runtime reachability or enclave exposure context.",
+                    "analyst_action": "Use system context to determine whether the vulnerable code path is reachable in the target deployment.",
+                },
+                {
+                    "name": "Assign Cyber disposition",
+                    "status": "needs-review",
+                    "evidence": (
+                        "Recommended initial path: upgrade."
+                        if fixed_available
+                        else "Recommended initial path: exception analysis."
+                    ),
+                    "analyst_action": "Record internal severity, rationale, compensating controls, and final disposition.",
+                },
+            ]
+            enriched.append(
+                {
+                    "package_name": package_name,
+                    "package_version": package_version,
+                    "vulnerability_id": vulnerability_id,
+                    "severity": "UNKNOWN",
+                    "scanner": str(row.get("scanner") or "").strip(),
+                    "title": str(row.get("title") or osv_match.get("summary") or osv_match.get("details") or "").strip(),
+                    "aliases": aliases,
+                    "cve_id": cve_id,
+                    "reference_url": reference_url,
+                    "nvd_url": nvd_url,
+                    "osv_url": osv_advisory_url(vulnerability_id),
+                    "package_home_url": package_home,
+                    "repository": package_repo,
+                    "ecosystem_name": ecosystem_name,
+                    "fixed_versions": fixed_versions,
+                    "fixed_available": fixed_available,
+                    "materialized": materialized,
+                    "recommended_disposition": "upgrade" if fixed_available else "exception-review",
+                    "analysis_steps": analysis_steps,
+                }
+            )
+
+        enriched.sort(key=lambda item: (item["package_name"], item["vulnerability_id"]))
+        return enriched
+
+    def create_r_upgrade_candidate_batch(
+        record: dict,
+        platform: dict,
+        findings: list[dict],
+        *,
+        requested_by: str,
+        rationale: str,
+    ) -> dict:
+        stack = describe_stack(app.config["R_STACK_NAME"])
+        input_bucket = stack_output_value(stack, "InputBucketName")
+        evidence_bucket = stack_output_value(stack, "EvidenceBucketName") or record["evidence_bucket"]
+        ephemeral_bucket = stack_output_value(stack, "EphemeralBucketName")
+        lock_token = stack_tag_value(stack, "DeploymentLockToken")
+        if not input_bucket or not evidence_bucket or not ephemeral_bucket or not lock_token:
+            raise RuntimeError("Required R stack outputs/tags were not available for candidate creation.")
+        if not findings:
+            raise RuntimeError("At least one finding must be selected for a candidate upgrade.")
+
+        scan_timestamp = utc_compact_timestamp()
+        candidate_id = f"r-upgrade-batch-{scan_timestamp}-{uuid.uuid4().hex[:8]}"
+        execution_id = f"r-scan-{scan_timestamp}-{uuid.uuid4().hex[:8]}"
+        package_names = "-".join(sorted({item["package_name"] for item in findings}))[:120]
+        base_prefix = (
+            f"{record['evidence_prefix']}/remediation-candidates/r/"
+            f"{record['execution_id']}/{platform['platform']}/{package_names}/{scan_timestamp}/"
+        )
+        original_lock_key = f"{platform['paths']['requirements_prefix']}renv.lock"
+        original_lock_bytes = s3_get_bytes(
+            record["evidence_bucket"],
+            original_lock_key,
+            region=app.config["AWS_REGION"],
+            profile=app.config["AWS_PROFILE"],
+        )
+        original_lock = json.loads(original_lock_bytes.decode("utf-8-sig"))
+        packages = original_lock.get("Packages") or {}
+        changes = []
+        for finding in findings:
+            package_name = finding["package_name"]
+            target_version = finding["target_version"]
+            if package_name not in packages:
+                raise RuntimeError(f"Package {package_name} was not present in the source renv.lock.")
+            current_version = str(packages[package_name].get("Version") or "").strip()
+            packages[package_name]["Version"] = target_version
+            changes.append(
+                {
+                    "package_name": package_name,
+                    "vulnerability_id": finding["vulnerability_id"],
+                    "title": finding["title"],
+                    "scanner": finding["scanner"],
+                    "aliases": finding["aliases"],
+                    "reference_url": finding["reference_url"],
+                    "nvd_url": finding["nvd_url"],
+                    "osv_url": finding["osv_url"],
+                    "from_version": current_version,
+                    "to_version": target_version,
+                }
+            )
+        candidate_lock_bytes = (json.dumps(original_lock, indent=2) + "\n").encode("utf-8")
+
+        candidate_input_key = (
+            f"inputs/r/candidates/{record['execution_id']}/{platform['platform']}/"
+            f"{scan_timestamp}/renv.lock"
+        )
+        s3_put_bytes(
+            input_bucket,
+            candidate_input_key,
+            candidate_lock_bytes,
+            region=app.config["AWS_REGION"],
+            profile=app.config["AWS_PROFILE"],
+            content_type="application/json",
+        )
+        s3_put_bytes(
+            evidence_bucket,
+            f"{base_prefix}original-renv.lock",
+            original_lock_bytes,
+            region=app.config["AWS_REGION"],
+            profile=app.config["AWS_PROFILE"],
+            content_type="application/json",
+        )
+        s3_put_bytes(
+            evidence_bucket,
+            f"{base_prefix}candidate-renv.lock",
+            candidate_lock_bytes,
+            region=app.config["AWS_REGION"],
+            profile=app.config["AWS_PROFILE"],
+            content_type="application/json",
+        )
+
+        governance_summary = s3_get_json_optional(
+            record["evidence_bucket"],
+            platform["paths"]["governance_summary_key"],
+        ) or {}
+        policy = governance_summary.get("policy") or {}
+        platform_set = "linux-only" if platform["platform"] == "linux-amd64" else "all"
+        state_machine_key = "RLinuxScanOrchestrationStateMachineArn" if platform_set == "linux-only" else "RScanOrchestrationStateMachineArn"
+        state_machine_arn = stack_output_value(stack, state_machine_key)
+        execution_input = {
+            "scan_execution_id": execution_id,
+            "scan_timestamp": scan_timestamp,
+            "input_bucket": input_bucket,
+            "input_object_key": candidate_input_key,
+            "evidence_bucket": evidence_bucket,
+            "evidence_prefix": record["evidence_prefix"],
+            "ephemeral_bucket": ephemeral_bucket,
+            "ephemeral_prefix": "deploy/tmp/r",
+            "remediate_medium": str(policy.get("remediate_medium", True)).lower(),
+            "fail_on_medium": str(policy.get("fail_on_medium", False)).lower(),
+            "remediate_unknown": str(policy.get("remediate_unknown", True)).lower(),
+            "fail_on_unknown": str(policy.get("fail_on_unknown", False)).lower(),
+            "r_stage_package_count": "25",
+        }
+        start_data = aws_json(
+            [
+                "stepfunctions",
+                "start-execution",
+                "--state-machine-arn",
+                state_machine_arn,
+                "--name",
+                execution_id,
+                "--input",
+                json.dumps(execution_input),
+            ],
+            region=app.config["AWS_REGION"],
+            profile=app.config["AWS_PROFILE"],
+        )
+        audit = {
+            "candidate_id": candidate_id,
+            "created_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+            "created_by": requested_by,
+            "rationale": rationale,
+            "ecosystem": "r",
+            "platform": platform["platform"],
+            "platform_set": platform_set,
+            "source_run": {
+                "execution_id": record["execution_id"],
+                "scan_timestamp": record["scan_timestamp"],
+                "evidence_bucket": record["evidence_bucket"],
+                "summary_key": record["summary_key"],
+            },
+            "finding": {
+                "count": len(changes),
+            },
+            "changes": [
+                {
+                    **change,
+                    "action": "upgrade-candidate-created",
+                    "why": rationale,
+                    "who": requested_by,
+                    "lockfile_field_updated": f"Packages.{change['package_name']}.Version",
+                    "note": "Only the selected package version field was changed in renv.lock. Dependency compatibility must be validated by the candidate scan.",
+                }
+                for change in changes
+            ],
+            "artifacts": {
+                "source_lock_key": original_lock_key,
+                "candidate_input_uri": f"s3://{input_bucket}/{candidate_input_key}",
+                "audit_prefix": f"s3://{evidence_bucket}/{base_prefix}",
+                "original_lock_uri": f"s3://{evidence_bucket}/{base_prefix}original-renv.lock",
+                "candidate_lock_uri": f"s3://{evidence_bucket}/{base_prefix}candidate-renv.lock",
+            },
+            "validation_scan": {
+                "stack_name": app.config["R_STACK_NAME"],
+                "deployment_lock_token": lock_token,
+                "state_machine_arn": state_machine_arn,
+                "execution_name": execution_id,
+                "execution_arn": start_data.get("executionArn"),
+                "summary_uri": f"s3://{evidence_bucket}/{record['evidence_prefix']}/orchestration/r/{execution_id}/orchestration-summary.json",
+                "execution_input": execution_input,
+            },
+            "steps": [
+                {
+                    "step": "source lockfile downloaded from evidence bucket",
+                    "status": "completed",
+                },
+                {
+                    "step": "selected package versions updated in renv.lock",
+                    "status": "completed",
+                },
+                {
+                    "step": "candidate renv.lock uploaded to candidate input prefix",
+                    "status": "completed",
+                },
+                {
+                    "step": f"{platform_set} validation scan started against candidate lockfile",
+                    "status": "completed",
+                },
+                {
+                    "step": "candidate scan must complete and be reviewed before package set is approved for use",
+                    "status": "pending",
+                },
+            ],
+        }
+        s3_put_json(
+            evidence_bucket,
+            f"{base_prefix}audit.json",
+            audit,
+            region=app.config["AWS_REGION"],
+            profile=app.config["AWS_PROFILE"],
+        )
+        summary_text = "\n".join(
+            [
+                f"CandidateId: {candidate_id}",
+                f"CreatedBy: {requested_by}",
+                f"Rationale: {rationale}",
+                f"SourceRun: {record['execution_id']}",
+                f"Platform: {platform['platform']}",
+                f"ChangeCount: {len(changes)}",
+                "Changes:",
+                *[
+                    f"- {change['package_name']}: {change['from_version']} -> {change['to_version']} ({change['vulnerability_id']})"
+                    for change in changes
+                ],
+                f"CandidateInput: s3://{input_bucket}/{candidate_input_key}",
+                f"ValidationExecution: {execution_id}",
+                f"ValidationExecutionArn: {start_data.get('executionArn', '')}",
+                f"ValidationSummary: s3://{evidence_bucket}/{record['evidence_prefix']}/orchestration/r/{execution_id}/orchestration-summary.json",
+            ]
+        )
+        s3_put_bytes(
+            evidence_bucket,
+            f"{base_prefix}audit-summary.txt",
+            summary_text.encode("utf-8"),
+            region=app.config["AWS_REGION"],
+            profile=app.config["AWS_PROFILE"],
+            content_type="text/plain",
+        )
+        return audit
+
+    def create_r_upgrade_candidate(
+        record: dict,
+        platform: dict,
+        finding: dict,
+        *,
+        target_version: str,
+        requested_by: str,
+        rationale: str,
+    ) -> dict:
+        return create_r_upgrade_candidate_batch(
+            record,
+            platform,
+            [
+                {
+                    **finding,
+                    "target_version": target_version,
+                }
+            ],
+            requested_by=requested_by,
+            rationale=rationale,
+        )
 
     def load_pointer(ecosystem: str, name: str) -> dict | None:
         try:
@@ -70,6 +894,29 @@ def create_app() -> Flask:
             )
         except Exception:
             return None
+
+    def describe_stack(stack_name: str) -> dict:
+        data = aws_json(
+            ["cloudformation", "describe-stacks", "--stack-name", stack_name],
+            region=app.config["AWS_REGION"],
+            profile=app.config["AWS_PROFILE"],
+        )
+        stacks = data.get("Stacks") or []
+        if not stacks:
+            raise RuntimeError(f"Stack not found: {stack_name}")
+        return stacks[0]
+
+    def stack_output_value(stack: dict, key: str) -> str:
+        for item in stack.get("Outputs", []) or []:
+            if item.get("OutputKey") == key:
+                return str(item.get("OutputValue") or "")
+        return ""
+
+    def stack_tag_value(stack: dict, key: str) -> str:
+        for item in stack.get("Tags", []) or []:
+            if item.get("Key") == key:
+                return str(item.get("Value") or "")
+        return ""
 
     def active_runs() -> list[dict]:
         configs = [
@@ -107,9 +954,40 @@ def create_app() -> Flask:
                     item["input"] = detail.get("input")
                 except Exception:
                     item["input"] = None
+                execution_input = item.get("input")
+                platform = ""
+                if isinstance(execution_input, str) and execution_input.strip():
+                    try:
+                        execution_input = json.loads(execution_input)
+                    except json.JSONDecodeError:
+                        execution_input = None
+                if isinstance(execution_input, dict):
+                    input_key = str(execution_input.get("input_object_key") or "").strip()
+                    platform_set = str(execution_input.get("platform_set") or "").strip()
+                    if "/windows-amd64/" in input_key or platform_set == "all":
+                        platform = "windows"
+                    elif "/linux-arm64/" in input_key:
+                        platform = "linux-arm64"
+                    elif "/linux-amd64/" in input_key:
+                        platform = "linux-amd64"
+                if not platform:
+                    platform = "linux-amd64" if ecosystem == "r" else "unknown"
+                item["platform_label"] = architecture_label(platform)
+                item["ecosystem_platform_badge"] = ecosystem_platform_badge(ecosystem, platform)
+                item["started_display"] = format_display_datetime(item.get("startDate"))
+                item["duration_display"] = format_duration(item.get("startDate"))
+                item["status_class"] = status_class(str(item.get("status") or ""))
                 active.append(item)
         active.sort(key=lambda row: str(row.get("startDate", "")), reverse=True)
         return active
+
+    def load_record(ecosystem: str, execution_id: str) -> dict:
+        return s3_get_json(
+            app.config["CATALOG_BUCKET"],
+            catalog_run_key(app.config["CATALOG_PREFIX"], ecosystem, execution_id),
+            region=app.config["AWS_REGION"],
+            profile=app.config["AWS_PROFILE"],
+        )
 
     @app.route("/")
     def index():
@@ -137,17 +1015,63 @@ def create_app() -> Flask:
             auth_error=auth_error,
         )
 
+    def normalize_paging() -> int:
+        per_page = request.args.get("per_page", "10")
+        if per_page not in {"10", "50", "100"}:
+            per_page = "10"
+        return int(per_page)
+
     @app.route("/runs/<ecosystem>")
     def runs(ecosystem: str):
         if ecosystem not in {"r", "python"}:
             abort(404)
         auth_error = None
+        selected_status, selected_platform, selected_validated, platform_options = normalize_filters(ecosystem)
+        per_page = normalize_paging()
+        cursor_id = request.args.get("cursor")
+        filters = (selected_status, selected_platform, selected_validated, per_page)
         try:
-            rows = list_runs(ecosystem)
+            offset, prev_cursor = normalize_cursor_state(ecosystem, cursor_id, filters)
+            rows = []
+            next_offset = None
+            for index, row in iter_filtered_rows(
+                ecosystem,
+                selected_status=selected_status,
+                selected_platform=selected_platform,
+                selected_validated=selected_validated,
+                offset=offset,
+            ):
+                if len(rows) == per_page:
+                    next_offset = index
+                    break
+                rows.append(row)
+            for row in rows:
+                row["package_count"] = package_count_for_platform(row, row["selected_platform"], ecosystem)
+            next_cursor = (
+                save_cursor_state(ecosystem, filters, offset=next_offset, prev_cursor=cursor_id)
+                if next_offset is not None
+                else None
+            )
         except AwsAuthExpiredError as exc:
             auth_error = str(exc)
             rows = []
-        return render_template("runs.html", ecosystem=ecosystem, runs=rows, auth_error=auth_error)
+            per_page = 10
+            prev_cursor = None
+            next_cursor = None
+        return render_template(
+            "runs.html",
+            ecosystem=ecosystem,
+            runs=rows,
+            auth_error=auth_error,
+            selected_status=selected_status,
+            selected_platform=selected_platform,
+            selected_validated=selected_validated,
+            platform_options=platform_options,
+            per_page=per_page,
+            current_cursor=cursor_id,
+            prev_cursor=prev_cursor,
+            next_cursor=next_cursor,
+        )
 
     @app.route("/runs/<ecosystem>/<execution_id>")
     def run_detail(ecosystem: str, execution_id: str):
@@ -155,18 +1079,304 @@ def create_app() -> Flask:
             abort(404)
         auth_error = None
         try:
-            record = s3_get_json(
-                app.config["CATALOG_BUCKET"],
-                catalog_run_key(app.config["CATALOG_PREFIX"], ecosystem, execution_id),
-                region=app.config["AWS_REGION"],
-                profile=app.config["AWS_PROFILE"],
-            )
+            record = load_record(ecosystem, execution_id)
         except AwsAuthExpiredError as exc:
             auth_error = str(exc)
             record = None
         except Exception:
             abort(404)
         return render_template("run_detail.html", ecosystem=ecosystem, record=enrich_record(record, ecosystem) if record else None, auth_error=auth_error)
+
+    @app.route("/download-bundle/<ecosystem>/<execution_id>/<platform_name>")
+    def download_bundle(ecosystem: str, execution_id: str, platform_name: str):
+        if ecosystem not in {"r", "python"}:
+            abort(404)
+        try:
+            record = enrich_record(load_record(ecosystem, execution_id), ecosystem)
+        except AwsAuthExpiredError as exc:
+            return render_template("download_error.html", auth_error=str(exc), key=execution_id), 401
+        except Exception:
+            abort(404)
+
+        platform = next((item for item in record.get("platforms", []) if item.get("platform") == platform_name), None)
+        if not platform:
+            abort(404)
+
+        archive = io.BytesIO()
+        try:
+            with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+                for filename, key in artifact_bundle_entries(platform):
+                    try:
+                        payload = s3_get_bytes(
+                            record["evidence_bucket"],
+                            key,
+                            region=app.config["AWS_REGION"],
+                            profile=app.config["AWS_PROFILE"],
+                        )
+                    except AwsAuthExpiredError:
+                        raise
+                    except Exception:
+                        continue
+                    bundle.writestr(filename, payload)
+        except AwsAuthExpiredError as exc:
+            return render_template("download_error.html", auth_error=str(exc), key=execution_id), 401
+
+        archive.seek(0)
+        download_name = f"{execution_id}-{platform_name}-review-bundle.zip"
+        return send_file(archive, as_attachment=True, download_name=download_name, mimetype="application/zip")
+
+    @app.route("/runs/<ecosystem>/<execution_id>/<platform_name>/unknown-findings")
+    def unknown_findings(ecosystem: str, execution_id: str, platform_name: str):
+        if ecosystem not in {"r", "python"}:
+            abort(404)
+        auth_error = None
+        form_error = request.args.get("error")
+        try:
+            record = enrich_record(load_record(ecosystem, execution_id), ecosystem)
+            platform = next((item for item in record.get("platforms", []) if item.get("platform") == platform_name), None)
+            if not platform:
+                abort(404)
+            findings = unknown_findings_for_platform(record, platform, ecosystem)
+        except AwsAuthExpiredError as exc:
+            auth_error = str(exc)
+            record = None
+            platform = None
+            findings = []
+        except Exception:
+            abort(404)
+        return render_template(
+            "unknown_findings.html",
+            ecosystem=ecosystem,
+            record=record,
+            platform=platform,
+            findings=findings,
+            auth_error=auth_error,
+            form_error=form_error,
+        )
+
+    @app.route("/download-unknown-bundle/<ecosystem>/<execution_id>/<platform_name>")
+    def download_unknown_bundle(ecosystem: str, execution_id: str, platform_name: str):
+        if ecosystem not in {"r", "python"}:
+            abort(404)
+        try:
+            record = enrich_record(load_record(ecosystem, execution_id), ecosystem)
+        except AwsAuthExpiredError as exc:
+            return render_template("download_error.html", auth_error=str(exc), key=execution_id), 401
+        except Exception:
+            abort(404)
+
+        platform = next((item for item in record.get("platforms", []) if item.get("platform") == platform_name), None)
+        if not platform:
+            abort(404)
+        findings = unknown_findings_for_platform(record, platform, ecosystem)
+
+        archive = io.BytesIO()
+        try:
+            with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+                bundle.writestr("unknown-findings-enriched.json", json.dumps(findings, indent=2))
+                csv_buffer = io.StringIO()
+                fieldnames = [
+                    "package_name",
+                    "package_version",
+                    "vulnerability_id",
+                    "scanner",
+                    "repository",
+                    "ecosystem_name",
+                    "fixed_available",
+                    "fixed_versions",
+                    "recommended_disposition",
+                    "reference_url",
+                    "nvd_url",
+                    "osv_url",
+                    "package_home_url",
+                ]
+                writer = csv.DictWriter(csv_buffer, fieldnames=fieldnames)
+                writer.writeheader()
+                for finding in findings:
+                    writer.writerow(
+                        {
+                            **{key: finding.get(key, "") for key in fieldnames},
+                            "fixed_versions": ";".join(finding.get("fixed_versions", [])),
+                            "fixed_available": "yes" if finding.get("fixed_available") else "no",
+                        }
+                    )
+                bundle.writestr("unknown-findings-enriched.csv", csv_buffer.getvalue())
+
+                source_keys = [
+                    platform["paths"]["vulnerability_findings_key"],
+                    platform["paths"]["materialization_summary_key"],
+                    platform["paths"]["governance_summary_key"],
+                    platform["paths"]["run_metadata_key"],
+                ]
+                if ecosystem == "r":
+                    source_keys.extend(
+                        [
+                            f"{platform['paths']['requirements_prefix']}installed-packages.csv",
+                            platform["paths"].get("osv_report_key"),
+                        ]
+                    )
+                for key in [item for item in source_keys if item]:
+                    try:
+                        payload = s3_get_bytes(
+                            record["evidence_bucket"],
+                            key,
+                            region=app.config["AWS_REGION"],
+                            profile=app.config["AWS_PROFILE"],
+                        )
+                    except AwsAuthExpiredError:
+                        raise
+                    except Exception:
+                        continue
+                    bundle.writestr(f"source/{key.split('/')[-1]}", payload)
+        except AwsAuthExpiredError as exc:
+            return render_template("download_error.html", auth_error=str(exc), key=execution_id), 401
+
+        archive.seek(0)
+        download_name = f"{execution_id}-{platform_name}-unknown-findings-bundle.zip"
+        return send_file(archive, as_attachment=True, download_name=download_name, mimetype="application/zip")
+
+    @app.post("/upgrade-candidate/<ecosystem>/<execution_id>/<platform_name>")
+    def create_upgrade_candidate(ecosystem: str, execution_id: str, platform_name: str):
+        if ecosystem != "r":
+            abort(404)
+        requested_by = str(request.form.get("requested_by") or "").strip()
+        rationale = str(request.form.get("rationale") or "").strip()
+        package_name = str(request.form.get("package_name") or "").strip()
+        vulnerability_id = str(request.form.get("vulnerability_id") or "").strip()
+        target_version = str(request.form.get("target_version") or "").strip()
+        if not requested_by or not rationale or not package_name or not vulnerability_id or not target_version:
+            abort(400)
+
+        try:
+            record = enrich_record(load_record(ecosystem, execution_id), ecosystem)
+            platform = next((item for item in record.get("platforms", []) if item.get("platform") == platform_name), None)
+            if not platform:
+                abort(404)
+            finding = next(
+                (
+                    item
+                    for item in unknown_findings_for_platform(record, platform, ecosystem)
+                    if item["package_name"] == package_name and item["vulnerability_id"] == vulnerability_id
+                ),
+                None,
+            )
+            if not finding:
+                abort(404)
+            audit = create_r_upgrade_candidate(
+                record,
+                platform,
+                finding,
+                target_version=target_version,
+                requested_by=requested_by,
+                rationale=rationale,
+            )
+        except AwsAuthExpiredError as exc:
+            return render_template("download_error.html", auth_error=str(exc), key=execution_id), 401
+
+        return render_template(
+            "upgrade_candidate_result.html",
+            ecosystem=ecosystem,
+            record=record,
+            platform=platform,
+            findings=[finding],
+            audit=audit,
+        )
+
+    @app.post("/upgrade-candidates/<ecosystem>/<execution_id>/<platform_name>")
+    def create_upgrade_candidates(ecosystem: str, execution_id: str, platform_name: str):
+        if ecosystem != "r":
+            abort(404)
+        requested_by = str(request.form.get("requested_by") or "").strip()
+        rationale = str(request.form.get("rationale") or "").strip()
+        selected_ids = [item.strip() for item in request.form.getlist("selected_ids") if item.strip()]
+        if not requested_by or not rationale or not selected_ids:
+            return redirect(
+                f"/runs/{ecosystem}/{execution_id}/{platform_name}/unknown-findings"
+                "?error=Select at least one finding and fill in Requested By and Why before submitting."
+            )
+
+        try:
+            record = enrich_record(load_record(ecosystem, execution_id), ecosystem)
+            platform = next((item for item in record.get("platforms", []) if item.get("platform") == platform_name), None)
+            if not platform:
+                abort(404)
+            findings_index = {
+                f"{item['package_name']}::{item['vulnerability_id']}": item
+                for item in unknown_findings_for_platform(record, platform, ecosystem)
+            }
+            selected_findings = []
+            for selected_id in selected_ids:
+                finding = findings_index.get(selected_id)
+                if not finding:
+                    continue
+                target_version = str(request.form.get(f"target_version__{selected_id}") or "").strip()
+                if not target_version:
+                    continue
+                selected_findings.append(
+                    {
+                        **finding,
+                        "target_version": target_version,
+                    }
+                )
+            if not selected_findings:
+                return redirect(
+                    f"/runs/{ecosystem}/{execution_id}/{platform_name}/unknown-findings"
+                    "?error=No valid target versions were submitted for the selected findings."
+                )
+            audit = create_r_upgrade_candidate_batch(
+                record,
+                platform,
+                selected_findings,
+                requested_by=requested_by,
+                rationale=rationale,
+            )
+        except AwsAuthExpiredError as exc:
+            return render_template("download_error.html", auth_error=str(exc), key=execution_id), 401
+
+        return render_template(
+            "upgrade_candidate_result.html",
+            ecosystem=ecosystem,
+            record=record,
+            platform=platform,
+            findings=selected_findings,
+            audit=audit,
+        )
+
+    @app.get("/execution-status")
+    def execution_status():
+        execution_arn = str(request.args.get("execution_arn") or "").strip()
+        if not execution_arn:
+            abort(400)
+        try:
+            detail = stepfunctions_describe_execution(
+                execution_arn,
+                region=app.config["AWS_REGION"],
+                profile=app.config["AWS_PROFILE"],
+            )
+        except AwsAuthExpiredError as exc:
+            return jsonify({"auth_error": str(exc)}), 401
+        except Exception:
+            abort(404)
+
+        payload = {
+            "executionArn": detail.get("executionArn"),
+            "name": detail.get("name"),
+            "status": detail.get("status"),
+            "startDate": detail.get("startDate"),
+            "stopDate": detail.get("stopDate"),
+            "stateMachineArn": detail.get("stateMachineArn"),
+        }
+        output = detail.get("output")
+        if isinstance(output, str):
+            try:
+                payload["output"] = json.loads(output)
+            except Exception:
+                payload["output"] = output
+        if detail.get("error"):
+            payload["error"] = detail.get("error")
+        if detail.get("cause"):
+            payload["cause"] = detail.get("cause")
+        return jsonify(payload)
 
     @app.route("/download")
     def download():

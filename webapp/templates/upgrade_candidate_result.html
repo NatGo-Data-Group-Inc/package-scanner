@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Upgrade Candidate Created</h1>
+<p>Run: <a href="/runs/{{ ecosystem }}/{{ record.execution_id }}">{{ record.execution_id }}</a></p>
+<p>Platform: <code>{{ platform.platform }}</code></p>
+<p>Selected Findings: {{ findings|length }}</p>
+
+<div class="card">
+  <p><strong>Who:</strong> {{ audit.created_by }}</p>
+  <p><strong>Why:</strong> {{ audit.rationale }}</p>
+  <p><strong>Candidate Input:</strong> <code>{{ audit.artifacts.candidate_input_uri }}</code></p>
+  <p><strong>Audit Prefix:</strong> <code>{{ audit.artifacts.audit_prefix }}</code></p>
+  <p><strong>Validation Execution:</strong> <code>{{ audit.validation_scan.execution_name }}</code></p>
+  <p><strong>Execution ARN:</strong> <code>{{ audit.validation_scan.execution_arn }}</code></p>
+  <p><strong>Summary Path:</strong> <code>{{ audit.validation_scan.summary_uri }}</code></p>
+</div>
+
+<h2>Live Validation Status</h2>
+<div id="execution-status-card" class="card">
+  <p><strong>Status:</strong> <span id="execution-status-value" class="muted">Loading...</span></p>
+  <p><strong>Started:</strong> <span id="execution-start-value" class="muted">Loading...</span></p>
+  <p><strong>Stopped:</strong> <span id="execution-stop-value" class="muted">Not finished</span></p>
+  <p><strong>Execution:</strong> <code>{{ audit.validation_scan.execution_name }}</code></p>
+  <p id="execution-error-line" class="bad" style="display:none;"></p>
+</div>
+
+<h2>Planned Changes</h2>
+<table class="step-table">
+  <thead>
+    <tr><th>Package</th><th>Finding</th><th>From</th><th>To</th></tr>
+  </thead>
+  <tbody>
+    {% for change in audit.changes %}
+    <tr>
+      <td>{{ change.package_name }}</td>
+      <td>{{ change.vulnerability_id }}</td>
+      <td>{{ change.from_version }}</td>
+      <td>{{ change.to_version }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>Audit Trail</h2>
+<table class="step-table">
+  <thead>
+    <tr><th>Step</th><th>Status</th></tr>
+  </thead>
+  <tbody>
+    {% for step in audit.steps %}
+    <tr>
+      <td>{{ step.step }}</td>
+      <td class="{{ 'ok' if step.status == 'completed' else 'muted' }}">{{ step.status }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<p><a href="/runs/{{ ecosystem }}/{{ record.execution_id }}/{{ platform.platform }}/unknown-findings">Back to UNKNOWN findings</a></p>
+<script>
+  (function () {
+    const executionArn = {{ audit.validation_scan.execution_arn|tojson }};
+    const statusEl = document.getElementById('execution-status-value');
+    const startEl = document.getElementById('execution-start-value');
+    const stopEl = document.getElementById('execution-stop-value');
+    const errorEl = document.getElementById('execution-error-line');
+    const doneStates = new Set(['SUCCEEDED', 'FAILED', 'TIMED_OUT', 'ABORTED']);
+
+    async function refreshStatus() {
+      try {
+        const response = await fetch(`/execution-status?execution_arn=${encodeURIComponent(executionArn)}`, { cache: 'no-store' });
+        if (!response.ok) {
+          throw new Error(`status request failed: ${response.status}`);
+        }
+        const data = await response.json();
+        statusEl.textContent = data.status || 'unknown';
+        statusEl.className = data.status === 'SUCCEEDED' ? 'ok' : (data.status === 'RUNNING' ? '' : 'bad');
+        startEl.textContent = data.startDate || 'n/a';
+        stopEl.textContent = data.stopDate || 'Not finished';
+        if (data.error || data.cause) {
+          errorEl.style.display = 'block';
+          errorEl.textContent = `${data.error || 'Execution error'}${data.cause ? `: ${data.cause}` : ''}`;
+        } else {
+          errorEl.style.display = 'none';
+          errorEl.textContent = '';
+        }
+        if (!doneStates.has(data.status)) {
+          window.setTimeout(refreshStatus, 10000);
+        }
+      } catch (error) {
+        statusEl.textContent = 'status unavailable';
+        errorEl.style.display = 'block';
+        errorEl.textContent = String(error);
+        window.setTimeout(refreshStatus, 15000);
+      }
+    }
+
+    refreshStatus();
+  }());
+</script>
+{% endblock %}

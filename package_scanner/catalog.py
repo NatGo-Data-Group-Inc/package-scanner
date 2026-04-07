@@ -45,6 +45,9 @@ def build_catalog_record(
 ) -> dict[str, Any]:
     timestamp = summary["scan_timestamp"]
     execution_id = summary["scan_execution_id"]
+    started_at = summary.get("started_at") or timestamp
+    completed_at = summary.get("completed_at")
+    duration_seconds = summary.get("duration_seconds")
     platforms: list[dict[str, Any]] = []
     for item in summary.get("platforms", []):
         platform = item["platform"]
@@ -67,6 +70,7 @@ def build_catalog_record(
                     "materialization_summary_key": f"{paths['traceability_prefix']}materialization-summary.json",
                     "governance_summary_key": f"{paths['traceability_prefix']}governance-summary.json",
                     "run_metadata_key": f"{paths['traceability_prefix']}run-metadata.json",
+                    "preflight_native_deps_key": f"{paths['traceability_prefix']}preflight-native-deps.json" if ecosystem == "r" else None,
                     "vulnerability_findings_key": f"{paths['governance_prefix']}vulnerability-findings.csv",
                     "remediation_required_key": f"{paths['governance_prefix']}remediation-required.csv",
                     "remediation_exceptions_key": f"{paths['governance_prefix']}remediation-exceptions.csv",
@@ -82,6 +86,9 @@ def build_catalog_record(
         "ecosystem": ecosystem,
         "execution_id": execution_id,
         "scan_timestamp": timestamp,
+        "started_at": started_at,
+        "completed_at": completed_at,
+        "duration_seconds": duration_seconds,
         "status": summary.get("overall_status"),
         "summary_key": summary_key,
         "summary_uri": s3_uri(bucket, summary_key),

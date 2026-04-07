@@ -83,6 +83,8 @@ function Start-CheckpointLoop {
 function Publish-FailureDiagnostics {
   Stop-CheckpointLoop
   Write-State -Phase 'failed'
+  Upload-IfExists -Path "$runDir\preflight-native-deps.txt" -Destination "$checkpointPrefix/failures/preflight-native-deps.txt"
+  Upload-IfExists -Path "$runDir\preflight-native-deps.json" -Destination "$checkpointPrefix/failures/preflight-native-deps.json"
   Upload-IfExists -Path "$runDir\restore.log" -Destination "$checkpointPrefix/failures/restore.log"
   Upload-IfExists -Path "$runDir\stage-state.json" -Destination "$checkpointPrefix/failures/stage-state.json"
   try { Publish-Checkpoint -Phase 'failed' } catch {}
@@ -112,6 +114,11 @@ if ($actualVersion -ne $rVersion) {
   throw "R version mismatch. image=$actualVersion lockfile=$rVersion"
 }
 
+Write-State -Phase 'preflight'
+python "$scriptRoot\preflight-r-native-deps.py" --lock-file "$runDir\renv.lock" --platform $Platform --output-json "$runDir\preflight-native-deps.json" --output-text "$runDir\preflight-native-deps.txt"
+Upload-IfExists -Path "$runDir\preflight-native-deps.json" -Destination "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/traceability/r/$Platform/$ts/preflight-native-deps.json"
+Upload-IfExists -Path "$runDir\preflight-native-deps.txt" -Destination "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/env-artifacts/r/$Platform/$ts/preflight-native-deps.txt"
+
 Write-State -Phase 'restore'
 Start-CheckpointLoop
 
@@ -138,8 +145,10 @@ Upload-IfExists -Path "$runDir\installed-packages.csv" -Destination "s3://${env:
 Upload-IfExists -Path "$runDir\r-packages.cdx.json" -Destination "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/env-artifacts/r/$Platform/$ts/r-packages.cdx.json"
 Upload-IfExists -Path "$runDir\session-info.txt" -Destination "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/env-artifacts/r/$Platform/$ts/session-info.txt"
 Upload-IfExists -Path "$runDir\renv-status.txt" -Destination "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/env-artifacts/r/$Platform/$ts/renv-status.txt"
+Upload-IfExists -Path "$runDir\preflight-native-deps.txt" -Destination "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/env-artifacts/r/$Platform/$ts/preflight-native-deps.txt"
 Upload-IfExists -Path "$runDir\restore.log" -Destination "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/env-artifacts/r/$Platform/$ts/restore.log"
 Upload-IfExists -Path "$runDir\materialization-summary.json" -Destination "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/traceability/r/$Platform/$ts/materialization-summary.json"
+Upload-IfExists -Path "$runDir\preflight-native-deps.json" -Destination "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/traceability/r/$Platform/$ts/preflight-native-deps.json"
 Upload-IfExists -Path "$runDir\environment-artifacts.tar.gz" -Destination "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/env-artifacts/r/$Platform/$ts/environment-artifacts.tar.gz"
 Upload-IfExists -Path "$runDir\renv-library-$Platform-$ts.tar.gz" -Destination "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/env-artifacts/r/$Platform/$ts/renv-library-$Platform-$ts.tar.gz"
 Upload-IfExists -Path "$runDir\renv-library-$Platform-$ts.tar.gz.sha256" -Destination "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/env-artifacts/r/$Platform/$ts/renv-library-$Platform-$ts.tar.gz.sha256"

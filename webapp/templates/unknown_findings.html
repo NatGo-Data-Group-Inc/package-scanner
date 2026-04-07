@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block body %}
+{% if not record or not platform %}
+<h1>UNKNOWN Findings</h1>
+<p class="muted">Finding details are unavailable until AWS authentication is restored.</p>
+{% else %}
+<h1>{{ ecosystem|upper }} UNKNOWN Findings</h1>
+<p>Run: <a href="/runs/{{ ecosystem }}/{{ record.execution_id }}">{{ record.execution_id }}</a></p>
+<p>Platform: <code>{{ platform.platform }}</code></p>
+<p>
+  <a href="/download-unknown-bundle/{{ ecosystem }}/{{ record.execution_id }}/{{ platform.platform }}">download UNKNOWN analyst bundle</a>
+</p>
+{% if form_error %}
+<div class="card bad">{{ form_error }}</div>
+{% endif %}
+{% if findings %}
+<p class="muted">These findings require analyst severity/disposition review. The checklist below annotates evidence already gathered and the remaining human decisions.</p>
+<div class="callout">
+  Select the findings you want to include by checking `include in candidate`, then submit once to create one audited combined candidate and one validation scan.
+</div>
+<form method="post" action="/upgrade-candidates/{{ ecosystem }}/{{ record.execution_id }}/{{ platform.platform }}">
+  <label for="requested_by_bulk">Requested By
+    <input id="requested_by_bulk" name="requested_by" required>
+  </label>
+  <label for="rationale_bulk">Why These Upgrade Candidates Are Being Created
+    <input id="rationale_bulk" name="rationale" required>
+  </label>
+  <button id="bulk-submit-top" type="submit" disabled>Create One Audited Candidate For Selected Upgrades And Start One Validation Scan</button>
+{% for finding in findings %}
+{% set selected_id = finding.package_name ~ '::' ~ finding.vulnerability_id %}
+<div class="card">
+  <h2>{{ finding.package_name }} {{ finding.package_version }}</h2>
+  <p><strong>{{ finding.vulnerability_id }}</strong>{% if finding.title %}: {{ finding.title }}{% endif %}</p>
+  <div class="chip-row">
+    <label class="chip checkbox-chip"><input class="candidate-checkbox" type="checkbox" name="selected_ids" value="{{ selected_id }}"> include in candidate</label>
+    <span class="chip">severity: UNKNOWN</span>
+    <span class="chip">scanner: {{ finding.scanner }}</span>
+    <span class="chip">materialized: {{ 'yes' if finding.materialized else 'no' }}</span>
+    <span class="chip">fix available: {{ 'yes' if finding.fixed_available else 'no' }}</span>
+    <span class="chip">recommended path: {{ finding.recommended_disposition }}</span>
+  </div>
+  <p>Repository: {{ finding.repository or 'n/a' }}{% if finding.ecosystem_name %} | Ecosystem: {{ finding.ecosystem_name }}{% endif %}</p>
+  {% if finding.aliases %}
+  <p>Aliases: {{ finding.aliases|join(', ') }}</p>
+  {% endif %}
+  {% if finding.fixed_versions %}
+  <p>Known fixed versions: {{ finding.fixed_versions|join(', ') }}</p>
+  {% endif %}
+  <p>Reference links:
+    {% if finding.reference_url %}<a href="{{ finding.reference_url }}">reference</a>{% else %}<span class="muted">reference unavailable</span>{% endif %}
+    {% if finding.nvd_url %} | <a href="{{ finding.nvd_url }}">NVD</a>{% endif %}
+    {% if finding.osv_url %} | <a href="{{ finding.osv_url }}">OSV</a>{% endif %}
+    {% if finding.package_home_url %} | <a href="{{ finding.package_home_url }}">package home</a>{% endif %}
+  </p>
+  <table class="step-table">
+    <thead>
+      <tr><th>Step</th><th>Status</th><th>Evidence gathered</th><th>Analyst action</th></tr>
+    </thead>
+    <tbody>
+      {% for step in finding.analysis_steps %}
+      <tr>
+        <td>{{ step.name }}</td>
+        <td class="{{ 'ok' if step.status == 'complete' else 'muted' }}">{{ step.status }}</td>
+        <td>{{ step.evidence }}</td>
+        <td>{{ step.analyst_action }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if finding.fixed_versions %}
+    <input type="hidden" name="package_name__{{ selected_id }}" value="{{ finding.package_name }}">
+    <input type="hidden" name="vulnerability_id__{{ selected_id }}" value="{{ finding.vulnerability_id }}">
+    <label for="target_version_{{ loop.index }}">Target Version For {{ finding.package_name }}
+      <select id="target_version_{{ loop.index }}" name="target_version__{{ selected_id }}">
+        {% for version in finding.fixed_versions %}
+        <option value="{{ version }}">{{ version }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  {% endif %}
+</div>
+{% endfor %}
+  <button id="bulk-submit-bottom" type="submit" disabled>Create One Audited Candidate For Selected Upgrades And Start One Validation Scan</button>
+</form>
+<script>
+  (function () {
+    const checkboxes = Array.from(document.querySelectorAll('.candidate-checkbox'));
+    const buttons = [
+      document.getElementById('bulk-submit-top'),
+      document.getElementById('bulk-submit-bottom'),
+    ].filter(Boolean);
+    function syncButtons() {
+      const enabled = checkboxes.some((item) => item.checked);
+      buttons.forEach((button) => {
+        button.disabled = !enabled;
+      });
+    }
+    checkboxes.forEach((item) => item.addEventListener('change', syncButtons));
+    syncButtons();
+  }());
+</script>
+{% else %}
+<p class="muted">No UNKNOWN findings were detected for this platform.</p>
+{% endif %}
+{% endif %}
+{% endblock %}

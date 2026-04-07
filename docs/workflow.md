@@ -213,6 +213,19 @@ The scanner evaluates the resolved environment/lockfile. To scan specific packag
   - `--fail-on-unknown true|false`
 - Large R lockfiles should use staged restores via `--r-stage-package-count`.
 
+### Interpreting `UNKNOWN` Severity
+
+- `UNKNOWN` means the scanner identified a finding but could not assign a
+  reliable severity from the available vulnerability metadata.
+- Treat `UNKNOWN` as unresolved severity, not as cleared and not automatically
+  as high severity.
+- For Cyber handoff, interpret `UNKNOWN` as "analyst review required to assign
+  severity and disposition."
+- When `--remediate-unknown true` is used, `UNKNOWN` findings are included in
+  remediation-required outputs.
+- When `--fail-on-unknown true` is used, `UNKNOWN` findings also gate-fail the
+  run.
+
 ## 10) PowerShell Users
 
 Equivalent wrappers:
