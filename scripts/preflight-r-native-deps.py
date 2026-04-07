@@ -23,6 +23,51 @@ LINUX_RULES = [
         ],
     },
     {
+        "id": "mpfr",
+        "description": "Multiple-precision floating-point support required by Rmpfr and dependents.",
+        "packages": ["Rmpfr"],
+        "checks": [
+            {
+                "type": "header",
+                "paths": ["/usr/include/mpfr.h", "/usr/local/include/mpfr.h"],
+                "label": "mpfr.h",
+                "install_hint": "Install the distro MPFR development package, such as mpfr-devel.",
+            }
+        ],
+    },
+    {
+        "id": "png-freetype",
+        "description": "libpng and FreeType headers required by isoband/ggplot2 and related graphics packages.",
+        "packages": ["isoband", "ggplot2"],
+        "checks": [
+            {
+                "type": "header",
+                "paths": ["/usr/include/png.h", "/usr/local/include/png.h"],
+                "label": "png.h",
+                "install_hint": "Install the distro libpng development package, such as libpng-devel.",
+            },
+            {
+                "type": "header",
+                "paths": ["/usr/include/freetype2/ft2build.h", "/usr/local/include/freetype2/ft2build.h"],
+                "label": "freetype2/ft2build.h",
+                "install_hint": "Install the distro FreeType development package, such as freetype-devel.",
+            },
+        ],
+    },
+    {
+        "id": "udunits2",
+        "description": "UDUNITS-2 configuration required by spatial/time packages (e.g., spData, terra).",
+        "packages": ["spData", "terra"],
+        "checks": [
+            {
+                "type": "command",
+                "path": "udunits2-config",
+                "label": "udunits2-config",
+                "install_hint": "Install the distro udunits2 development package, such as udunits2-devel.",
+            }
+        ],
+    },
+    {
         "id": "gmp",
         "description": "GNU MP headers and libraries required by packages such as gmp.",
         "packages": ["gmp"],
@@ -141,7 +186,7 @@ def build_report(lockfile: Path, target_platform: str) -> dict:
     report_rules = []
     missing = []
     for rule in platform_rules(target_platform):
-        matched = [package_index[name] for name in rule["packages"] if name in package_index]
+        matched = [package_index[name.lower()] for name in rule["packages"] if name.lower() in package_index]
         if not matched:
             continue
         checks = [check_requirement(check) for check in rule["checks"]]

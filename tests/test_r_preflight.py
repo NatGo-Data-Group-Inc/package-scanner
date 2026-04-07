@@ -67,6 +67,13 @@ class RPreflightTests(unittest.TestCase):
         self.assertEqual(report["status"], "passed")
         self.assertEqual(len(report["missing_requirements"]), 0)
 
+    def test_preflight_flags_missing_mpfr_header(self):
+        lockfile = self.write_lockfile({"Rmpfr": "1.1-2"})
+        with mock.patch.object(self.mod.os.path, "exists", return_value=False):
+            report = self.mod.build_report(lockfile, "linux-amd64")
+        self.assertEqual(report["status"], "failed")
+        self.assertEqual(report["missing_requirements"][0]["id"], "mpfr")
+
 
 if __name__ == "__main__":
     unittest.main()

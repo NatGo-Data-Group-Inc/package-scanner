@@ -171,6 +171,10 @@ For R, the offline bundle is the enclave-transfer artifact set under:
 The primary transfer artifact is the offline `.tar.gz` bundle together with its
 `.sha256` checksum file.
 
+### For Cyber: Artifact Reference
+
+See `docs/cyber-artifacts.md` for a concise handoff guide describing every file in the download bundle (findings CSVs, remediation CSVs, OSV/Trivy reports, materialization/governance summaries, run metadata, preflight results, and offline bundles).
+
 ### Default Filters
 
 The runs page defaults are:

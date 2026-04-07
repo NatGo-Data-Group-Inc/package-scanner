@@ -34,6 +34,7 @@ RUN dnf install -y \
     libicu-devel \
     libjpeg-turbo-devel \
     libpng-devel \
+    mpfr-devel \
     libwebp-devel \
     libtiff-devel \
     libxml2-devel \
@@ -42,6 +43,7 @@ RUN dnf install -y \
     pcre2-devel \
     pkgconfig \
     proj-devel \
+    udunits2-devel \
     python3 \
     python3-pip \
     readline-devel \
