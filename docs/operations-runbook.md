@@ -27,6 +27,28 @@ Use [handoff-runbook.md](./handoff-runbook.md) as the primary day-to-day operato
 - Use `scripts/start-python-scan.sh`.
 - Ensure `environment.yml` is uploaded first.
 
+### S3 Layout and Artifact Map
+
+Buckets (dev):
+- Input: `package-scanner-dev-scan-input-<acct>-<region>`
+- Evidence (long-term): `package-scanner-dev-scan-evidence-<acct>-<region>`
+- Ephemeral (short-lived build outputs): `package-scanner-dev-scan-ephemeral-<acct>-<region>`
+
+Python artifacts (per platform/timestamp in evidence bucket):
+- Requirements: `evidence/requirements/python/<platform>/<ts>/environment.yml` (and resolved lockfile if present)
+- Model results: `evidence/model-results/python/<platform>/<ts>/trivy-sbom-report.json` (plus `safety-report.json` if enabled)
+- Governance: `evidence/governance/python/<platform>/<ts>/vulnerability-findings.csv`, `remediation-required.csv`, `remediation-exceptions.csv`, `remediation-spreadsheet.csv`, `governance-summary.json`
+- Traceability: `evidence/traceability/python/<platform>/<ts>/run-metadata.json`, `materialization-summary.json`
+
+R artifacts (per platform/timestamp in evidence bucket):
+- Requirements: `evidence/requirements/r/<platform>/<ts>/renv.lock`, `installed-packages.csv`
+- Model results: `evidence/model-results/r/<platform>/<ts>/osv-report.json`, `trivy-sbom-report.json`
+- Governance: `evidence/governance/r/<platform>/<ts>/vulnerability-findings.csv`, `remediation-required.csv`, `remediation-exceptions.csv`, `remediation-spreadsheet.csv`, `governance-summary.json`
+- Traceability: `evidence/traceability/r/<platform>/<ts>/run-metadata.json`, `materialization-summary.json`
+- Offline caches: `evidence/packages/offline/r/<platform>/<ts>/renv-cache-*.tar.gz` (+ `.sha256`)
+
+Enclave delivery (Python): pull the Python evidence set above, plus the original `environment.yml` and any offline wheel/conda cache if produced; apply the same approval/transfer flow as R.
+
 ### Start R Scan
 
 - Use `scripts/start-r-scan.sh`.
@@ -123,7 +145,33 @@ For production updates:
 
 ## Enclave Transfer Checklist
 
-1. Pull the latest passing `renv.lock` and cache archive (plus `.sha256`) from the evidence bucket.
-2. Verify the checksum locally: `sha256sum -c renv-cache-<platform>.tar.gz.sha256`.
-3. Move the files across the approved transfer mechanism.
-4. Inside the enclave, unpack to the designated cache path, set `RENV_PATHS_CACHE`, install R 4.4.0, and run `renv::restore()` to hydrate the environment without outbound access.
+Artifact locations (R linux):
+- Evidence bucket: `s3://package-scanner-dev-scan-evidence-<acct>-<region>`
+- Offline cache: `evidence/packages/offline/r/linux-amd64/<timestamp>/renv-cache-linux-amd64-<timestamp>.tar.gz` (+ `.sha256`)
+- Lockfile: `evidence/requirements/r/linux-amd64/<timestamp>/renv.lock`
+- Governance/model: `evidence/governance/r/linux-amd64/<timestamp>/...` (findings/remediation CSVs, governance-summary.json), `evidence/model-results/r/linux-amd64/<timestamp>/osv-report.json`, `trivy-sbom-report.json`
+- Traceability: `evidence/traceability/r/linux-amd64/<timestamp>/run-metadata.json`, `materialization-summary.json`, `installed-packages.csv`
+
+Transfer steps (airgapped R):
+1. Pull the lockfile, cache tarball, `.sha256`, and governance/model/traceability bundle from the evidence bucket.
+2. Deliver the artifact bundle to cyber and obtain approval before any enclave install.
+3. After approval, move the approved artifacts via the sanctioned transfer path.
+4. In the enclave (per platform):
+   - Linux cache path example: `/opt/renv/cache`; Windows cache path example: `C:\renv\cache`.
+   - Untar cache: Linux `tar -xzf renv-cache-linux-amd64-<timestamp>.tar.gz -C /`; Windows use 7zip/PowerShell to extract into `C:\`.
+   - Set cache env: Linux `export RENV_PATHS_CACHE=/opt/renv/cache`; Windows `set RENV_PATHS_CACHE=C:\renv\cache`.
+   - Ensure R 4.4.0 is installed and on PATH.
+   - Restore:
+     - Linux:
+       ```bash
+       R -q <<'RSCRIPT'
+       options(repos = c(CRAN = "https://cloud.r-project.org"))
+       renv::restore(lockfile = "renv.lock", prompt = FALSE, clean = TRUE)
+       RSCRIPT
+       ```
+     - Windows (PowerShell):
+       ```powershell
+       $env:RENV_PATHS_CACHE="C:\renv\cache"
+       Rscript -e "options(repos=c(CRAN='https://cloud.r-project.org')); renv::restore(lockfile='renv.lock', prompt=FALSE, clean=TRUE)"
+       ```
+   - Confirm library path from `renv/library-path.txt`; default is `~/.local/share/renv/library` (Linux) or `%USERPROFILE%\\AppData\\Local\\renv\\library` (Windows).
