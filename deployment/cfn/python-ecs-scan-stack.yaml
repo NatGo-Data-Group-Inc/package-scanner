@@ -633,7 +633,7 @@ Resources:
                       ],
                       "Parameters": {
                         "Cluster": "${PythonLinuxAmd64Cluster.Arn}",
-                        "TaskDefinition": "${PythonLinuxAmd64TaskDefinition}",
+                        "TaskDefinition": "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${EnvironmentName}-python-linux-amd64",
                         "Overrides": {
                           "ContainerOverrides": [
                             {
@@ -698,7 +698,7 @@ Resources:
                       ],
                       "Parameters": {
                         "Cluster": "${PythonLinuxArm64Cluster.Arn}",
-                        "TaskDefinition": "${PythonLinuxArm64TaskDefinition}",
+                        "TaskDefinition": "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${EnvironmentName}-python-linux-arm64",
                         "Overrides": {
                           "ContainerOverrides": [
                             {

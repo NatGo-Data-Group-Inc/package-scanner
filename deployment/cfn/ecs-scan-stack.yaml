@@ -667,7 +667,7 @@ Resources:
                       ],
                       "Parameters": {
                         "Cluster": "${RLinuxCluster.Arn}",
-                        "TaskDefinition": "${RLinuxAmd64TaskDefinition}",
+                        "TaskDefinition": "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${EnvironmentName}-r-linux-amd64",
                         "Overrides": {
                           "ContainerOverrides": [
                             {
@@ -733,7 +733,7 @@ Resources:
                       ],
                       "Parameters": {
                         "Cluster": "${RWindowsCluster.Arn}",
-                        "TaskDefinition": "${RWindowsTaskDefinition}",
+                        "TaskDefinition": "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${EnvironmentName}-r-windows-amd64",
                         "Overrides": {
                           "ContainerOverrides": [
                             {
@@ -851,7 +851,7 @@ Resources:
                       ],
                       "Parameters": {
                         "Cluster": "${RLinuxCluster.Arn}",
-                        "TaskDefinition": "${RLinuxAmd64TaskDefinition}",
+                        "TaskDefinition": "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${EnvironmentName}-r-linux-amd64",
                         "Overrides": {
                           "ContainerOverrides": [
                             {

@@ -78,6 +78,7 @@ publish_failure_diagnostics() {
   upload_if_exists "${RUN_DIR}/preflight-native-deps.txt" "${CHECKPOINT_PREFIX}/failures/preflight-native-deps.txt"
   upload_if_exists "${RUN_DIR}/preflight-native-deps.json" "${CHECKPOINT_PREFIX}/failures/preflight-native-deps.json"
   upload_if_exists "${RUN_DIR}/restore.log" "${CHECKPOINT_PREFIX}/failures/restore.log"
+  upload_if_exists "${RUN_DIR}/restore-root-cause.txt" "${CHECKPOINT_PREFIX}/failures/restore-root-cause.txt"
   upload_if_exists "${RUN_DIR}/stage-state.json" "${CHECKPOINT_PREFIX}/failures/stage-state.json"
   publish_checkpoint "failed"
 }
@@ -146,6 +147,7 @@ upload_if_exists "${RUN_DIR}/session-info.txt" "s3://${EVIDENCE_BUCKET}/${EVIDEN
 upload_if_exists "${RUN_DIR}/renv-status.txt" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/renv-status.txt"
 upload_if_exists "${RUN_DIR}/preflight-native-deps.txt" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/preflight-native-deps.txt"
 upload_if_exists "${RUN_DIR}/restore.log" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/restore.log"
+upload_if_exists "${RUN_DIR}/restore-root-cause.txt" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/r/${TARGET_PLATFORM}/${TS}/restore-root-cause.txt"
 upload_if_exists "${RUN_DIR}/materialization-summary.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/r/${TARGET_PLATFORM}/${TS}/materialization-summary.json"
 upload_if_exists "${RUN_DIR}/preflight-native-deps.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/r/${TARGET_PLATFORM}/${TS}/preflight-native-deps.json"
 upload_if_exists "${RUN_DIR}/environment-artifacts.tar.gz" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/environment-artifacts.tar.gz"

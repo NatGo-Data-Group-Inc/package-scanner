@@ -14,8 +14,24 @@
 </ul>
 <h2>Latest Failed</h2>
 <ul>
-  <li>R: {% if failed_r %}<a href="/runs/r/{{ failed_r.execution_id }}">{{ failed_r.execution_id }}</a>{% else %}<span class="muted">none</span>{% endif %}</li>
-  <li>Python: {% if failed_python %}<a href="/runs/python/{{ failed_python.execution_id }}">{{ failed_python.execution_id }}</a>{% else %}<span class="muted">none</span>{% endif %}</li>
+  <li>
+    R:
+    {% if failed_r %}
+      <a href="/runs/r/{{ failed_r.execution_id }}">{{ failed_r.execution_id }}</a>
+      {% if failed_r.root_cause %}<div class="muted"><strong>Root cause:</strong> {{ failed_r.root_cause }}</div>{% endif %}
+    {% else %}
+      <span class="muted">none</span>
+    {% endif %}
+  </li>
+  <li>
+    Python:
+    {% if failed_python %}
+      <a href="/runs/python/{{ failed_python.execution_id }}">{{ failed_python.execution_id }}</a>
+      {% if failed_python.root_cause %}<div class="muted"><strong>Root cause:</strong> {{ failed_python.root_cause }}</div>{% endif %}
+    {% else %}
+      <span class="muted">none</span>
+    {% endif %}
+  </li>
 </ul>
 <h2>Current Approved</h2>
 <ul>

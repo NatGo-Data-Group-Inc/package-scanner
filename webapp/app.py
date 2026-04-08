@@ -1003,6 +1003,42 @@ def create_app() -> Flask:
             profile=app.config["AWS_PROFILE"],
         )
 
+    def latest_root_cause(ecosystem: str, row: dict) -> str | None:
+        platforms = row.get("platforms", [])
+        failed_platform = next((p for p in platforms if p.get("status") == "FAILED"), platforms[0] if platforms else None)
+        if not failed_platform:
+            return None
+        platform_name = str(failed_platform.get("platform") or "").strip()
+        timestamp = str(row.get("scan_timestamp") or "").strip()
+        if not platform_name or not timestamp:
+            return None
+        candidates = [
+            f"{app.config['CATALOG_PREFIX'].rstrip('/')}/traceability/{ecosystem}/{platform_name}/{timestamp}/restore-root-cause.txt",
+            f"deploy/tmp/r/{platform_name}/{timestamp}/restore-root-cause.txt",
+        ]
+        for key in candidates:
+            try:
+                if key.startswith("deploy/tmp/"):
+                    payload = s3_get_bytes(
+                        app.config["EPHEMERAL_BUCKET"],
+                        key,
+                        region=app.config["AWS_REGION"],
+                        profile=app.config["AWS_PROFILE"],
+                    )
+                else:
+                    payload = s3_get_bytes(
+                        app.config["CATALOG_BUCKET"],
+                        key,
+                        region=app.config["AWS_REGION"],
+                        profile=app.config["AWS_PROFILE"],
+                    )
+                text = payload.decode("utf-8", errors="ignore").strip()
+                if text:
+                    return text.splitlines()[0]
+            except Exception:
+                continue
+        return None
+
     @app.route("/")
     def index():
         auth_error = None
@@ -1030,6 +1066,12 @@ def create_app() -> Flask:
                 return None
             failed_r = latest_failed("r")
             failed_python = latest_failed("python")
+            if failed_r:
+                failed_r = dict(failed_r)
+                failed_r["root_cause"] = latest_root_cause("r", failed_r)
+            if failed_python:
+                failed_python = dict(failed_python)
+                failed_python["root_cause"] = latest_root_cause("python", failed_python)
         except AwsAuthExpiredError as exc:
             auth_error = str(exc)
             latest_r = None
