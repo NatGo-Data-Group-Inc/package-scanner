@@ -53,6 +53,8 @@ Enclave delivery (Python): pull the Python evidence set above, plus the original
 
 - Use `scripts/start-r-scan.sh`.
 - Ensure `renv.lock` is uploaded first, or pass `--source-lock-file`.
+- For named approval candidates, upload and run the specific candidate lockfile path instead of relying only on `inputs/r/renv.lock`.
+  - Example: `inputs/r/candidates/PI-26.3/linux-amd64/<timestamp>/renv.lock`
 - Each successful R workflow now:
   - plans staged restore batches
   - runs sequential CodeBuild stages per platform
@@ -77,6 +79,28 @@ scripts/register-r-task-def.sh \
 ```
 
 The R orchestrator targets the latest revision of the `package-scanner-dev-r-linux-amd64` family, so the next run pulls the new image. Ensure the ECS instance role retains `ecr:GetAuthorizationToken` so pulls succeed.
+
+Operator impact:
+
+- This is a required step whenever the scanner code changes and the runtime behavior must match the repo for governance reasons.
+- Do not assume a rebuilt image is active until you confirm the ECS task is running on the new task-definition revision and image digest.
+
+### Current R ECS behavior changes
+
+- The live ECS orchestrators now use task-definition family ARNs instead of revision-pinned ARNs.
+- Failed R ECS runs now publish `restore-root-cause.txt` and the dashboard surfaces that root cause in the latest-failed section.
+- Repository prechecks only validate `Source: Repository` lockfile entries against CRAN/RSPM visibility.
+- GitHub-sourced lockfile entries are no longer incorrectly rejected by the pre-restore availability check.
+- The restore path retries still-missing requested packages once after the first `renv::restore()` pass to recover from dependency-ordering failures.
+
+User-facing runbook effects:
+
+- `docs/workflow.md`
+  - start scans using the exact candidate lockfile path that is intended for approval
+  - understand that new task-definition revisions are now picked up automatically by ECS orchestrators
+- `docs/troubleshooting.md`
+  - use `restore-root-cause.txt` as the first triage artifact for R ECS failures
+  - verify the actual ECS task definition/image before assuming a runtime fix is active
 
 ### Enclave handoff (R)
 

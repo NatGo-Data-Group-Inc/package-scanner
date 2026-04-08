@@ -188,6 +188,62 @@ Fix:
 2. Restart the R scan with the same `renv.lock`.
 3. Confirm the new stage 1 build includes the smaller `STAGE_PACKAGES_JSON` payload in the build environment.
 
+### R ECS scan used an old image / old task definition
+
+Cause:
+
+- A Step Functions ECS state machine was pinned to a revisioned task-definition ARN instead of the task-definition family ARN.
+
+Fix:
+
+1. Verify the live state machine definition references the family ARN:
+   - `arn:aws:ecs:<region>:<account>:task-definition/<family>`
+   - not `...:task-definition/<family>:<revision>`
+2. Register the new scanner image with a new task-definition revision:
+   - `scripts/register-r-task-def.sh --image <ecr-uri:tag> ...`
+3. Re-run the scan. The next run should resolve the latest active revision automatically.
+
+Operator impact:
+
+- This affects ECS-based R and Python scan orchestrators.
+- If a scan behaves as if a recent image fix is missing, confirm the task-definition ARN on the actual ECS task before debugging package behavior.
+
+### R restore root cause says package is unavailable before restore
+
+Cause:
+
+- The lockfile requested a repository-sourced package that is not visible from CRAN/RSPM at run time, or the lockfile still contains stale package entries that are no longer intended.
+
+Fix:
+
+1. Pull the run root cause file:
+   - `evidence/traceability/r/<platform>/<timestamp>/restore-root-cause.txt`
+2. Compare the run lockfile in S3 with the local candidate lockfile.
+3. Remove unintended stale package entries from the candidate lockfile, or update the candidate package set and regenerate the lockfile.
+4. Upload the corrected candidate lockfile and rerun.
+
+Operator impact:
+
+- This affects candidate preparation for named R runs such as `PI-26.3`.
+- The canonical scan input may differ from the local file you were editing; always compare against the S3 object actually used by the run.
+
+### R restore says dependency was unavailable even though it built later
+
+Cause:
+
+- `renv::restore()` can fail a package early if one of its dependencies is not yet available in the target library at that moment, even if that dependency finishes building later in the same run.
+
+Fix:
+
+1. Confirm the package and dependency both appear in `restore.log`.
+2. Verify the scanner image includes the retry-enabled restore path.
+3. Rebuild/push/register the latest image if the running task is on an older revision.
+
+Operator impact:
+
+- This is the failure mode that affected packages like `arkdb` and `progress`.
+- The retry-enabled scanner image (`retry-*` tags and later revisions) is required to recover from this class of transient ordering issue.
+
 ### Windows R stage failed during Rtools installation
 
 Cause:

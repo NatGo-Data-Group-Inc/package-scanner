@@ -140,6 +140,16 @@ renv::snapshot()
 
 This creates `renv.lock`.
 
+Operator note:
+
+- The scanner currently expects an R `renv.lock` as input.
+- For customer-driven package requests, the practical workflow is:
+  - start from the requested package set,
+  - generate or update the candidate `renv.lock`,
+  - upload that candidate lockfile,
+  - scan and approve that exact candidate.
+- The approved candidate lockfile and the generated offline cache remain the deployment boundary for enclave delivery.
+
 ### Step B: upload input
 
 ```bash
@@ -166,6 +176,12 @@ You can skip this separate upload when the lockfile already exists locally in th
   --remediate-medium true \
   --fail-on-medium false
 ```
+
+User-facing impact:
+
+- Use the exact candidate lockfile path you intend to approve and deploy.
+- For named candidates, prefer `inputs/r/candidates/<candidate-id>/<platform>/<timestamp>/renv.lock` instead of overwriting only `inputs/r/renv.lock`.
+- The ECS orchestrators now resolve the latest active task-definition family revision automatically, so newly registered scanner images are picked up by future runs without editing the Step Functions definition again.
 
 ### Step D: get report artifacts
 
@@ -212,6 +228,15 @@ The scanner evaluates the resolved environment/lockfile. To scan specific packag
   - `--remediate-unknown true|false`
   - `--fail-on-unknown true|false`
 - Large R lockfiles should use staged restores via `--r-stage-package-count`.
+
+### R Restore Diagnostics
+
+- Failed R ECS runs now emit `restore-root-cause.txt` in `evidence/traceability/r/<platform>/<timestamp>/`.
+- The dashboard latest-failed section shows this concise root cause when available.
+- The restore path now:
+  - validates only `Source: Repository` packages against repo visibility,
+  - does not falsely reject GitHub-sourced packages such as `ROhdsiWebApi`,
+  - retries still-missing packages once after the initial `renv::restore()` pass to handle dependency-ordering gaps.
 
 ### Interpreting `UNKNOWN` Severity
 

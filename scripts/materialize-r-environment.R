@@ -66,6 +66,14 @@ install_with_retry <- function(pkgs, attempts = 3) {
   }
 }
 
+installed_package_names <- function() {
+  rownames(installed.packages(lib.loc = unique(c(library_dir, system_lib)), noCache = TRUE))
+}
+
+missing_requested_packages <- function() {
+  setdiff(requested_packages, installed_package_names())
+}
+
 write_root_cause <- function(summary, details = character()) {
   path <- file.path(output_dir, "restore-root-cause.txt")
   lines <- c(summary, details)
@@ -85,10 +93,11 @@ if (!is.null(packages_file)) {
 }
 
 lock <- renv::lockfile_read(file.path(project_dir, "renv.lock"))
-lock_packages <- names(if (is.null(lock$Packages)) list() else lock$Packages)
+lock_entries <- if (is.null(lock$Packages)) list() else lock$Packages
+lock_packages <- names(lock_entries)
 requested_packages <- if (is.null(packages_to_restore)) lock_packages else intersect(packages_to_restore, lock_packages)
 
-installed_now <- rownames(installed.packages(lib.loc = unique(c(library_dir, system_lib)), noCache = TRUE))
+installed_now <- installed_package_names()
 available_repo_packages <- tryCatch(
   rownames(available.packages(repos = getOption("repos"))),
   error = function(e) {
@@ -99,12 +108,20 @@ available_repo_packages <- tryCatch(
     stop(e)
   }
 )
-missing_from_repo <- setdiff(requested_packages, union(installed_now, available_repo_packages))
+repo_requested_packages <- Filter(
+  f = function(pkg) {
+    entry <- lock_entries[[pkg]]
+    !is.null(entry) && identical(entry$Source, "Repository")
+  },
+  x = requested_packages
+)
+missing_from_repo <- setdiff(repo_requested_packages, union(installed_now, available_repo_packages))
 if (length(missing_from_repo)) {
   write_root_cause(
     sprintf("Requested packages unavailable before restore: %s", paste(missing_from_repo, collapse = ", ")),
     c(
       sprintf("Requested package count: %d", length(requested_packages)),
+      sprintf("Repository-sourced requested package count: %d", length(repo_requested_packages)),
       sprintf("Already installed/linked package count: %d", length(installed_now)),
       sprintf("Repo-visible package count: %d", length(available_repo_packages))
     )
@@ -112,22 +129,55 @@ if (length(missing_from_repo)) {
   stop(sprintf("requested packages unavailable before restore: %s", paste(missing_from_repo, collapse = ", ")))
 }
 
-restore_error <- tryCatch({
-  renv::restore(
-    project = project_dir,
-    lockfile = file.path(project_dir, "renv.lock"),
-    library = library_dir,
-    packages = packages_to_restore,
-    prompt = FALSE,
-    clean = clean_restore
-  )
-  NULL
-}, error = function(e) e)
+run_restore <- function(pkgs = packages_to_restore, clean = clean_restore) {
+  tryCatch({
+    renv::restore(
+      project = project_dir,
+      lockfile = file.path(project_dir, "renv.lock"),
+      library = library_dir,
+      packages = pkgs,
+      prompt = FALSE,
+      clean = clean
+    )
+    NULL
+  }, error = function(e) e)
+}
+
+restore_error <- run_restore()
+retry_notes <- character()
+if (!is.null(restore_error)) {
+  remaining <- missing_requested_packages()
+  if (length(remaining)) {
+    retry_notes <- c(
+      retry_notes,
+      sprintf(
+        "Initial restore failed; retrying %d still-missing packages after dependency materialization.",
+        length(remaining)
+      ),
+      sprintf("Retry package set: %s", paste(remaining, collapse = ", "))
+    )
+    message(retry_notes[1])
+    message(retry_notes[2])
+    retry_error <- run_restore(pkgs = remaining, clean = FALSE)
+    if (is.null(retry_error)) {
+      restore_error <- NULL
+    } else {
+      restore_error <- retry_error
+      remaining <- missing_requested_packages()
+      if (length(remaining)) {
+        retry_notes <- c(
+          retry_notes,
+          sprintf("Packages still missing after retry: %s", paste(remaining, collapse = ", "))
+        )
+      }
+    }
+  }
+}
 
 if (!is.null(restore_error)) {
   write_root_cause(
     sprintf("renv::restore failed: %s", conditionMessage(restore_error)),
-    c("See restore.log for full package cascade.")
+    c(retry_notes, "See restore.log for full package cascade.")
   )
   stop(restore_error)
 }
