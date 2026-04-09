@@ -71,6 +71,12 @@
       .inline-filters { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
       .pager { display: flex; gap: 0.75rem; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-top: 1rem; }
       .pager-links { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+      .stage-list { display: flex; gap: 0.3rem; flex-wrap: wrap; align-items: center; }
+      .stage-chip { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.12rem 0.45rem; border-radius: 999px; border: 1px solid var(--border); font-size: 0.82rem; white-space: nowrap; }
+      .stage-chip.done { background: rgba(10, 125, 40, 0.10); color: var(--ok); border-color: rgba(10, 125, 40, 0.35); }
+      .stage-chip.current { background: rgba(11, 87, 208, 0.10); color: var(--link); border-color: rgba(11, 87, 208, 0.35); font-weight: 600; }
+      .stage-chip.failed { background: rgba(180, 35, 24, 0.10); color: var(--bad); border-color: rgba(180, 35, 24, 0.35); }
+      .stage-chip.pending { color: var(--muted); }
       code { background: var(--code-bg); padding: 0.1rem 0.3rem; border-radius: 0.2rem; }
     </style>
   </head>

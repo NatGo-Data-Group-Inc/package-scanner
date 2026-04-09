@@ -123,6 +123,7 @@ printf '%s\n' "${ENV_PREFIX}" > "${RUN_DIR}/env-prefix.txt"
   --root-prefix "${ROOT_PREFIX}" \
   --env-prefix "${ENV_PREFIX}"
 
+write_state "analysis"
 "${PYTHON_BIN}" -m cyclonedx_py requirements "${RUN_DIR}/requirements.lock.txt" -o "${RUN_DIR}/python-packages.cdx.json" || true
 trivy sbom --format json --output "${RUN_DIR}/trivy-sbom-report.json" "${RUN_DIR}/python-packages.cdx.json" || true
 printf '[]\n' > "${RUN_DIR}/safety-report.json"
@@ -130,12 +131,14 @@ if [[ -n "${SAFETY_API_KEY:-}" ]]; then
   safety --key "${SAFETY_API_KEY}" scan --file "${RUN_DIR}/requirements.lock.txt" --output json > "${RUN_DIR}/safety-report.json" || true
 fi
 GOVERNANCE_EXIT=0
+write_state "governance"
 "${PYTHON_BIN}" "${SCRIPT_ROOT}/generate-governance-artifacts.py" \
   --run-dir "${RUN_DIR}" \
   --platform "${TARGET_PLATFORM}" \
   --remediate-medium "${REMEDIATE_MEDIUM:-true}" \
   --fail-on-medium "${FAIL_ON_MEDIUM:-false}" || GOVERNANCE_EXIT=$?
 
+write_state "publish"
 "${PYTHON_BIN}" "${SCRIPT_ROOT}/bundle-directory.py" \
   --source-dir "${ROOT_PREFIX}/pkgs" \
   --output-file "${RUN_DIR}/python-pkgs-${TARGET_PLATFORM}-${TS}.tar.gz" \
