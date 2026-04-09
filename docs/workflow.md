@@ -127,7 +127,7 @@ Evidence paths:
 
 ## 6) R Scan: Example (`tidyverse`)
 
-### Step A: prepare `renv.lock`
+### Step A: prepare the R input
 
 One way to generate it:
 
@@ -142,7 +142,9 @@ This creates `renv.lock`.
 
 Operator note:
 
-- The scanner currently expects an R `renv.lock` as input.
+- The scanner can now accept either:
+  - an R `renv.lock`, or
+  - a requested-package manifest (`requested-packages.json`) that lets the scanner resolve current package versions and then generate the realized `renv.lock` during materialization.
 - For customer-driven package requests, the practical workflow is:
   - start from the requested package set,
   - generate or update the candidate `renv.lock`,
@@ -160,6 +162,25 @@ aws s3 cp ./renv.lock \
 ```
 
 You can skip this separate upload when the lockfile already exists locally in the repo and pass `--source-lock-file` in the next step instead.
+
+To convert an existing lockfile into the new requested-package manifest format:
+
+```bash
+scripts/r-lockfile-tools.sh export-requested \
+  --lockfile ./artifacts/renv.lock \
+  --requested-out-file ./artifacts/requested-packages.json
+```
+
+To run the requested-package path later, use the same launcher with the new source switch:
+
+```bash
+scripts/start-r-scan.sh \
+  --stack-name <stack> \
+  --input-bucket <input-bucket> \
+  --source-requested-file ./artifacts/requested-packages.json \
+  --deployment-lock-token <token> \
+  --profile <profile>
+```
 
 ### Step C: start scan (all R platforms)
 
@@ -181,6 +202,8 @@ User-facing impact:
 
 - Use the exact candidate lockfile path you intend to approve and deploy.
 - For named candidates, prefer `inputs/r/candidates/<candidate-id>/<platform>/<timestamp>/renv.lock` instead of overwriting only `inputs/r/renv.lock`.
+- For requested-package candidates, prefer `inputs/r/candidates/<candidate-id>/<platform>/<timestamp>/requested-packages.json`.
+- When the requested-package path is used, the run still emits `evidence/requirements/r/<platform>/<timestamp>/renv.lock`; that file is the generated, realized lockfile that cyber signs off on.
 - The ECS orchestrators now resolve the latest active task-definition family revision automatically, so newly registered scanner images are picked up by future runs without editing the Step Functions definition again.
 
 ### Step D: get report artifacts

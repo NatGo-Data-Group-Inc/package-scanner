@@ -6,6 +6,7 @@ import platform
 import shutil
 import sys
 from pathlib import Path
+from typing import Optional
 
 
 LINUX_RULES = [
@@ -143,7 +144,7 @@ def load_lockfile(path: Path) -> dict:
         return json.load(f)
 
 
-def normalize_platform(value: str | None) -> str:
+def normalize_platform(value: Optional[str]) -> str:
     if value:
         return value
     system = platform.system().lower()
@@ -263,7 +264,7 @@ def render_text(report: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--lock-file", required=True)
     parser.add_argument("--platform")

@@ -42,6 +42,7 @@ Python artifacts (per platform/timestamp in evidence bucket):
 
 R artifacts (per platform/timestamp in evidence bucket):
 - Requirements: `evidence/requirements/r/<platform>/<ts>/renv.lock`, `installed-packages.csv`
+  - When the scan starts from `requested-packages.json`, that same requirements prefix also includes `requested-packages.json`, and the `renv.lock` there is the generated lockfile from the realized build.
 - Model results: `evidence/model-results/r/<platform>/<ts>/osv-report.json`, `trivy-sbom-report.json`
 - Governance: `evidence/governance/r/<platform>/<ts>/vulnerability-findings.csv`, `remediation-required.csv`, `remediation-exceptions.csv`, `remediation-spreadsheet.csv`, `governance-summary.json`
 - Traceability: `evidence/traceability/r/<platform>/<ts>/run-metadata.json`, `materialization-summary.json`
@@ -53,6 +54,7 @@ Enclave delivery (Python): pull the Python evidence set above, plus the original
 
 - Use `scripts/start-r-scan.sh`.
 - Ensure `renv.lock` is uploaded first, or pass `--source-lock-file`.
+- You can now also pass `--source-requested-file` with a `requested-packages.json` manifest. In that mode the scan resolves current package versions, materializes them, and emits the generated `renv.lock` as the governed requirement artifact.
 - For named approval candidates, upload and run the specific candidate lockfile path instead of relying only on `inputs/r/renv.lock`.
   - Example: `inputs/r/candidates/PI-26.3/linux-amd64/<timestamp>/renv.lock`
 - Each successful R workflow now:

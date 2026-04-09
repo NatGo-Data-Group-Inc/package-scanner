@@ -5,6 +5,7 @@ STACK_NAME=""
 INPUT_BUCKET=""
 INPUT_OBJECT_KEY="inputs/r/renv.lock"
 SOURCE_LOCK_FILE=""
+SOURCE_REQUESTED_FILE=""
 EVIDENCE_BUCKET=""
 EVIDENCE_PREFIX="evidence"
 EPHEMERAL_BUCKET=""
@@ -32,6 +33,7 @@ Required:
 Optional:
   --input-object-key <key>                (default: inputs/r/renv.lock)
   --source-lock-file <path>               Upload local renv.lock before starting builds
+  --source-requested-file <path>          Upload local requested-packages.json before starting builds
   --evidence-bucket <bucket>              (default: auto from stack output)
   --evidence-prefix <prefix>              (default: evidence)
   --ephemeral-bucket <bucket>             (default: auto from stack output)
@@ -56,6 +58,7 @@ while [[ $# -gt 0 ]]; do
     --input-bucket) INPUT_BUCKET="$2"; shift 2 ;;
     --input-object-key) INPUT_OBJECT_KEY="$2"; shift 2 ;;
     --source-lock-file) SOURCE_LOCK_FILE="$2"; shift 2 ;;
+    --source-requested-file) SOURCE_REQUESTED_FILE="$2"; shift 2 ;;
     --evidence-bucket) EVIDENCE_BUCKET="$2"; shift 2 ;;
     --evidence-prefix) EVIDENCE_PREFIX="$2"; shift 2 ;;
     --ephemeral-bucket) EPHEMERAL_BUCKET="$2"; shift 2 ;;
@@ -83,6 +86,14 @@ if [[ -z "${STACK_NAME}" || -z "${INPUT_BUCKET}" ]]; then
 fi
 if [[ -n "${SOURCE_LOCK_FILE}" && ! -f "${SOURCE_LOCK_FILE}" ]]; then
   echo "Local lockfile not found: ${SOURCE_LOCK_FILE}" >&2
+  exit 1
+fi
+if [[ -n "${SOURCE_REQUESTED_FILE}" && ! -f "${SOURCE_REQUESTED_FILE}" ]]; then
+  echo "Local requested-package manifest not found: ${SOURCE_REQUESTED_FILE}" >&2
+  exit 1
+fi
+if [[ -n "${SOURCE_LOCK_FILE}" && -n "${SOURCE_REQUESTED_FILE}" ]]; then
+  echo "Use only one of --source-lock-file or --source-requested-file." >&2
   exit 1
 fi
 if [[ "${ALLOW_DEFAULT_PROFILE}" != "true" && -z "${PROFILE}" ]]; then
@@ -158,6 +169,13 @@ fi
 if [[ -n "${SOURCE_LOCK_FILE}" ]]; then
   echo "Uploading R blueprint ${SOURCE_LOCK_FILE} to s3://${INPUT_BUCKET}/${INPUT_OBJECT_KEY}"
   aws s3 cp "${SOURCE_LOCK_FILE}" "s3://${INPUT_BUCKET}/${INPUT_OBJECT_KEY}" "${AWS_ARGS[@]}"
+fi
+if [[ -n "${SOURCE_REQUESTED_FILE}" ]]; then
+  if [[ "${INPUT_OBJECT_KEY}" == "inputs/r/renv.lock" ]]; then
+    INPUT_OBJECT_KEY="inputs/r/requested-packages.json"
+  fi
+  echo "Uploading R requested-package manifest ${SOURCE_REQUESTED_FILE} to s3://${INPUT_BUCKET}/${INPUT_OBJECT_KEY}"
+  aws s3 cp "${SOURCE_REQUESTED_FILE}" "s3://${INPUT_BUCKET}/${INPUT_OBJECT_KEY}" "${AWS_ARGS[@]}"
 fi
 
 start_build() {

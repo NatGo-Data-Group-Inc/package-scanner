@@ -14,6 +14,8 @@ $checkpointPrefix = "s3://${env:EPHEMERAL_BUCKET}/${env:EPHEMERAL_PREFIX}/checkp
 $checkpointIntervalSeconds = if ($env:CHECKPOINT_INTERVAL_SECONDS) { [int]$env:CHECKPOINT_INTERVAL_SECONDS } else { 900 }
 $scriptRoot = if ($env:SCRIPT_ROOT) { $env:SCRIPT_ROOT } else { 'C:\package-scanner\scripts' }
 $checkpointJob = $null
+$inputKind = ""
+$inputRVersion = ""
 
 function Write-State {
   param([string]$Phase)
@@ -96,8 +98,22 @@ trap {
 }
 
 New-Item -ItemType Directory -Force -Path $runDir, $projectDir, $cacheDir, $libraryDir, 'C:\scan-input' | Out-Null
-aws s3 cp "s3://${env:INPUT_BUCKET}/${env:INPUT_OBJECT_KEY}" C:\scan-input\renv.lock | Out-Null
-Copy-Item C:\scan-input\renv.lock "$runDir\renv.lock" -Force
+$inputFile = Join-Path 'C:\scan-input' ([System.IO.Path]::GetFileName($env:INPUT_OBJECT_KEY))
+aws s3 cp "s3://${env:INPUT_BUCKET}/${env:INPUT_OBJECT_KEY}" $inputFile | Out-Null
+$inputPayload = Get-Content $inputFile -Raw | ConvertFrom-Json
+if ($null -ne $inputPayload.Packages -and $null -ne $inputPayload.R) {
+  $inputKind = 'lockfile'
+  $inputRVersion = $inputPayload.R.Version
+  Copy-Item $inputFile "$runDir\renv.lock" -Force
+} elseif (($inputPayload.input_type -eq 'requested-packages') -or $null -ne $inputPayload.packages) {
+  $inputKind = 'requested'
+  $inputRVersion = $inputPayload.r.version
+  if (-not $inputRVersion) { $inputRVersion = $inputPayload.r_version }
+  if (-not $inputRVersion) { throw "requested-package manifest missing r.version" }
+  Copy-Item $inputFile "$runDir\requested-packages.json" -Force
+} else {
+  throw "unsupported R input manifest"
+}
 
 try {
   aws s3 cp "$checkpointPrefix/latest/renv-cache.tar.gz" "$runDir\checkpoint-renv-cache.tar.gz" | Out-Null
@@ -108,26 +124,42 @@ try {
   python "$scriptRoot\extract-archive.py" --archive "$runDir\checkpoint-renv-library.tar.gz" --destination $libraryDir
 } catch {}
 
-$rVersion = ((Get-Content "$runDir\renv.lock" -Raw | ConvertFrom-Json).R.Version)
+$rVersion = $inputRVersion
 $actualVersion = (& Rscript -e "cat(as.character(getRversion()))")
 if ($actualVersion -ne $rVersion) {
-  throw "R version mismatch. image=$actualVersion lockfile=$rVersion"
+  throw "R version mismatch. image=$actualVersion input=$rVersion"
 }
 
-Write-State -Phase 'preflight'
-python "$scriptRoot\preflight-r-native-deps.py" --lock-file "$runDir\renv.lock" --platform $Platform --output-json "$runDir\preflight-native-deps.json" --output-text "$runDir\preflight-native-deps.txt"
-Upload-IfExists -Path "$runDir\preflight-native-deps.json" -Destination "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/traceability/r/$Platform/$ts/preflight-native-deps.json"
-Upload-IfExists -Path "$runDir\preflight-native-deps.txt" -Destination "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/env-artifacts/r/$Platform/$ts/preflight-native-deps.txt"
+function Run-Preflight {
+  Write-State -Phase 'preflight'
+  python "$scriptRoot\preflight-r-native-deps.py" --lock-file "$runDir\renv.lock" --platform $Platform --output-json "$runDir\preflight-native-deps.json" --output-text "$runDir\preflight-native-deps.txt"
+  Upload-IfExists -Path "$runDir\preflight-native-deps.json" -Destination "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/traceability/r/$Platform/$ts/preflight-native-deps.json"
+  Upload-IfExists -Path "$runDir\preflight-native-deps.txt" -Destination "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/env-artifacts/r/$Platform/$ts/preflight-native-deps.txt"
+}
+
+if ($inputKind -eq 'lockfile') {
+  Run-Preflight
+}
 
 Write-State -Phase 'restore'
 Start-CheckpointLoop
 
-Rscript "$scriptRoot\materialize-r-environment.R" --lock-file "$runDir\renv.lock" --project-dir $projectDir --cache-dir $cacheDir --library-dir $libraryDir --output-dir $runDir --platform $Platform --clean false
+if ($inputKind -eq 'lockfile') {
+  Rscript "$scriptRoot\materialize-r-environment.R" --lock-file "$runDir\renv.lock" --project-dir $projectDir --cache-dir $cacheDir --library-dir $libraryDir --output-dir $runDir --platform $Platform --clean false
+} else {
+  Rscript "$scriptRoot\materialize-r-environment.R" --requested-packages-file "$runDir\requested-packages.json" --project-dir $projectDir --cache-dir $cacheDir --library-dir $libraryDir --output-dir $runDir --platform $Platform --clean false
+}
 
 Stop-CheckpointLoop
 Publish-Checkpoint -Phase 'restored'
 
+if ($inputKind -eq 'requested') {
+  Run-Preflight
+}
+
 $libraryPath = (Get-Content "$runDir\library-path.txt" -Raw).Trim()
+$environmentArtifacts = @('renv.lock', 'installed-packages.csv', 'session-info.txt', 'renv-status.txt', 'materialization-summary.json', 'r-packages.cdx.json')
+if (Test-Path "$runDir\requested-packages.json") { $environmentArtifacts += 'requested-packages.json' }
 python "$scriptRoot\bundle-directory.py" --source-dir $cacheDir --output-file "$runDir\renv-cache-$Platform-$ts.tar.gz" --checksum-file "$runDir\renv-cache-$Platform-$ts.tar.gz.sha256"
 python "$scriptRoot\bundle-directory.py" --source-dir $libraryPath --output-file "$runDir\renv-library-$Platform-$ts.tar.gz" --checksum-file "$runDir\renv-library-$Platform-$ts.tar.gz.sha256"
 python "$scriptRoot\generate-r-materialization-summary.py" --run-dir $runDir --platform $Platform --r-version $rVersion --cache-dir $cacheDir --library-path $libraryPath
@@ -137,9 +169,10 @@ trivy sbom --format json --output "$runDir\trivy-sbom-report.json" "$runDir\r-pa
 $govExit = 0
 python "$scriptRoot\generate-r-governance-artifacts.py" --run-dir $runDir --platform $Platform --remediate-medium $env:REMEDIATE_MEDIUM --fail-on-medium $env:FAIL_ON_MEDIUM --remediate-unknown $env:REMEDIATE_UNKNOWN --fail-on-unknown $env:FAIL_ON_UNKNOWN
 if ($LASTEXITCODE -ne 0) { $govExit = $LASTEXITCODE }
-try { tar -czf "$runDir\environment-artifacts.tar.gz" -C $runDir renv.lock installed-packages.csv session-info.txt renv-status.txt materialization-summary.json r-packages.cdx.json } catch {}
+try { tar -czf "$runDir\environment-artifacts.tar.gz" -C $runDir @environmentArtifacts } catch {}
 aws s3 cp "$runDir\" "s3://${env:EPHEMERAL_BUCKET}/${env:EPHEMERAL_PREFIX}/$Platform/$ts/" --recursive | Out-Null
 aws s3 cp "$runDir\renv.lock" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/requirements/r/$Platform/$ts/renv.lock" | Out-Null
+Upload-IfExists -Path "$runDir\requested-packages.json" -Destination "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/requirements/r/$Platform/$ts/requested-packages.json"
 Upload-IfExists -Path "$runDir\approval-candidate-packages.csv" -Destination "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/requirements/r/$Platform/$ts/approval-candidate-packages.csv"
 Upload-IfExists -Path "$runDir\installed-packages.csv" -Destination "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/requirements/r/$Platform/$ts/installed-packages.csv"
 Upload-IfExists -Path "$runDir\r-packages.cdx.json" -Destination "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/env-artifacts/r/$Platform/$ts/r-packages.cdx.json"
@@ -161,7 +194,7 @@ Upload-IfExists -Path "$runDir\remediation-required.csv" -Destination "s3://${en
 Upload-IfExists -Path "$runDir\remediation-exceptions.csv" -Destination "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/governance/r/$Platform/$ts/remediation-exceptions.csv"
 Upload-IfExists -Path "$runDir\remediation-spreadsheet.csv" -Destination "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/governance/r/$Platform/$ts/remediation-spreadsheet.csv"
 Upload-IfExists -Path "$runDir\governance-summary.json" -Destination "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/traceability/r/$Platform/$ts/governance-summary.json"
-$metaJson = "{`"platform`":`"$Platform`",`"timestamp_utc`":`"$ts`",`"scan_execution_id`":`"$($env:SCAN_EXECUTION_ID)`",`"r_version`":`"$rVersion`",`"ephemeral_prefix`":`"${env:EPHEMERAL_PREFIX}/$Platform/$ts`",`"offline_bundle_prefix`":`"${env:EVIDENCE_PREFIX}/packages/offline/r/$Platform/$ts`",`"cleanup`":`"requested`"}"
+$metaJson = "{`"platform`":`"$Platform`",`"timestamp_utc`":`"$ts`",`"scan_execution_id`":`"$($env:SCAN_EXECUTION_ID)`",`"r_version`":`"$rVersion`",`"input_type`":`"$inputKind`",`"ephemeral_prefix`":`"${env:EPHEMERAL_PREFIX}/$Platform/$ts`",`"offline_bundle_prefix`":`"${env:EVIDENCE_PREFIX}/packages/offline/r/$Platform/$ts`",`"cleanup`":`"requested`"}"
 $metaJson | Out-File "$runDir\run-metadata.json" -Encoding ascii
 aws s3 cp "$runDir\run-metadata.json" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/traceability/r/$Platform/$ts/run-metadata.json" | Out-Null
 Write-State -Phase 'completed'

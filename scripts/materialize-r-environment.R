@@ -8,7 +8,16 @@ get_arg <- function(name) {
   args[[idx + 1]]
 }
 
-lock_file <- normalizePath(get_arg("--lock-file"), mustWork = TRUE)
+has_arg <- function(name) {
+  name %in% args
+}
+
+`%||%` <- function(lhs, rhs) {
+  if (is.null(lhs) || (length(lhs) == 1 && is.na(lhs)) || identical(lhs, "")) rhs else lhs
+}
+
+lock_file <- if (has_arg("--lock-file")) normalizePath(get_arg("--lock-file"), mustWork = TRUE) else NULL
+requested_packages_file <- if (has_arg("--requested-packages-file")) normalizePath(get_arg("--requested-packages-file"), mustWork = TRUE) else NULL
 project_dir <- normalizePath(get_arg("--project-dir"), mustWork = FALSE)
 cache_dir <- normalizePath(get_arg("--cache-dir"), mustWork = FALSE)
 output_dir <- normalizePath(get_arg("--output-dir"), mustWork = FALSE)
@@ -18,11 +27,17 @@ library_dir <- if ("--library-dir" %in% args) normalizePath(get_arg("--library-d
 packages_file <- if ("--packages-file" %in% args) normalizePath(get_arg("--packages-file"), mustWork = TRUE) else NULL
 clean_restore <- if ("--clean" %in% args) tolower(get_arg("--clean")) == "true" else FALSE
 
+if (is.null(lock_file) == is.null(requested_packages_file)) {
+  stop("Pass exactly one of --lock-file or --requested-packages-file", call. = FALSE)
+}
+
 dir.create(project_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(library_dir, recursive = TRUE, showWarnings = FALSE)
-file.copy(lock_file, file.path(project_dir, "renv.lock"), overwrite = TRUE)
+if (!is.null(lock_file)) {
+  file.copy(lock_file, file.path(project_dir, "renv.lock"), overwrite = TRUE)
+}
 
 log_path <- file.path(output_dir, "restore.log")
 log_con <- file(log_path, open = "wt")
@@ -53,6 +68,9 @@ file.symlink(list.files(system_lib, full.names = TRUE), file.path(library_dir, b
 
 if (!requireNamespace("renv", quietly = TRUE)) {
   install.packages("renv")
+}
+if (!requireNamespace("jsonlite", quietly = TRUE)) {
+  install.packages("jsonlite")
 }
 # Pre-fetch common problematic deps to avoid "not available" failures during targeted restores.
 # Generic retry helper for any package set; used later if needed.
@@ -92,10 +110,123 @@ if (!is.null(packages_file)) {
   }
 }
 
-lock <- renv::lockfile_read(file.path(project_dir, "renv.lock"))
-lock_entries <- if (is.null(lock$Packages)) list() else lock$Packages
-lock_packages <- names(lock_entries)
-requested_packages <- if (is.null(packages_to_restore)) lock_packages else intersect(packages_to_restore, lock_packages)
+normalize_repositories <- function(repo_value) {
+  if (is.null(repo_value)) {
+    return(getOption("repos"))
+  }
+  if (is.list(repo_value) && !is.null(names(repo_value)) && all(vapply(repo_value, is.character, logical(1), USE.NAMES = FALSE))) {
+    repos <- unlist(repo_value, use.names = TRUE)
+    return(repos[nzchar(repos)])
+  }
+  if (is.list(repo_value)) {
+    repos <- vapply(
+      repo_value,
+      function(entry) {
+        if (is.list(entry)) {
+          entry$url %||% entry$URL %||% ""
+        } else {
+          ""
+        }
+      },
+      character(1)
+    )
+    repo_names <- vapply(
+      repo_value,
+      function(entry) {
+        if (is.list(entry)) {
+          entry$name %||% entry$Name %||% ""
+        } else {
+          ""
+        }
+      },
+      character(1)
+    )
+    names(repos) <- repo_names
+    repos <- repos[nzchar(names(repos)) & nzchar(repos)]
+    if (length(repos)) {
+      return(repos)
+    }
+  }
+  getOption("repos")
+}
+
+build_requested_entry <- function(entry) {
+  if (is.character(entry)) {
+    return(list(
+      name = unname(entry),
+      source = "Repository",
+      ref = unname(entry)
+    ))
+  }
+  if (!is.list(entry)) {
+    stop("Unsupported requested package entry type", call. = FALSE)
+  }
+  name <- entry$name %||% entry$Package
+  if (is.null(name) || !nzchar(name)) {
+    stop("Requested package entry is missing name", call. = FALSE)
+  }
+  source <- entry$source %||% entry$Source %||% "Repository"
+  ref <- entry$ref
+  if (is.null(ref) || !nzchar(ref)) {
+    if (tolower(source) == "github") {
+      remote_username <- entry$remote_username %||% entry$RemoteUsername
+      remote_repo <- entry$remote_repo %||% entry$RemoteRepo
+      remote_ref <- entry$remote_ref %||% entry$RemoteRef
+      if (!is.null(remote_username) && !is.null(remote_repo)) {
+        ref <- sprintf(
+          "%s/%s%s",
+          remote_username,
+          remote_repo,
+          if (!is.null(remote_ref) && nzchar(remote_ref)) paste0("@", remote_ref) else ""
+        )
+      }
+    }
+  }
+  if (is.null(ref) || !nzchar(ref)) {
+    ref <- name
+  }
+  list(
+    name = name,
+    source = source,
+    ref = ref
+  )
+}
+
+write_generated_lockfile <- function() {
+  generated_lockfile <- file.path(project_dir, "renv.lock")
+  if (!file.exists(generated_lockfile)) {
+    stop("Expected generated renv.lock after materialization", call. = FALSE)
+  }
+  file.copy(generated_lockfile, file.path(output_dir, "renv.lock"), overwrite = TRUE)
+}
+
+input_mode <- if (is.null(lock_file)) "requested" else "lockfile"
+lock_entries <- list()
+requested_package_refs <- character()
+
+if (identical(input_mode, "lockfile")) {
+  lock <- renv::lockfile_read(file.path(project_dir, "renv.lock"))
+  lock_entries <- if (is.null(lock$Packages)) list() else lock$Packages
+  lock_packages <- names(lock_entries)
+  requested_packages <- if (is.null(packages_to_restore)) lock_packages else intersect(packages_to_restore, lock_packages)
+  requested_package_refs <- setNames(requested_packages, requested_packages)
+} else {
+  requested_manifest <- jsonlite::fromJSON(requested_packages_file, simplifyVector = FALSE)
+  requested_manifest_output <- normalizePath(file.path(output_dir, "requested-packages.json"), mustWork = FALSE)
+  if (!identical(requested_packages_file, requested_manifest_output)) {
+    file.copy(requested_packages_file, requested_manifest_output, overwrite = TRUE)
+  }
+  manifest_packages <- requested_manifest$packages %||% list()
+  requested_entries <- lapply(manifest_packages, build_requested_entry)
+  if (!is.null(packages_to_restore)) {
+    requested_entries <- Filter(function(entry) entry$name %in% packages_to_restore, requested_entries)
+  }
+  requested_packages <- vapply(requested_entries, function(entry) entry$name, character(1))
+  requested_package_refs <- stats::setNames(vapply(requested_entries, function(entry) entry$ref, character(1)), requested_packages)
+  lock_entries <- stats::setNames(lapply(requested_entries, function(entry) list(Source = entry$source)), requested_packages)
+  manifest_repos <- normalize_repositories(requested_manifest$repositories %||% requested_manifest$Repositories)
+  options(repos = manifest_repos)
+}
 
 installed_now <- installed_package_names()
 available_repo_packages <- tryCatch(
@@ -130,15 +261,43 @@ if (length(missing_from_repo)) {
 }
 
 run_restore <- function(pkgs = packages_to_restore, clean = clean_restore) {
+  if (identical(input_mode, "lockfile")) {
+    return(tryCatch({
+      renv::restore(
+        project = project_dir,
+        lockfile = file.path(project_dir, "renv.lock"),
+        library = library_dir,
+        packages = pkgs,
+        prompt = FALSE,
+        clean = clean
+      )
+      NULL
+    }, error = function(e) e))
+  }
+
   tryCatch({
-    renv::restore(
+    if (!file.exists(file.path(project_dir, ".Rprofile"))) {
+      renv::init(project = project_dir, bare = TRUE)
+    }
+    renv::settings$snapshot.type("all", project = project_dir)
+    refs <- if (is.null(pkgs)) unname(requested_package_refs) else unname(requested_package_refs[names(requested_package_refs) %in% pkgs])
+    if (!length(refs)) {
+      refs <- unname(requested_package_refs)
+    }
+    renv::install(
+      refs,
       project = project_dir,
-      lockfile = file.path(project_dir, "renv.lock"),
       library = library_dir,
-      packages = pkgs,
-      prompt = FALSE,
-      clean = clean
+      prompt = FALSE
     )
+    renv::snapshot(
+      project = project_dir,
+      library = library_dir,
+      lockfile = file.path(project_dir, "renv.lock"),
+      prompt = FALSE,
+      type = "all"
+    )
+    write_generated_lockfile()
     NULL
   }, error = function(e) e)
 }
@@ -174,9 +333,13 @@ if (!is.null(restore_error)) {
   }
 }
 
+if (identical(input_mode, "requested") && is.null(restore_error)) {
+  write_generated_lockfile()
+}
+
 if (!is.null(restore_error)) {
   write_root_cause(
-    sprintf("renv::restore failed: %s", conditionMessage(restore_error)),
+    sprintf("%s failed: %s", if (identical(input_mode, "requested")) "requested package materialization" else "renv::restore", conditionMessage(restore_error)),
     c(retry_notes, "See restore.log for full package cascade.")
   )
   stop(restore_error)

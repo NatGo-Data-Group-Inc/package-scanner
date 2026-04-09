@@ -12,6 +12,9 @@ param(
   [string]$SourceLockFile = "",
 
   [Parameter(Mandatory = $false)]
+  [string]$SourceRequestedFile = "",
+
+  [Parameter(Mandatory = $false)]
   [string]$EvidenceBucket = "",
 
   [Parameter(Mandatory = $false)]
@@ -76,6 +79,7 @@ $bashArgs = @(
 )
 
 if ($SourceLockFile -ne "") { $bashArgs += @("--source-lock-file", $SourceLockFile) }
+if ($SourceRequestedFile -ne "") { $bashArgs += @("--source-requested-file", $SourceRequestedFile) }
 if ($Profile -ne "") { $bashArgs += @("--profile", $Profile) }
 if ($AllowDefaultProfile) { $bashArgs += "--allow-default-profile" }
 if ($ExpectedAccountId -ne "") { $bashArgs += @("--expected-account-id", $ExpectedAccountId) }

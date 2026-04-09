@@ -1,0 +1,2544 @@
+{
+  "schema_version": 1,
+  "ecosystem": "r",
+  "input_type": "requested-packages",
+  "generated_from": "renv.lock",
+  "r": {
+    "version": "4.4.0"
+  },
+  "repositories": {
+    "CRAN": "https://cloud.r-project.org"
+  },
+  "packages": [
+    {
+      "name": "abind",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "acepack",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "ada",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "adabag",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "additivityTests",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "ade4",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "ade4TkGUI",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "adegraphics",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "adehabitatLT",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "adehabitatMA",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "akima",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "alabama",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "alluvial",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "alpaca",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "alphavantager",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "amap",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "analogsea",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "Andromeda",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "anomalize",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "antiword",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "anytime",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "aod",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "ape",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "arkdb",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "arrayhelpers",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "arrow",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "arsenal",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "ash",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "asht",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "askpass",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "assertthat",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "astsa",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "attempt",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "audio",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "aws.ec2metadata",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "aws.signature",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "babynames",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "backports",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "base64enc",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "base64url",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "basefun",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "batchtools",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "bayesmeta",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "bayesplot",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "bayesQR",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "bayestestR",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "bbmle",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "BCClong",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "bdsmatrix",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "beepr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "beeswarm",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "bench",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "betareg",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "BH",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "bigD",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "bit",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "bit64",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "bitops",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "blob",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "boot",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "bpcp",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "brew",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "bridgesampling",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "brio",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "Brobdingnag",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "broom",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "broom.helpers",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "bslib",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "ca",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "cachem",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "callr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "carData",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "cards",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "caret",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "caTools",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "cellranger",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "checkmate",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "chk",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "CircStats",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "class",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "classInt",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "cli",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "clipr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "clock",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "clue",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "cluster",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "cmprsk",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "coda",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "codetools",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "CohortGenerator",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "coin",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "collapse",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "collections",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "colorspace",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "commonmark",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "conflicted",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "conquer",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "corrplot",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "covr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "cowplot",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "cpp11",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "crayon",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "credentials",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "crosstalk",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "crul",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "curl",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "cyclocomp",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "Cyclops",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "data.table",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "data.tree",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "DatabaseConnector",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "datawizard",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "DBI",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "dbplyr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "deldir",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "dendextend",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "Deriv",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "desc",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "DescTools",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "diagram",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "dichromat",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "diffobj",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "digest",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "distributional",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "doBy",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "doParallel",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "doRNG",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "dplyr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "drat",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "DT",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "dtplyr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "duckdb",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "dygraphs",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "e1071",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "effectsize",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "ellipse",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "ellipsis",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "emmeans",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "estimability",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "evaluate",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "Exact",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "exact2x2",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "exactci",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "exactRankTests",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "expint",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "expm",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "expss",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "extrafont",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "extrafontdb",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "FADPclust",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "fansi",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "farver",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "fastmap",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "fastverse",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "FeatureExtraction",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "filehash",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "filelock",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "flexmix",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "fontawesome",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "forcats",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "foreach",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "forecast",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "foreign",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "forestplot",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "formatR",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "Formula",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "fracdiff",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "fs",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "fst",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "fstcore",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "furrr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "future",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "future.apply",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "gargle",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "gbmt",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "gclus",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "gdata",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "generics",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "geometry",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "ggeffects",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "ggfortify",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "ggplot2",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "ggrepel",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "ggridges",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "ggsci",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "ggsignif",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "gh",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "git2r",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "gitcreds",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "gld",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "glmnet",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "globals",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "glue",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "gmodels",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "googledrive",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "googlesheets4",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "gower",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "gplots",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "gridExtra",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "gtable",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "gtools",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "hardhat",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "haven",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "hexbin",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "highr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "hms",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "htmlTable",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "htmltools",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "htmlwidgets",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "httpcode",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "httpuv",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "httr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "httr2",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "icd.data",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "ids",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "ini",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "inline",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "insight",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "interp",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "ipred",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "IRdisplay",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "IRkernel",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "isoband",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "iterators",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "itertools",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "janeaustenr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "janitor",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "jose",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "jpeg",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "jquerylib",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "jsonlite",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "KernSmooth",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "kit",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "km.ci",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "KMsurv",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "knitr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "kyotil",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "labeling",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "labelled",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "later",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "latrend",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "lattice",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "latticeExtra",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "lava",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "lazyeval",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "lcmm",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "LearnBayes",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "libcoin",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "lifecycle",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "linprog",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "listenv",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "litedown",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "lmom",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "lmtest",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "loo",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "lpSolve",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "lubridate",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "maditr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "magic",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "magick",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "magrittr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "maps",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "markdown",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "MASS",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "Matching",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "MatchIt",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "mathjaxr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "Matrix",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "matrixcalc",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "MatrixModels",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "matrixStats",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "maxstat",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "MBA",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "memoise",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "memuse",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "metadat",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "metafor",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "mgcv",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "microbenchmark",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "mime",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "miniUI",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "minqa",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "missForest",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "mitools",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "mnormt",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "mockery",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "ModelMetrics",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "modelr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "modeltools",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "multcomp",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "munsell",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "mvtnorm",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "nanoparquet",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "nleqslv",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "nlme",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "NLP",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "nnet",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "numDeriv",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "odbc",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "openssl",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "openxlsx",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "orthopolynom",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "otel",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "packrat",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "pacman",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "padr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "ParallelLogger",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "parallelly",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "parameters",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "PatientLevelPrediction",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "pbapply",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "pbdZMQ",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "performance",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "perm",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "permute",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "pillar",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "pingr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "pixmap",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "pkgbuild",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "pkgcache",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "pkgconfig",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "pkgload",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "PKI",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "plotly",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "plotrix",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "plyr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "png",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "polspline",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "polynom",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "pool",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "posterior",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "praise",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "prettycode",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "prettyunits",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "pROC",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "processx",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "prodlim",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "profmem",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "progress",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "progressr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "promises",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "proxy",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "PRROC",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "ps",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "psych",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "Publish",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "purrr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "qap",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "quadprog",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "quantmod",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "quantreg",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "QuickJSR",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "R.cache",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "R.methodsS3",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "R.oo",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "R.utils",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "R6",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "ragg",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "randomForest",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "ranger",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "rappdirs",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "raster",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "rbibutils",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "rcmdcheck",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "RColorBrewer",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "Rcpp",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "RcppArmadillo",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "RcppEigen",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "RcppParallel",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "RcppProgress",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "RcppRoll",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "RcppTOML",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "Rdpack",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "readr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "readxl",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "recipes",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "reformulas",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "registry",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "rematch",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "rematch2",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "remotes",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "renv",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "repr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "reprex",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "reshape2",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "ResultModelManager",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "rex",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "rio",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "rJava",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "RJSONIO",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "rlang",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "rmarkdown",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "rncl",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "rngtools",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "RODBC",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "rootSolve",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "rpart",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "rprojroot",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "rsample",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "rsconnect",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "RSQLite",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "rstantools",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "rstudioapi",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "Rttf2pt1",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "RUnit",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "rvest",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "S7",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "sandwich",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "sas7bdat",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "sass",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "scales",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "scatterplot3d",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "segmented",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "selectr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "seqinr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "seriation",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "sessioninfo",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "shape",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "shiny",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "shinyjs",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "shinythemes",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "sjlabelled",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "sjmisc",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "slam",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "slider",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "snakecase",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "snow",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "SnowballC",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "snowflakeauth",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "sourcetools",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "sp",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "spacefillr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "SparseM",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "sparsevctrs",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "spatial",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "spData",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "SqlRender",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "SQUAREM",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "ssanv",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "StanHeaders",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "statmod",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "stringi",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "stringr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "styler",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "survey",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "survival",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "svUnit",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "sweep",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "sys",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "systemfonts",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "tableone",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "tensorA",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "testthat",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "textshaping",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "TH.data",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "tibble",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "tibbletime",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "tidyr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "tidyselect",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "tidyverse",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "timechange",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "timeDate",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "timereg",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "timetk",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "tinytex",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "tkrplot",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "tmvnsim",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "tokenizers",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "transport",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "triebeard",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "tseries",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "tsfeatures",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "TSP",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "TTR",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "tzdb",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "urca",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "urltools",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "usethis",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "utf8",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "uuid",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "variables",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "vcd",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "vctrs",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "vegan",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "VGAM",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "viridis",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "viridisLite",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "visNetwork",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "vroom",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "waldo",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "warp",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "webfakes",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "webshot",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "whisker",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "withr",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "wk",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "writexl",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "xfun",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "xml2",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "xmlparsedata",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "xopen",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "xtable",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "xts",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "yaml",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "zip",
+      "source": "Repository",
+      "repository": "CRAN"
+    },
+    {
+      "name": "zoo",
+      "source": "Repository",
+      "repository": "CRAN"
+    }
+  ]
+}
