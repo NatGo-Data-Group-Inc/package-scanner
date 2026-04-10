@@ -156,6 +156,70 @@ def ecosystem_platform_badge(ecosystem: str, platform: str) -> str:
     return f"{ecosystem}-{architecture_label(platform or 'unknown')}"
 
 
+ACTIVE_RUN_STAGES = [
+    ("preflight", "Preflight"),
+    ("materialization", "Materialization"),
+    ("analysis", "Analysis"),
+    ("governance", "Governance"),
+    ("publish", "Publish"),
+    ("complete", "Complete"),
+]
+
+
+def normalize_live_phase(value: str | None) -> str | None:
+    normalized = str(value or "").strip().lower()
+    if not normalized:
+        return None
+    phase_map = {
+        "preflight": "preflight",
+        "restore": "materialization",
+        "materialize": "materialization",
+        "materialization": "materialization",
+        "restored": "analysis",
+        "analysis": "analysis",
+        "governance": "governance",
+        "publish": "publish",
+        "completed": "complete",
+        "complete": "complete",
+        "failed": "failed",
+    }
+    return phase_map.get(normalized, normalized)
+
+
+def stage_label(stage_key: str | None) -> str:
+    for key, label in ACTIVE_RUN_STAGES:
+        if key == stage_key:
+            return label
+    if stage_key == "failed":
+        return "Failed"
+    return "Unknown"
+
+
+def stage_checklist(current_stage: str | None, status: str, *, stage_detail: str | None = None) -> list[dict[str, str]]:
+    status_upper = str(status or "").upper()
+    current_index = next((idx for idx, (key, _) in enumerate(ACTIVE_RUN_STAGES) if key == current_stage), None)
+    checklist: list[dict[str, str]] = []
+    for idx, (key, label) in enumerate(ACTIVE_RUN_STAGES):
+        chip_class = "pending"
+        if status_upper == "SUCCEEDED":
+            chip_class = "done"
+        elif status_upper in {"FAILED", "TIMED_OUT", "ABORTED"}:
+            if current_index is not None and idx < current_index:
+                chip_class = "done"
+            elif current_index is not None and idx == current_index:
+                chip_class = "failed"
+        elif current_index is not None:
+            if idx < current_index:
+                chip_class = "done"
+            elif idx == current_index:
+                chip_class = "current"
+        text = label
+        if key == current_stage and stage_detail:
+            text = f"{label} {stage_detail}"
+        checklist.append({"key": key, "label": text, "class": chip_class})
+    return checklist
+
+
 LISTING_CACHE_TTL_SECONDS = 120
 RECORD_CACHE_TTL_SECONDS = 300
 CURSOR_CACHE_TTL_SECONDS = 1800
@@ -261,6 +325,17 @@ def create_app() -> Flask:
             )
         except Exception:
             return None
+
+    def live_checkpoint_stage_state(execution_input: dict | None, ecosystem: str, execution_id: str, platform: str) -> dict | None:
+        if not platform:
+            return None
+        payload = execution_input if isinstance(execution_input, dict) else {}
+        bucket = str(payload.get("ephemeral_bucket") or app.config.get("EPHEMERAL_BUCKET") or "").strip()
+        prefix_root = str(payload.get("ephemeral_prefix") or f"deploy/tmp/{ecosystem}").strip().rstrip("/")
+        if not bucket or not prefix_root:
+            return None
+        key = f"{prefix_root}/checkpoints/{ecosystem}/{execution_id}/{platform}/latest/stage-state.json"
+        return s3_get_json_optional(bucket, key)
 
     def get_listing_keys(ecosystem: str) -> list[str]:
         now = time.time()
@@ -369,9 +444,9 @@ def create_app() -> Flask:
         platform_options = ["all", "linux-amd64", "windows"]
         if ecosystem == "python":
             platform_options.insert(2, "linux-arm64")
-        selected_status = request.args.get("status", "SUCCEEDED").upper()
+        selected_status = request.args.get("status", "ANY").upper()
         if selected_status not in {"SUCCEEDED", "FAILED", "RUNNING", "TIMED_OUT", "ABORTED", "ANY"}:
-            selected_status = "SUCCEEDED"
+            selected_status = "ANY"
         selected_platform = request.args.get("platform", "linux-amd64")
         if selected_platform not in platform_options:
             selected_platform = "linux-amd64"
@@ -991,6 +1066,21 @@ def create_app() -> Flask:
                 item["started_display"] = format_display_datetime(item.get("startDate"))
                 item["duration_display"] = format_duration(item.get("startDate"))
                 item["status_class"] = status_class(str(item.get("status") or ""))
+                stage_state = live_checkpoint_stage_state(execution_input if isinstance(execution_input, dict) else None, ecosystem, str(item.get("name") or ""), platform) or {}
+                current_stage = normalize_live_phase(stage_state.get("phase"))
+                stage_detail = None
+                stage_index = stage_state.get("stage_index")
+                total_stages = stage_state.get("total_stages")
+                if current_stage == "materialization" and stage_index and total_stages:
+                    stage_detail = f"({stage_index}/{total_stages})"
+                item["current_stage"] = current_stage or "materialization"
+                item["current_stage_label"] = stage_label(item["current_stage"])
+                item["current_stage_detail"] = stage_detail
+                item["progress_chips"] = stage_checklist(
+                    item["current_stage"],
+                    str(item.get("status") or ""),
+                    stage_detail=stage_detail,
+                )
                 active.append(item)
         active.sort(key=lambda row: str(row.get("startDate", "")), reverse=True)
         return active
@@ -1010,12 +1100,15 @@ def create_app() -> Flask:
             return None
         platform_name = str(failed_platform.get("platform") or "").strip()
         timestamp = str(row.get("scan_timestamp") or "").strip()
+        execution_id = str(row.get("execution_id") or "").strip()
         if not platform_name or not timestamp:
             return None
         candidates = [
             f"{app.config['CATALOG_PREFIX'].rstrip('/')}/traceability/{ecosystem}/{platform_name}/{timestamp}/restore-root-cause.txt",
             f"deploy/tmp/r/{platform_name}/{timestamp}/restore-root-cause.txt",
         ]
+        if execution_id and app.config.get("EPHEMERAL_BUCKET"):
+            candidates.insert(1, f"deploy/tmp/{ecosystem}/checkpoints/{ecosystem}/{execution_id}/{platform_name}/failures/restore-root-cause.txt")
         for key in candidates:
             try:
                 if key.startswith("deploy/tmp/"):
@@ -1201,6 +1294,8 @@ def create_app() -> Flask:
         checkpoint_keys = []
         restore_log_tail = None
         restore_log_key = None
+        checkpoint_bucket = None
+        checkpoint_prefix = None
         try:
             record = load_record(ecosystem, execution_id)
             summary = s3_get_json(
@@ -1211,14 +1306,18 @@ def create_app() -> Flask:
             )
             platforms = record.get("platforms", [])
             triage_platform = next((p for p in platforms if p.get("status") == "FAILED"), platforms[0] if platforms else None)
-            bucket, prefix = (triage_checkpoint_prefix(ecosystem, execution_id, triage_platform.get("platform", "")) if triage_platform else (None, None))
-            if bucket and prefix:
-                checkpoint_keys = list_checkpoint_keys(bucket, prefix)
+            checkpoint_bucket, checkpoint_prefix = (
+                triage_checkpoint_prefix(ecosystem, execution_id, triage_platform.get("platform", ""))
+                if triage_platform
+                else (None, None)
+            )
+            if checkpoint_bucket and checkpoint_prefix:
+                checkpoint_keys = list_checkpoint_keys(checkpoint_bucket, checkpoint_prefix)
                 for candidate in ["failures/restore.log", "latest/restore.log"]:
-                    key = f"{prefix}{candidate}"
+                    key = f"{checkpoint_prefix}{candidate}"
                     try:
                         payload = s3_get_bytes(
-                            bucket,
+                            checkpoint_bucket,
                             key,
                             region=app.config["AWS_REGION"],
                             profile=app.config["AWS_PROFILE"],
@@ -1239,6 +1338,8 @@ def create_app() -> Flask:
             summary=summary,
             triage_platform=triage_platform,
             checkpoint_keys=checkpoint_keys,
+            checkpoint_bucket=checkpoint_bucket,
+            checkpoint_prefix=checkpoint_prefix,
             restore_log_tail=restore_log_tail,
             restore_log_key=restore_log_key,
             auth_error=auth_error,

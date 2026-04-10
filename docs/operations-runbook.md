@@ -184,20 +184,56 @@ Transfer steps (airgapped R):
 3. After approval, move the approved artifacts via the sanctioned transfer path.
 4. In the enclave (per platform):
    - Linux cache path example: `/opt/renv/cache`; Windows cache path example: `C:\renv\cache`.
-   - Untar cache: Linux `tar -xzf renv-cache-linux-amd64-<timestamp>.tar.gz -C /`; Windows use 7zip/PowerShell to extract into `C:\`.
+   - Create the cache root first. Example: Linux `mkdir -p /opt/renv/cache`; Windows `New-Item -ItemType Directory -Force C:\renv\cache`.
+   - Extract the bundle into that cache root, not into `/`. The archive contains the cache contents only.
+   - Untar cache: Linux `tar -xzf renv-cache-linux-amd64-<timestamp>.tar.gz -C /opt/renv/cache`; Windows use 7zip/PowerShell to extract into `C:\renv\cache`.
    - Set cache env: Linux `export RENV_PATHS_CACHE=/opt/renv/cache`; Windows `set RENV_PATHS_CACHE=C:\renv\cache`.
    - Ensure R 4.4.0 is installed and on PATH.
+   - Ensure the `renv` package is already installed on the enclave host image. The cache bundle restores the project library; it is not a bootstrap installer for `renv` itself.
+   - Do not point `repos` at `https://cloud.r-project.org` or Posit Package Manager inside the enclave. The restore validation must be cache-only.
    - Restore:
      - Linux:
        ```bash
        R -q <<'RSCRIPT'
-       options(repos = c(CRAN = "https://cloud.r-project.org"))
+       options(repos = c(CRAN = "file:///nonexistent-cran", RSPM = "file:///nonexistent-rspm"))
+       Sys.setenv(
+         RENV_PATHS_CACHE = "/opt/renv/cache",
+         RENV_CONFIG_CACHE_SYMLINKS = "FALSE"
+       )
+       stopifnot(requireNamespace("renv", quietly = TRUE))
+       renv::consent(provided = TRUE)
        renv::restore(lockfile = "renv.lock", prompt = FALSE, clean = TRUE)
        RSCRIPT
        ```
      - Windows (PowerShell):
        ```powershell
        $env:RENV_PATHS_CACHE="C:\renv\cache"
-       Rscript -e "options(repos=c(CRAN='https://cloud.r-project.org')); renv::restore(lockfile='renv.lock', prompt=FALSE, clean=TRUE)"
+       $env:RENV_CONFIG_CACHE_SYMLINKS="FALSE"
+       Rscript -e "options(repos=c(CRAN='file:///nonexistent-cran',RSPM='file:///nonexistent-rspm')); if(!requireNamespace('renv',quietly=TRUE)) stop('renv package must be preinstalled on enclave host'); renv::consent(provided=TRUE); renv::restore(lockfile='renv.lock', prompt=FALSE, clean=TRUE)"
        ```
    - Confirm library path from `renv/library-path.txt`; default is `~/.local/share/renv/library` (Linux) or `%USERPROFILE%\\AppData\\Local\\renv\\library` (Windows).
+   - Validate the restore result against the approved evidence bundle:
+     - compare package count against `materialization-summary.json` `counts.restored_packages`
+     - compare package/version inventory against `installed-packages.csv`
+     - retain the enclave-side restore log with the transferred evidence set
+
+Air-gap restore validation steps:
+1. Before transfer, verify the tarball checksum:
+   - `sha256sum -c renv-cache-linux-amd64-<timestamp>.tar.gz.sha256`
+2. After extraction in the enclave, confirm the cache is populated before any restore:
+   - Linux: `find /opt/renv/cache -maxdepth 3 -type d | head`
+   - Windows: `Get-ChildItem C:\renv\cache -Depth 3 | Select-Object -First 20`
+3. Run the cache-only restore command above with repos set to nonexistent `file:///` URLs. This is the explicit no-network restore test.
+4. Export the realized package inventory and compare it with the approved evidence:
+   - Linux:
+     ```bash
+     Rscript -e "write.csv(as.data.frame(installed.packages()[,c('Package','Version')]), 'enclave-installed-packages.csv', row.names=FALSE)"
+     ```
+   - Windows:
+     ```powershell
+     Rscript -e "write.csv(as.data.frame(installed.packages()[,c('Package','Version')]), 'enclave-installed-packages.csv', row.names=FALSE)"
+     ```
+5. Accept the restore only if:
+   - the restore completed without any package download attempts
+   - `enclave-installed-packages.csv` matches the approved package/version rows from `installed-packages.csv`
+   - package count is consistent with `materialization-summary.json`

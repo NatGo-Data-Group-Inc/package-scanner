@@ -42,7 +42,7 @@
 {% if active_runs %}
 <table>
   <thead>
-    <tr><th>Ecosystem</th><th>Platform</th><th>Execution</th><th>Status</th><th>Started</th><th>Elapsed</th></tr>
+    <tr><th>Ecosystem</th><th>Platform</th><th>Execution</th><th>Status</th><th>Current Stage</th><th>Progress</th><th>Started</th><th>Elapsed</th></tr>
   </thead>
   <tbody>
     {% for run in active_runs %}
@@ -51,6 +51,17 @@
       <td><span class="chip badge-{{ run.platform_label }}">{{ run.platform_label }}</span></td>
       <td><code>{{ run.name }}</code></td>
       <td class="{{ run.status_class }}">{{ run.status }}</td>
+      <td>
+        {{ run.current_stage_label }}
+        {% if run.current_stage_detail %}<span class="muted">{{ run.current_stage_detail }}</span>{% endif %}
+      </td>
+      <td>
+        <div class="stage-list">
+          {% for chip in run.progress_chips %}
+          <span class="stage-chip {{ chip.class }}">{{ chip.label }}</span>
+          {% endfor %}
+        </div>
+      </td>
       <td>{{ run.started_display }}</td>
       <td>{{ run.duration_display or 'n/a' }}</td>
     </tr>

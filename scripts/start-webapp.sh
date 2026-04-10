@@ -8,6 +8,7 @@ PROFILE=""
 ALLOW_DEFAULT_PROFILE="false"
 CATALOG_BUCKET=""
 CATALOG_PREFIX="evidence"
+EPHEMERAL_BUCKET=""
 APP_HOME="/tmp/package-scanner-webapp-home"
 LOG_FILE="/tmp/package-scanner-webapp.log"
 PID_FILE="/tmp/package-scanner-webapp.pid"
@@ -24,6 +25,7 @@ Options:
   --allow-default-profile
   --catalog-bucket <bucket>     Required unless CATALOG_BUCKET is already set
   --catalog-prefix <prefix>     (default: evidence)
+  --ephemeral-bucket <bucket>   Optional; enables triage checkpoint lookups
   --app-home <dir>              (default: /tmp/package-scanner-webapp-home)
   --log-file <path>             (default: /tmp/package-scanner-webapp.log)
   --pid-file <path>             (default: /tmp/package-scanner-webapp.pid)
@@ -40,6 +42,7 @@ while [[ $# -gt 0 ]]; do
     --allow-default-profile) ALLOW_DEFAULT_PROFILE="true"; shift 1 ;;
     --catalog-bucket) CATALOG_BUCKET="$2"; shift 2 ;;
     --catalog-prefix) CATALOG_PREFIX="$2"; shift 2 ;;
+    --ephemeral-bucket) EPHEMERAL_BUCKET="$2"; shift 2 ;;
     --app-home) APP_HOME="$2"; shift 2 ;;
     --log-file) LOG_FILE="$2"; shift 2 ;;
     --pid-file) PID_FILE="$2"; shift 2 ;;
@@ -104,6 +107,7 @@ export PYTHONPATH="$(pwd)"
 export AWS_REGION="${REGION}"
 export CATALOG_BUCKET
 export CATALOG_PREFIX
+export EPHEMERAL_BUCKET
 export FLASK_APP="webapp/app.py"
 export FLASK_DEBUG="0"
 export WEBAPP_LOG_PATH="${LOG_FILE}"

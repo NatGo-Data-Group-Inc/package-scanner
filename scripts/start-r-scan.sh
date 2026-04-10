@@ -114,6 +114,111 @@ if [[ -n "${PROFILE}" ]]; then
   AWS_ARGS+=(--profile "${PROFILE}")
 fi
 
+put_catalog_record() {
+  local execution_id="$1"
+  local scan_timestamp="$2"
+  local summary_key="$3"
+  local record_json
+  local temp_json
+
+  record_json="$(
+    python - <<PY
+import json
+
+execution_id = ${execution_id@Q}
+scan_timestamp = ${scan_timestamp@Q}
+summary_key = ${summary_key@Q}
+evidence_bucket = ${EVIDENCE_BUCKET@Q}
+evidence_prefix = ${EVIDENCE_PREFIX@Q}
+input_bucket = ${INPUT_BUCKET@Q}
+input_object_key = ${INPUT_OBJECT_KEY@Q}
+platform_set = ${PLATFORM_SET@Q}
+
+platforms = ["linux-amd64"] if platform_set == "linux-only" else ["linux-amd64", "windows-amd64"]
+
+def ecosystem_paths(prefix: str, ecosystem: str, platform: str, timestamp: str) -> dict:
+    root = prefix.rstrip("/")
+    return {
+        "requirements_prefix": f"{root}/requirements/{ecosystem}/{platform}/{timestamp}/",
+        "env_artifacts_prefix": f"{root}/env-artifacts/{ecosystem}/{platform}/{timestamp}/",
+        "model_results_prefix": f"{root}/model-results/{ecosystem}/{platform}/{timestamp}/",
+        "governance_prefix": f"{root}/governance/{ecosystem}/{platform}/{timestamp}/",
+        "traceability_prefix": f"{root}/traceability/{ecosystem}/{platform}/{timestamp}/",
+        "offline_bundle_prefix": f"{root}/packages/offline/{ecosystem}/{platform}/{timestamp}/",
+    }
+
+platform_rows = []
+for platform in platforms:
+    paths = ecosystem_paths(evidence_prefix, "r", platform, scan_timestamp)
+    platform_rows.append(
+        {
+            "platform": platform,
+            "status": "RUNNING",
+            "validated": False,
+            "task_arn": None,
+            "cluster_arn": None,
+            "build_id": None,
+            "project_name": None,
+            "bundle_keys": [],
+            "missing": [],
+            "error": None,
+            "cause": None,
+            "paths": {
+                **paths,
+                "materialization_summary_key": f"{paths['traceability_prefix']}materialization-summary.json",
+                "governance_summary_key": f"{paths['traceability_prefix']}governance-summary.json",
+                "run_metadata_key": f"{paths['traceability_prefix']}run-metadata.json",
+                "preflight_native_deps_key": f"{paths['traceability_prefix']}preflight-native-deps.json",
+                "vulnerability_findings_key": f"{paths['governance_prefix']}vulnerability-findings.csv",
+                "remediation_required_key": f"{paths['governance_prefix']}remediation-required.csv",
+                "remediation_exceptions_key": f"{paths['governance_prefix']}remediation-exceptions.csv",
+                "remediation_spreadsheet_key": f"{paths['governance_prefix']}remediation-spreadsheet.csv",
+                "trivy_report_key": f"{paths['model_results_prefix']}trivy-sbom-report.json",
+                "safety_report_key": None,
+                "osv_report_key": f"{paths['model_results_prefix']}osv-report.json",
+            },
+        }
+    )
+
+record = {
+    "schema_version": 1,
+    "ecosystem": "r",
+    "execution_id": execution_id,
+    "scan_timestamp": scan_timestamp,
+    "started_at": scan_timestamp,
+    "completed_at": None,
+    "duration_seconds": None,
+    "status": "RUNNING",
+    "summary_key": summary_key,
+    "summary_uri": f"s3://{evidence_bucket}/{summary_key}",
+    "evidence_bucket": evidence_bucket,
+    "evidence_prefix": evidence_prefix.rstrip("/"),
+    "input_bucket": input_bucket,
+    "input_object_key": input_object_key,
+    "input_uri": f"s3://{input_bucket}/{input_object_key}",
+    "platforms": platform_rows,
+    "platform_count": len(platform_rows),
+    "validated_platforms": 0,
+    "created_at": scan_timestamp,
+    "approved": False,
+    "approved_at": None,
+    "approved_by": None,
+}
+
+print(json.dumps(record, indent=2))
+PY
+  )"
+  temp_json="$(mktemp /tmp/r-catalog-record.XXXXXX.json)"
+  printf '%s\n' "${record_json}" > "${temp_json}"
+  aws s3api put-object \
+    --bucket "${EVIDENCE_BUCKET}" \
+    --key "${EVIDENCE_PREFIX%/}/catalog/r/runs/${execution_id}.json" \
+    --content-type application/json \
+    --body "${temp_json}" \
+    "${AWS_ARGS[@]}" >/dev/null
+  rm -f "${temp_json}"
+}
+
 CALLER_ACCOUNT_ID="$(
   aws sts get-caller-identity --query "Account" --output text "${AWS_ARGS[@]}"
 )"
@@ -205,6 +310,7 @@ import json
 payload = {
     "scan_execution_id": ${SCAN_EXECUTION_ID@Q},
     "scan_timestamp": ${SCAN_TIMESTAMP@Q},
+    "platform_set": ${PLATFORM_SET@Q},
     "input_bucket": ${INPUT_BUCKET@Q},
     "input_object_key": ${INPUT_OBJECT_KEY@Q},
     "evidence_bucket": ${EVIDENCE_BUCKET@Q},
@@ -231,11 +337,14 @@ EXECUTION_ARN="$(
     "${AWS_ARGS[@]}"
 )"
 
+SUMMARY_KEY="${EVIDENCE_PREFIX%/}/orchestration/r/${SCAN_EXECUTION_ID}/orchestration-summary.json"
+put_catalog_record "${SCAN_EXECUTION_ID}" "${SCAN_TIMESTAMP}" "${SUMMARY_KEY}"
+
 cat <<EOF
 Started R scan orchestration
 PlatformSet:  ${PLATFORM_SET}
 ExecutionName: ${SCAN_EXECUTION_ID}
 ExecutionArn:  ${EXECUTION_ARN}
 TimestampUtc:  ${SCAN_TIMESTAMP}
-SummaryPath:   s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/orchestration/r/${SCAN_EXECUTION_ID}/orchestration-summary.json
+SummaryPath:   s3://${EVIDENCE_BUCKET}/${SUMMARY_KEY}
 EOF

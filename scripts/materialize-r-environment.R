@@ -58,12 +58,18 @@ Sys.setenv(
   RENV_PATHS_CACHE = cache_dir,
   RENV_CONFIG_CACHE_SYMLINKS = "FALSE",
   RENV_CONFIG_PAK_ENABLED = "FALSE",
-  RENV_CONFIG_EXTERNAL_LIBRARIES = "/opt/R/4.4.0/lib64/R/library"
+  R_INSTALL_STAGED = "FALSE"
 )
-# Symlink system library into the project library so prebuilt packages are directly reused.
+
+system_lib <- Sys.getenv("R_SYSTEM_LIBRARY", unset = R.home("library"))
+if (!nzchar(system_lib)) {
+  system_lib <- R.home("library")
+}
+Sys.setenv(RENV_CONFIG_EXTERNAL_LIBRARIES = system_lib)
+
+# Keep the system library visible for base/recommended reuse without injecting
+# symlinks into the mutable project library during staged package installs.
 dir.create(library_dir, recursive = TRUE, showWarnings = FALSE)
-system_lib <- "/opt/R/4.4.0/lib64/R/library"
-file.symlink(list.files(system_lib, full.names = TRUE), file.path(library_dir, basename(list.files(system_lib, full.names = TRUE))))
 .libPaths(unique(c(library_dir, system_lib, .libPaths())))
 
 if (!requireNamespace("renv", quietly = TRUE)) {
@@ -90,6 +96,31 @@ installed_package_names <- function() {
 
 missing_requested_packages <- function() {
   setdiff(requested_packages, installed_package_names())
+}
+
+installed_system_packages <- function() {
+  if (!dir.exists(system_lib)) {
+    return(data.frame())
+  }
+  as.data.frame(
+    installed.packages(
+      lib.loc = system_lib,
+      fields = c("Priority", "Repository"),
+      noCache = TRUE
+    ),
+    stringsAsFactors = FALSE
+  )
+}
+
+system_priority_map <- function() {
+  pkgs <- installed_system_packages()
+  if (!nrow(pkgs)) {
+    return(setNames(character(), character()))
+  }
+  stats::setNames(
+    if ("Priority" %in% colnames(pkgs)) pkgs[, "Priority"] else rep("", nrow(pkgs)),
+    pkgs[, "Package"]
+  )
 }
 
 write_root_cause <- function(summary, details = character()) {
@@ -228,6 +259,20 @@ if (identical(input_mode, "lockfile")) {
   options(repos = manifest_repos)
 }
 
+system_priorities <- system_priority_map()
+requested_system_seed_packages <- requested_packages[
+  requested_packages %in% names(system_priorities) &
+    system_priorities[requested_packages] %in% c("base", "recommended")
+]
+if (length(requested_system_seed_packages)) {
+  message(
+    sprintf(
+      "Using system-library versions for requested base/recommended packages: %s",
+      paste(requested_system_seed_packages, collapse = ", ")
+    )
+  )
+}
+
 installed_now <- installed_package_names()
 available_repo_packages <- tryCatch(
   rownames(available.packages(repos = getOption("repos"))),
@@ -281,15 +326,21 @@ run_restore <- function(pkgs = packages_to_restore, clean = clean_restore) {
     }
     renv::settings$snapshot.type("all", project = project_dir)
     refs <- if (is.null(pkgs)) unname(requested_package_refs) else unname(requested_package_refs[names(requested_package_refs) %in% pkgs])
-    if (!length(refs)) {
-      refs <- unname(requested_package_refs)
+    if (length(requested_system_seed_packages)) {
+      seed_refs <- unname(requested_package_refs[names(requested_package_refs) %in% requested_system_seed_packages])
+      refs <- setdiff(refs, seed_refs)
     }
-    renv::install(
-      refs,
-      project = project_dir,
-      library = library_dir,
-      prompt = FALSE
-    )
+    if (!length(refs)) {
+      refs <- character()
+    }
+    if (length(refs)) {
+      renv::install(
+        refs,
+        project = project_dir,
+        library = library_dir,
+        prompt = FALSE
+      )
+    }
     renv::snapshot(
       project = project_dir,
       library = library_dir,
@@ -348,7 +399,7 @@ if (!is.null(restore_error)) {
 project_library <- normalizePath(library_dir, winslash = "/", mustWork = FALSE)
 installed <- as.data.frame(
   installed.packages(
-    lib.loc = project_library,
+    lib.loc = unique(c(project_library, system_lib)),
     fields = c("Priority", "Repository")
   ),
   stringsAsFactors = FALSE
@@ -357,7 +408,7 @@ installed <- as.data.frame(
 installed_out <- data.frame(
   package_name = installed[, "Package"],
   package_version = installed[, "Version"],
-  library_path = project_library,
+  library_path = installed[, "LibPath"],
   priority = if ("Priority" %in% colnames(installed)) installed[, "Priority"] else "",
   repository = if ("Repository" %in% colnames(installed)) installed[, "Repository"] else "",
   stringsAsFactors = FALSE

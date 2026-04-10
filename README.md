@@ -15,6 +15,7 @@ Operator documentation:
 - `docs/troubleshooting.md`
 - `docs/architecture.md`
 - `docs/operations-runbook.md`
+- `docs/posit-handoff-runbook.md`
 - `docs/security-and-governance.md`
 - `docs/testing-and-quality.md`
 

@@ -31,5 +31,6 @@ Full procedures and examples are in:
 - [architecture.md](./architecture.md)
 - [catalog-and-ui.md](./catalog-and-ui.md)
 - [operations-runbook.md](./operations-runbook.md)
+- [posit-handoff-runbook.md](./posit-handoff-runbook.md)
 - [security-and-governance.md](./security-and-governance.md)
 - [testing-and-quality.md](./testing-and-quality.md)

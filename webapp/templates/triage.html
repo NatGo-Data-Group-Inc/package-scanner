@@ -40,14 +40,30 @@
 
 <div class="card">
   <h3>Checkpoint Logs</h3>
+  <p><strong>Ephemeral Bucket:</strong>
+    {% if checkpoint_bucket %}
+      <code>{{ checkpoint_bucket }}</code>
+    {% else %}
+      <span class="muted">not configured</span>
+    {% endif %}
+  </p>
+  <p><strong>Checkpoint Prefix:</strong>
+    {% if checkpoint_prefix %}
+      <code>{{ checkpoint_prefix }}</code>
+    {% else %}
+      <span class="muted">n/a</span>
+    {% endif %}
+  </p>
   {% if checkpoint_keys %}
     <ul>
     {% for key in checkpoint_keys %}
       <li><code>{{ key }}</code></li>
     {% endfor %}
     </ul>
+  {% elif checkpoint_bucket %}
+    <p class="muted">No checkpoint keys were found under the configured prefix.</p>
   {% else %}
-    <p class="muted">No checkpoint keys listed. Ensure EPHEMERAL_BUCKET is configured.</p>
+    <p class="muted">No checkpoint keys listed because EPHEMERAL_BUCKET is not configured in the webapp process.</p>
   {% endif %}
 </div>
 
@@ -56,8 +72,10 @@
   {% if restore_log_tail %}
     <p class="muted">Source: <code>{{ restore_log_key }}</code></p>
     <pre><code>{{ restore_log_tail }}</code></pre>
+  {% elif checkpoint_bucket %}
+    <p class="muted">No restore log was found under the configured checkpoint prefix.</p>
   {% else %}
-    <p class="muted">No restore log available. Check EPHEMERAL_BUCKET and checkpoint paths.</p>
+    <p class="muted">No restore log available because EPHEMERAL_BUCKET is not configured in the webapp process.</p>
   {% endif %}
 </div>
 

@@ -324,9 +324,26 @@ sha256sum -c renv-cache-<platform>-<timestamp>.tar.gz.sha256
 3. transfer the files through the approved mechanism
 4. in the enclave:
    - install matching R version
-   - unpack the cache archive
+   - ensure `renv` is already installed on the base R image
+   - unpack the cache archive into the cache root, not `/`
    - set `RENV_PATHS_CACHE`
-   - run `renv::restore()`
+   - run `renv::restore()` with public repos disabled so the validation is cache-only
+
+Linux example:
+
+```bash
+mkdir -p /opt/renv/cache
+tar -xzf renv-cache-<platform>-<timestamp>.tar.gz -C /opt/renv/cache
+export RENV_PATHS_CACHE=/opt/renv/cache
+export RENV_CONFIG_CACHE_SYMLINKS=FALSE
+Rscript -e "options(repos=c(CRAN='file:///nonexistent-cran',RSPM='file:///nonexistent-rspm')); stopifnot(requireNamespace('renv', quietly=TRUE)); renv::consent(provided=TRUE); renv::restore(lockfile='renv.lock', prompt=FALSE, clean=TRUE)"
+```
+
+Validation:
+
+- compare the restored package list to the approved `installed-packages.csv`
+- compare package count to `materialization-summary.json`
+- treat any attempted network download as a failed enclave restore test
 
 ## 11. First-Line Failure Handling
 
