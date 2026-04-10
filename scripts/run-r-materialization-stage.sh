@@ -52,7 +52,7 @@ aws s3 cp "${RUN_DIR}/checkpoint-renv-cache.tar.gz" "${CHECKPOINT_PREFIX}/latest
 aws s3 cp "${RUN_DIR}/checkpoint-renv-library.tar.gz" "${CHECKPOINT_PREFIX}/latest/renv-library.tar.gz"
 
 cat > "${RUN_DIR}/stage-state.json" <<EOF
-{"platform":"${TARGET_PLATFORM}","scan_execution_id":"${SCAN_EXECUTION_ID:-manual}","scan_timestamp":"${TS}","stage_index":${STAGE_INDEX},"total_stages":${TOTAL_STAGES},"final_stage":"${FINAL_STAGE}","checkpoint_prefix":"${CHECKPOINT_PREFIX#s3://}"}
+{"platform":"${TARGET_PLATFORM}","scan_execution_id":"${SCAN_EXECUTION_ID:-manual}","scan_timestamp":"${TS}","phase":"materialization","stage_index":${STAGE_INDEX},"total_stages":${TOTAL_STAGES},"final_stage":"${FINAL_STAGE}","checkpoint_prefix":"${CHECKPOINT_PREFIX#s3://}"}
 EOF
 aws s3 cp "${RUN_DIR}/stage-state.json" "${CHECKPOINT_PREFIX}/latest/stage-state.json"
 
