@@ -168,8 +168,15 @@ For R, the offline bundle is the enclave-transfer artifact set under:
 
 - `evidence/packages/offline/r/<platform>/<timestamp>/`
 
-The primary transfer artifact is the offline `.tar.gz` bundle together with its
-`.sha256` checksum file.
+For R, the primary deployable set is the pair of offline archives together with
+their `.sha256` checksum files:
+
+- `renv-cache-<platform>-<timestamp>.tar.gz`
+- `renv-library-<platform>-<timestamp>.tar.gz`
+
+The GUI `download Posit handoff bundle` action packages those deployables
+together with `renv.lock`, `installed-packages.csv`, `materialization-summary.json`,
+`run-metadata.json`, and the local verifier scripts.
 
 ### For Cyber: Artifact Reference
 

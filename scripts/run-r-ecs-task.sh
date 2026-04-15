@@ -204,6 +204,8 @@ upload_if_exists "${RUN_DIR}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz" "s3:/
 upload_if_exists "${RUN_DIR}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz.sha256" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
 upload_if_exists "${RUN_DIR}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/packages/offline/r/${TARGET_PLATFORM}/${TS}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz"
 upload_if_exists "${RUN_DIR}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz.sha256" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/packages/offline/r/${TARGET_PLATFORM}/${TS}/renv-cache-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
+upload_if_exists "${RUN_DIR}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/packages/offline/r/${TARGET_PLATFORM}/${TS}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz"
+upload_if_exists "${RUN_DIR}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz.sha256" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/packages/offline/r/${TARGET_PLATFORM}/${TS}/renv-library-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
 upload_if_exists "${RUN_DIR}/trivy-sbom-report.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/model-results/r/${TARGET_PLATFORM}/${TS}/trivy-sbom-report.json"
 upload_if_exists "${RUN_DIR}/osv-report.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/model-results/r/${TARGET_PLATFORM}/${TS}/osv-report.json"
 upload_if_exists "${RUN_DIR}/vulnerability-findings.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/governance/r/${TARGET_PLATFORM}/${TS}/vulnerability-findings.csv"

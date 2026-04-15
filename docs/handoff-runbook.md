@@ -262,6 +262,8 @@ R-specific key files:
 - `osv-report.json`
 - `renv-cache-<platform>-<timestamp>.tar.gz`
 - `renv-cache-<platform>-<timestamp>.tar.gz.sha256`
+- `renv-library-<platform>-<timestamp>.tar.gz`
+- `renv-library-<platform>-<timestamp>.tar.gz.sha256`
 
 ## 8. Success Criteria
 
@@ -282,8 +284,8 @@ An R run is considered complete when:
 - each platform has:
   - `governance-summary.json`
   - `materialization-summary.json`
-  - offline cache tarball
-  - offline cache checksum
+  - offline cache tarball + checksum
+  - offline realized library tarball + checksum
 
 ## 9. S3 Navigation Cheatsheet
 
@@ -315,10 +317,13 @@ After a successful R run:
    - `renv.lock`
    - `renv-cache-<platform>-<timestamp>.tar.gz`
    - `renv-cache-<platform>-<timestamp>.tar.gz.sha256`
+   - `renv-library-<platform>-<timestamp>.tar.gz`
+   - `renv-library-<platform>-<timestamp>.tar.gz.sha256`
 2. verify checksum:
 
 ```bash
 sha256sum -c renv-cache-<platform>-<timestamp>.tar.gz.sha256
+sha256sum -c renv-library-<platform>-<timestamp>.tar.gz.sha256
 ```
 
 3. transfer the files through the approved mechanism
@@ -326,8 +331,9 @@ sha256sum -c renv-cache-<platform>-<timestamp>.tar.gz.sha256
    - install matching R version
    - ensure `renv` is already installed on the base R image
    - unpack the cache archive into the cache root, not `/`
+   - preserve the realized library archive and seed the project library from it before restore when validating a Posit/Workbench deployment
    - set `RENV_PATHS_CACHE`
-   - run `renv::restore()` with public repos disabled so the validation is cache-only
+   - run `renv::restore()` with public repos disabled so the validation is offline and uses the transferred artifacts only
 
 Linux example:
 

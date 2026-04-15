@@ -4,7 +4,7 @@ Use this runbook when the approved R offline bundle from `package_scanner` must 
 
 This document intentionally separates Posit Workbench from Posit Connect:
 
-- Posit Workbench: supported target for manual offline `renv` restore from the approved cache tarball.
+- Posit Workbench: supported target for manual offline `renv` restore from the approved deployable bundle (`renv-cache` plus `renv-library`).
 - Posit Connect: do not manually unpack the tarball into Connect-managed runtime cache paths. Connect owns those caches and rebuilds them as part of content deployment.
 
 ## 1. Preferred Linux Location
@@ -30,6 +30,8 @@ From the approved scan run, transfer:
 - `renv.lock`
 - `renv-cache-linux-amd64-<timestamp>.tar.gz`
 - `renv-cache-linux-amd64-<timestamp>.tar.gz.sha256`
+- `renv-library-linux-amd64-<timestamp>.tar.gz`
+- `renv-library-linux-amd64-<timestamp>.tar.gz.sha256`
 - `installed-packages.csv`
 - `materialization-summary.json`
 - `run-metadata.json`
@@ -51,10 +53,15 @@ If multiple Workbench users need to reuse the cache, grant read and execute acce
 ```bash
 cd /path/to/transferred/bundle
 sha256sum -c renv-cache-linux-amd64-<timestamp>.tar.gz.sha256
+sha256sum -c renv-library-linux-amd64-<timestamp>.tar.gz.sha256
 sudo tar -xzf renv-cache-linux-amd64-<timestamp>.tar.gz -C /opt/posit/renv/cache/R-4.4.0
 ```
 
-The tarball contains cache contents only. Extract into the cache root, not into `/`.
+The cache tarball contains cache contents only. Extract into the cache root, not into `/`.
+
+The realized library tarball is the deployment-side bootstrap for air-gapped
+restore and must be preserved in the transferred handoff bundle. The automated
+verifier seeds the project library from it before running `renv::restore()`.
 
 ### Stage the project
 
@@ -108,9 +115,52 @@ After restore:
    - `renv::status()` reports the project is synchronized
    - the installed package inventory matches the approved run evidence
 
+### Automated verifier
+
+You can run the same handoff procedure automatically against the exact target
+Linux image before transferring anything into the enclave.
+
+Example:
+
+```bash
+./scripts/verify-posit-handoff.sh \
+  --image <exact-posit-r44-image> \
+  --evidence-bucket <evidence-bucket> \
+  --timestamp <approved-run-timestamp> \
+  --profile <aws-profile> \
+  --app-name <application-name>
+```
+
+Directly on a Posit server after the handoff bundle has been transferred:
+
+```bash
+./scripts/verify-posit-handoff.sh \
+  --local-host \
+  --bundle-dir /path/to/transferred/bundle \
+  --app-name <application-name> \
+  --work-dir /var/tmp/posit-restore-verification
+```
+
+What it does:
+
+- downloads the approved handoff bundle from S3
+- starts the supplied image with `--network none`
+- stages the bundle into `/opt/posit/renv/cache/R-4.4.0` and `/opt/posit/projects/<application-name>`
+- seeds the project library from the realized `renv-library-*.tar.gz` artifact
+- runs the no-network `renv::restore()` command from this runbook after seeding the project library
+- exports `enclave-installed-packages.csv`, `renv-status.txt`, `restore.log`, and a verification summary
+- fails if any approved package/version is missing from the realized inventory
+
+With `--local-host`, the same script skips Docker and runs the restore directly
+on the current Linux host. Use that mode on the Posit server itself when you
+want a single command instead of a manual runbook procedure.
+
+Use this verifier when you need proof that the enclave restore will work on the
+exact Posit-aligned runtime image, not just on the generic scanner image.
+
 ## 5. Posit Connect Boundary
 
-Do not manually place this cache tarball under `/var/lib/rstudio-connect` or other Posit Connect managed runtime-cache directories.
+Do not manually place these offline tarballs under `/var/lib/rstudio-connect` or other Posit Connect managed runtime-cache directories.
 
 Reason:
 

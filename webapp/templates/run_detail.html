@@ -19,6 +19,25 @@
   <p>Status: <span class="{{ 'ok' if platform.status == 'SUCCEEDED' else 'bad' }}">{{ platform.status }}</span></p>
   <p>Validated: {{ platform.validated }}</p>
   <p><a href="/download-bundle/{{ ecosystem }}/{{ record.execution_id }}/{{ platform.platform }}">download review bundle</a></p>
+  {% if ecosystem == 'r' and platform.status == 'SUCCEEDED' %}
+  <p><a href="/download-posit-handoff-bundle/{{ record.execution_id }}/{{ platform.platform }}">download Posit handoff bundle</a></p>
+  <form method="post" action="/verify-local-host/{{ ecosystem }}/{{ record.execution_id }}/{{ platform.platform }}">
+    <button type="submit">verify on local host</button>
+  </form>
+  {% set verify_status = verify_status_by_platform.get(platform.platform) %}
+  {% if verify_status %}
+  <p>Local host verify: <span class="{{ 'ok' if verify_status.status == 'SUCCEEDED' else ('bad' if verify_status.status == 'FAILED' else '') }}">{{ verify_status.status }}</span>{% if verify_status.pid %} <span class="muted">pid={{ verify_status.pid }}</span>{% endif %}{% if verify_status.exit_code is not none and not verify_status.running %} <span class="muted">exit={{ verify_status.exit_code }}</span>{% endif %}</p>
+  {% if verify_status.work_dir %}
+  <p class="muted">Verification work dir: <code>{{ verify_status.work_dir }}</code></p>
+  {% endif %}
+  {% if verify_status.log_path %}
+  <p class="muted">Verification log: <code>{{ verify_status.log_path }}</code></p>
+  {% endif %}
+  {% if verify_status.log_tail %}
+  <pre><code>{{ verify_status.log_tail }}</code></pre>
+  {% endif %}
+  {% endif %}
+  {% endif %}
   {% if platform.unknown_findings_count %}
   <p><a href="/runs/{{ ecosystem }}/{{ record.execution_id }}/{{ platform.platform }}/unknown-findings">review UNKNOWN findings ({{ platform.unknown_findings_count }})</a> | <a href="/download-unknown-bundle/{{ ecosystem }}/{{ record.execution_id }}/{{ platform.platform }}">download UNKNOWN analyst bundle</a></p>
   {% endif %}

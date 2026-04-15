@@ -5,6 +5,9 @@ import io
 import json
 import logging
 import os
+from pathlib import Path
+import shlex
+import subprocess
 import time
 import uuid
 import zipfile
@@ -51,6 +54,127 @@ def artifact_bundle_entries(platform: dict) -> list[tuple[str, str]]:
         ("osv-report.json", paths.get("osv_report_key")),
     ]
     return [(filename, key) for filename, key in entries if key]
+
+
+def posit_handoff_bundle_entries(platform: dict, scan_timestamp: str) -> list[tuple[str, str]]:
+    paths = platform.get("paths", {})
+    entries = [
+        ("renv.lock", f"{paths.get('requirements_prefix', '')}renv.lock" if paths.get("requirements_prefix") else None),
+        (
+            "installed-packages.csv",
+            f"{paths.get('requirements_prefix', '')}installed-packages.csv" if paths.get("requirements_prefix") else None,
+        ),
+        ("materialization-summary.json", paths.get("materialization_summary_key")),
+        ("run-metadata.json", paths.get("run_metadata_key")),
+        (
+            f"renv-library-{platform.get('platform')}-{scan_timestamp}.tar.gz",
+            f"{paths.get('env_artifacts_prefix', '')}renv-library-{platform.get('platform')}-{scan_timestamp}.tar.gz"
+            if paths.get("env_artifacts_prefix") and platform.get("platform") and scan_timestamp
+            else None,
+        ),
+        (
+            f"renv-library-{platform.get('platform')}-{scan_timestamp}.tar.gz.sha256",
+            f"{paths.get('env_artifacts_prefix', '')}renv-library-{platform.get('platform')}-{scan_timestamp}.tar.gz.sha256"
+            if paths.get("env_artifacts_prefix") and platform.get("platform") and scan_timestamp
+            else None,
+        ),
+    ]
+    bundle_keys = platform.get("bundle_keys") or []
+    for key in bundle_keys:
+        filename = str(key).rsplit("/", 1)[-1]
+        entries.append((filename, key))
+    return [(filename, key) for filename, key in entries if key]
+
+
+def local_bundle_script_entries(ecosystem: str) -> list[tuple[str, Path]]:
+    if ecosystem != "r":
+        return []
+    repo_root = Path(__file__).resolve().parents[1]
+    entries = [
+        ("scripts/verify-posit-handoff.sh", repo_root / "scripts" / "verify-posit-handoff.sh"),
+        ("scripts/verify-posit-handoff-inside.sh", repo_root / "scripts" / "verify-posit-handoff-inside.sh"),
+    ]
+    return [(name, path) for name, path in entries if path.exists()]
+
+
+def repo_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def local_verify_paths(execution_id: str, platform_name: str) -> dict[str, Path]:
+    safe_execution = execution_id.replace("/", "_")
+    safe_platform = platform_name.replace("/", "_")
+    base = Path("/tmp/package-scanner-local-verify") / safe_execution / safe_platform
+    return {
+        "base": base,
+        "log": base / "verify.log",
+        "pid": base / "verify.pid",
+        "exit": base / "verify.exitcode",
+        "meta": base / "verify-meta.json",
+    }
+
+
+def pid_is_running(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def read_local_verify_status(execution_id: str, platform_name: str) -> dict | None:
+    paths = local_verify_paths(execution_id, platform_name)
+    if not paths["base"].exists():
+        return None
+
+    pid = None
+    exit_code = None
+    metadata = {}
+    if paths["pid"].exists():
+        try:
+            pid = int(paths["pid"].read_text(encoding="utf-8").strip())
+        except Exception:
+            pid = None
+    if paths["exit"].exists():
+        try:
+            exit_code = int(paths["exit"].read_text(encoding="utf-8").strip())
+        except Exception:
+            exit_code = None
+    if paths["meta"].exists():
+        try:
+            metadata = json.loads(paths["meta"].read_text(encoding="utf-8"))
+        except Exception:
+            metadata = {}
+
+    running = bool(pid and pid_is_running(pid))
+    if running:
+        status = "RUNNING"
+    elif exit_code == 0:
+        status = "SUCCEEDED"
+    elif exit_code is not None:
+        status = "FAILED"
+    else:
+        status = "UNKNOWN"
+
+    log_tail = None
+    if paths["log"].exists():
+        try:
+            lines = paths["log"].read_text(encoding="utf-8", errors="ignore").splitlines()
+            log_tail = "\n".join(lines[-80:])
+        except Exception:
+            log_tail = None
+
+    return {
+        "status": status,
+        "pid": pid,
+        "running": running,
+        "exit_code": exit_code,
+        "log_path": str(paths["log"]),
+        "log_tail": log_tail,
+        "work_dir": metadata.get("work_dir"),
+        "app_name": metadata.get("app_name"),
+        "timestamp": metadata.get("timestamp"),
+    }
 
 
 def parse_csv_bytes(payload: bytes) -> list[dict[str, str]]:
@@ -379,6 +503,49 @@ def create_app() -> Flask:
         rows.sort(key=lambda row: row.get("scan_timestamp", ""), reverse=True)
         return rows
 
+    def live_running_execution_map(ecosystem: str) -> dict[str, dict]:
+        arn = app.config["PYTHON_STATE_MACHINE_ARN"] if ecosystem == "python" else app.config["R_STATE_MACHINE_ARN"]
+        if not arn:
+            return {}
+        try:
+            executions = stepfunctions_list_executions(
+                arn,
+                region=app.config["AWS_REGION"],
+                profile=app.config["AWS_PROFILE"],
+                status_filter="RUNNING",
+                max_results=25,
+            )
+        except Exception:
+            return {}
+        live_map: dict[str, dict] = {}
+        for execution in executions:
+            execution_id = str(execution.get("name") or "").strip()
+            if execution_id:
+                live_map[execution_id] = execution
+        return live_map
+
+    def overlay_live_status(row: dict, live_execution: dict | None) -> dict:
+        if not live_execution:
+            return row
+        updated = dict(row)
+        updated["status"] = "RUNNING"
+        updated["completed_at"] = None
+        updated["duration_seconds"] = None
+        started = live_execution.get("startDate")
+        if started:
+            updated["started_at"] = started
+        platforms = []
+        for platform in row.get("platforms", []):
+            platform_row = dict(platform)
+            platform_row["status"] = "RUNNING"
+            platform_row["validated"] = False
+            platform_row.pop("validation_error", None)
+            platform_row.pop("error", None)
+            platform_row.pop("cause", None)
+            platforms.append(platform_row)
+        updated["platforms"] = platforms
+        return updated
+
     def load_record_by_key(key: str) -> dict:
         now = time.time()
         cached = record_cache.get(key)
@@ -540,10 +707,12 @@ def create_app() -> Flask:
         offset: int,
     ) -> Iterator[tuple[int, dict]]:
         keys = get_listing_keys(ecosystem)
+        live_map = live_running_execution_map(ecosystem)
         for index, key in enumerate(keys[offset:], start=offset):
+            execution_id = key.rsplit("/", 1)[-1].replace(".json", "")
             row = select_run_row(
                 ecosystem,
-                load_record_by_key(key),
+                overlay_live_status(load_record_by_key(key), live_map.get(execution_id)),
                 selected_status=selected_status,
                 selected_platform=selected_platform,
                 selected_validated=selected_validated,
@@ -1249,6 +1418,7 @@ def create_app() -> Flask:
         if ecosystem not in {"r", "python"}:
             abort(404)
         auth_error = None
+        verify_status_by_platform = {}
         try:
             record = load_record(ecosystem, execution_id)
         except AwsAuthExpiredError as exc:
@@ -1256,7 +1426,103 @@ def create_app() -> Flask:
             record = None
         except Exception:
             abort(404)
-        return render_template("run_detail.html", ecosystem=ecosystem, record=enrich_record(record, ecosystem) if record else None, auth_error=auth_error)
+        enriched = enrich_record(record, ecosystem) if record else None
+        if enriched and ecosystem == "r":
+            for platform in enriched.get("platforms", []):
+                platform_name = str(platform.get("platform") or "")
+                if platform_name:
+                    verify_status_by_platform[platform_name] = read_local_verify_status(execution_id, platform_name)
+        return render_template(
+            "run_detail.html",
+            ecosystem=ecosystem,
+            record=enriched,
+            auth_error=auth_error,
+            verify_status_by_platform=verify_status_by_platform,
+        )
+
+    @app.route("/verify-local-host/<ecosystem>/<execution_id>/<platform_name>", methods=["POST"])
+    def verify_local_host(ecosystem: str, execution_id: str, platform_name: str):
+        if ecosystem != "r":
+            abort(404)
+        try:
+            record = enrich_record(load_record(ecosystem, execution_id), ecosystem)
+        except AwsAuthExpiredError as exc:
+            return render_template("download_error.html", auth_error=str(exc), key=execution_id), 401
+        except Exception:
+            abort(404)
+
+        platform = next((item for item in record.get("platforms", []) if item.get("platform") == platform_name), None)
+        if not platform or platform.get("status") != "SUCCEEDED":
+            abort(400)
+
+        timestamp = str(record.get("scan_timestamp") or "").strip()
+        evidence_bucket = str(record.get("evidence_bucket") or "").strip()
+        if not timestamp or not evidence_bucket:
+            abort(400)
+
+        existing = read_local_verify_status(execution_id, platform_name)
+        if existing and existing.get("running"):
+            return redirect(f"/runs/{ecosystem}/{execution_id}")
+
+        paths = local_verify_paths(execution_id, platform_name)
+        paths["base"].mkdir(parents=True, exist_ok=True)
+        for key in ("log", "pid", "exit"):
+            try:
+                paths[key].unlink()
+            except FileNotFoundError:
+                pass
+
+        work_dir = str(repo_root() / "artifacts" / "posit-restore-verification" / platform_name / timestamp)
+        app_name = f"{execution_id}-{platform_name}".replace("/", "-")
+        paths["meta"].write_text(
+            json.dumps(
+                {
+                    "execution_id": execution_id,
+                    "platform": platform_name,
+                    "timestamp": timestamp,
+                    "work_dir": work_dir,
+                    "app_name": app_name,
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        cmd = [
+            str(repo_root() / "scripts" / "verify-posit-handoff.sh"),
+            "--local-host",
+            "--evidence-bucket",
+            evidence_bucket,
+            "--timestamp",
+            timestamp,
+            "--platform",
+            platform_name,
+            "--region",
+            app.config["AWS_REGION"],
+            "--app-name",
+            app_name,
+            "--work-dir",
+            work_dir,
+        ]
+        if app.config.get("AWS_PROFILE"):
+            cmd.extend(["--profile", app.config["AWS_PROFILE"]])
+
+        command_line = " ".join(shlex.quote(part) for part in cmd)
+        shell_command = (
+            f"printf '%s\\n' {shlex.quote(command_line)} >> {shlex.quote(str(paths['log']))}; "
+            f"{command_line} >> {shlex.quote(str(paths['log']))} 2>&1; "
+            f"rc=$?; printf '%s\\n' \"$rc\" > {shlex.quote(str(paths['exit']))}"
+        )
+        process = subprocess.Popen(
+            ["/bin/bash", "-lc", shell_command],
+            cwd=str(repo_root()),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        paths["pid"].write_text(str(process.pid), encoding="utf-8")
+        return redirect(f"/runs/{ecosystem}/{execution_id}")
 
     def triage_checkpoint_prefix(ecosystem: str, execution_id: str, platform: str) -> tuple[str | None, str | None]:
         bucket = app.config.get("EPHEMERAL_BUCKET") or None
@@ -1419,11 +1685,57 @@ def create_app() -> Flask:
                     except Exception:
                         continue
                     bundle.writestr(filename, payload)
+                for filename, path in local_bundle_script_entries(ecosystem):
+                    try:
+                        bundle.writestr(filename, path.read_bytes())
+                    except Exception:
+                        continue
         except AwsAuthExpiredError as exc:
             return render_template("download_error.html", auth_error=str(exc), key=execution_id), 401
 
         archive.seek(0)
         download_name = f"{execution_id}-{platform_name}-review-bundle.zip"
+        return send_file(archive, as_attachment=True, download_name=download_name, mimetype="application/zip")
+
+    @app.route("/download-posit-handoff-bundle/<execution_id>/<platform_name>")
+    def download_posit_handoff_bundle(execution_id: str, platform_name: str):
+        try:
+            record = enrich_record(load_record("r", execution_id), "r")
+        except AwsAuthExpiredError as exc:
+            return render_template("download_error.html", auth_error=str(exc), key=execution_id), 401
+        except Exception:
+            abort(404)
+
+        platform = next((item for item in record.get("platforms", []) if item.get("platform") == platform_name), None)
+        if not platform or platform.get("status") != "SUCCEEDED":
+            abort(404)
+
+        archive = io.BytesIO()
+        try:
+            with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+                for filename, key in posit_handoff_bundle_entries(platform, str(record.get("scan_timestamp") or "")):
+                    try:
+                        payload = s3_get_bytes(
+                            record["evidence_bucket"],
+                            key,
+                            region=app.config["AWS_REGION"],
+                            profile=app.config["AWS_PROFILE"],
+                        )
+                    except AwsAuthExpiredError:
+                        raise
+                    except Exception:
+                        continue
+                    bundle.writestr(filename, payload)
+                for filename, path in local_bundle_script_entries("r"):
+                    try:
+                        bundle.writestr(filename, path.read_bytes())
+                    except Exception:
+                        continue
+        except AwsAuthExpiredError as exc:
+            return render_template("download_error.html", auth_error=str(exc), key=execution_id), 401
+
+        archive.seek(0)
+        download_name = f"{execution_id}-{platform_name}-posit-handoff-bundle.zip"
         return send_file(archive, as_attachment=True, download_name=download_name, mimetype="application/zip")
 
     @app.route("/runs/<ecosystem>/<execution_id>/<platform_name>/unknown-findings")
