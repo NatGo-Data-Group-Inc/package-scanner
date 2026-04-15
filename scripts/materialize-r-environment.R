@@ -54,16 +54,17 @@ options(repos = c(
   RSPM = "https://packagemanager.posit.co/all/latest",
   CRAN = "https://cloud.r-project.org"
 ))
+system_lib <- normalizePath(
+  Sys.getenv("R_SYSTEM_LIBRARY", unset = R.home("library")),
+  winslash = "/",
+  mustWork = FALSE
+)
 Sys.setenv(
   RENV_PATHS_CACHE = cache_dir,
   RENV_CONFIG_CACHE_SYMLINKS = "FALSE",
   RENV_CONFIG_PAK_ENABLED = "FALSE",
-  RENV_CONFIG_EXTERNAL_LIBRARIES = "/opt/R/4.4.0/lib64/R/library"
+  RENV_CONFIG_EXTERNAL_LIBRARIES = system_lib
 )
-# Symlink system library into the project library so prebuilt packages are directly reused.
-dir.create(library_dir, recursive = TRUE, showWarnings = FALSE)
-system_lib <- "/opt/R/4.4.0/lib64/R/library"
-file.symlink(list.files(system_lib, full.names = TRUE), file.path(library_dir, basename(list.files(system_lib, full.names = TRUE))))
 .libPaths(unique(c(library_dir, system_lib, .libPaths())))
 
 if (!requireNamespace("renv", quietly = TRUE)) {
@@ -200,8 +201,29 @@ write_generated_lockfile <- function() {
   file.copy(generated_lockfile, file.path(output_dir, "renv.lock"), overwrite = TRUE)
 }
 
+lockfile_payload <- function(lockfile_path) {
+  if (is.null(lockfile_path) || !file.exists(lockfile_path)) {
+    return(NULL)
+  }
+  jsonlite::fromJSON(lockfile_path, simplifyVector = FALSE)
+}
+
+lockfile_has_bioconductor <- function(lockfile_path) {
+  payload <- lockfile_payload(lockfile_path)
+  !is.null(payload) && !is.null(payload$Bioconductor)
+}
+
+bootstrap_packages_for_lockfile <- function(lockfile_path) {
+  packages <- character()
+  if (lockfile_has_bioconductor(lockfile_path)) {
+    # renv bootstraps Bioconductor support through BiocManager during restore.
+    packages <- c(packages, "BiocManager")
+  }
+  unique(packages)
+}
+
 count_lockfile_packages <- function(lockfile_path) {
-  lock <- jsonlite::fromJSON(lockfile_path, simplifyVector = FALSE)
+  lock <- lockfile_payload(lockfile_path)
   packages <- lock$Packages
   if (is.null(packages)) {
     return(0L)
@@ -228,6 +250,36 @@ mirror_materialized_library_into_project <- function() {
     }
   }
   project_library
+}
+
+package_installed_in_library <- function(package_name, lib = library_dir) {
+  if (!dir.exists(lib)) {
+    return(FALSE)
+  }
+  package_name %in% rownames(installed.packages(lib.loc = lib, noCache = TRUE))
+}
+
+ensure_bootstrap_packages <- function(packages, include_in_generated_lock = FALSE) {
+  packages <- unique(packages[nzchar(packages)])
+  if (!length(packages)) {
+    return(invisible(NULL))
+  }
+
+  missing <- packages[!vapply(packages, package_installed_in_library, logical(1), USE.NAMES = FALSE)]
+  if (!length(missing)) {
+    return(invisible(NULL))
+  }
+
+  message(sprintf(
+    "Installing restore-bootstrap packages into the realized library: %s",
+    paste(missing, collapse = ", ")
+  ))
+  install.packages(missing, lib = library_dir, dependencies = TRUE)
+
+  if (include_in_generated_lock) {
+    snapshot_requested_environment()
+    write_generated_lockfile()
+  }
 }
 
 snapshot_requested_environment <- function() {
@@ -281,6 +333,7 @@ snapshot_requested_environment <- function() {
 input_mode <- if (is.null(lock_file)) "requested" else "lockfile"
 lock_entries <- list()
 requested_package_refs <- character()
+requested_system_seed_packages <- character()
 
 if (identical(input_mode, "lockfile")) {
   lock <- renv::lockfile_read(file.path(project_dir, "renv.lock"))
@@ -305,6 +358,10 @@ if (identical(input_mode, "lockfile")) {
   manifest_repos <- normalize_repositories(requested_manifest$repositories %||% requested_manifest$Repositories)
   options(repos = manifest_repos)
 }
+
+requested_system_seed_packages <- requested_packages[
+  vapply(requested_packages, package_installed_in_library, logical(1), lib = system_lib, USE.NAMES = FALSE)
+]
 
 installed_now <- installed_package_names()
 available_repo_packages <- tryCatch(
@@ -341,6 +398,10 @@ if (length(missing_from_repo)) {
 run_restore <- function(pkgs = packages_to_restore, clean = clean_restore) {
   if (identical(input_mode, "lockfile")) {
     return(tryCatch({
+      ensure_bootstrap_packages(
+        bootstrap_packages_for_lockfile(file.path(project_dir, "renv.lock")),
+        include_in_generated_lock = FALSE
+      )
       renv::restore(
         project = project_dir,
         lockfile = file.path(project_dir, "renv.lock"),
@@ -375,6 +436,10 @@ run_restore <- function(pkgs = packages_to_restore, clean = clean_restore) {
       )
     }
     snapshot_requested_environment()
+    ensure_bootstrap_packages(
+      bootstrap_packages_for_lockfile(file.path(project_dir, "renv.lock")),
+      include_in_generated_lock = TRUE
+    )
     write_generated_lockfile()
     NULL
   }, error = function(e) e)

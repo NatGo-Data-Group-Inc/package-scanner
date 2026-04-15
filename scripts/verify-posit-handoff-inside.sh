@@ -56,7 +56,20 @@ if ! command -v Rscript >/dev/null 2>&1; then
   exit 1
 fi
 
+run_r() {
+  env \
+    HOME="${OUTPUT_DIR}/r-home" \
+    R_PROFILE_USER=/dev/null \
+    R_ENVIRON_USER=/dev/null \
+    R_LIBS_USER= \
+    RENV_PATHS_CACHE="${CACHE_ROOT}" \
+    RENV_CONFIG_CACHE_SYMLINKS=FALSE \
+    RENV_CONFIG_EXTERNAL_LIBRARIES="${SYSTEM_LIBRARY}" \
+    Rscript --vanilla "$@"
+}
+
 mkdir -p "${OUTPUT_DIR}"
+mkdir -p "${OUTPUT_DIR}/r-home"
 LOG_PATH="${OUTPUT_DIR}/posit-restore-verification.log"
 exec > >(tee "${LOG_PATH}") 2>&1
 
@@ -93,14 +106,15 @@ if [[ -z "${LIBRARY_CHECKSUM}" || ! -f "${LIBRARY_CHECKSUM}" ]]; then
   exit 1
 fi
 
-if ! Rscript -e "quit(status = if (requireNamespace('renv', quietly = TRUE)) 0 else 1)"; then
+SYSTEM_LIBRARY="$(Rscript --vanilla -e "cat(R.home('library'))")"
+
+if ! run_r -e "quit(status = if (requireNamespace('renv', quietly = TRUE)) 0 else 1)"; then
   echo "Target image does not have the renv package preinstalled." >&2
   exit 1
 fi
 
-SYSTEM_LIBRARY="$(Rscript -e "cat(R.home('library'))")"
 PROJECT_DIR="${PROJECTS_ROOT%/}/${APP_NAME}"
-PROJECT_LIBRARY="$(Rscript -e "suppressPackageStartupMessages(library(renv)); cat(renv::paths\$library(project='${PROJECT_DIR}'))")"
+PROJECT_LIBRARY="$(run_r -e "suppressPackageStartupMessages(library(renv)); cat(renv::paths\$library(project='${PROJECT_DIR}'))")"
 
 echo "Preparing Posit-style restore layout"
 echo "Bundle directory: ${BUNDLE_DIR}"
@@ -138,23 +152,27 @@ EOF
 export RENV_PATHS_CACHE="${CACHE_ROOT}"
 export RENV_CONFIG_CACHE_SYMLINKS=FALSE
 export RENV_CONFIG_EXTERNAL_LIBRARIES="${SYSTEM_LIBRARY}"
+export R_PROFILE_USER=/dev/null
+export R_ENVIRON_USER=/dev/null
+export R_LIBS_USER=
+export HOME="${OUTPUT_DIR}/r-home"
 
 echo "Running offline renv restore with network disabled"
 (
   cd "${PROJECT_DIR}"
-  Rscript -e "options(repos=c(CRAN='file:///nonexistent-cran',RSPM='file:///nonexistent-rspm')); stopifnot(requireNamespace('renv', quietly=TRUE)); renv::consent(provided=TRUE); writeLines(.libPaths()); renv::restore(lockfile='renv.lock', prompt=FALSE, clean=TRUE)"
+  run_r -e "options(repos=c(CRAN='file:///nonexistent-cran',RSPM='file:///nonexistent-rspm')); stopifnot(requireNamespace('renv', quietly=TRUE)); renv::consent(provided=TRUE); project <- normalizePath('.', mustWork=TRUE); library <- renv::paths\$library(project=project); .libPaths(unique(c(library, Sys.getenv('RENV_CONFIG_EXTERNAL_LIBRARIES'), .libPaths()))); writeLines(.libPaths()); renv::restore(project=project, library=library, lockfile='renv.lock', prompt=FALSE, clean=TRUE)"
 ) > "${OUTPUT_DIR}/restore.log" 2>&1
 
 echo "Capturing realized package inventory"
-Rscript -e "ip <- as.data.frame(installed.packages(fields=c('Priority','Repository'), noCache=TRUE), stringsAsFactors=FALSE); out <- data.frame(package_name=ip[, 'Package'], package_version=ip[, 'Version'], library_path=ip[, 'LibPath'], priority=if ('Priority' %in% names(ip)) ip[, 'Priority'] else '', repository=if ('Repository' %in% names(ip)) ip[, 'Repository'] else '', stringsAsFactors=FALSE); out <- out[order(tolower(out\$package_name)), ]; write.csv(out, '${OUTPUT_DIR}/enclave-installed-packages.csv', row.names=FALSE)"
+run_r -e "project <- normalizePath('${PROJECT_DIR}', mustWork=TRUE); library <- renv::paths\$library(project=project); ip <- as.data.frame(installed.packages(lib.loc = unique(c(library, Sys.getenv('RENV_CONFIG_EXTERNAL_LIBRARIES'))), fields=c('Priority','Repository'), noCache=TRUE), stringsAsFactors=FALSE); out <- data.frame(package_name=ip[, 'Package'], package_version=ip[, 'Version'], library_path=ip[, 'LibPath'], priority=if ('Priority' %in% names(ip)) ip[, 'Priority'] else '', repository=if ('Repository' %in% names(ip)) ip[, 'Repository'] else '', stringsAsFactors=FALSE); out <- out[order(tolower(out\$package_name)), ]; write.csv(out, '${OUTPUT_DIR}/enclave-installed-packages.csv', row.names=FALSE)"
 
 echo "Capturing renv status"
 (
   cd "${PROJECT_DIR}"
-  Rscript -e "renv::status()"
+  run_r -e "project <- normalizePath('.', mustWork=TRUE); library <- renv::paths\$library(project=project); .libPaths(unique(c(library, Sys.getenv('RENV_CONFIG_EXTERNAL_LIBRARIES'), .libPaths()))); renv::status(project=project)"
 ) > "${OUTPUT_DIR}/renv-status.txt" 2>&1
 
 echo "Comparing realized inventory to approved installed-packages.csv"
-Rscript -e "approved <- read.csv('${INSTALLED_CSV}', stringsAsFactors=FALSE); realized <- read.csv('${OUTPUT_DIR}/enclave-installed-packages.csv', stringsAsFactors=FALSE); approved <- unique(approved[, c('package_name','package_version')]); realized <- unique(realized[, c('package_name','package_version')]); approved_key <- paste(approved\$package_name, approved\$package_version, sep='=='); realized_key <- paste(realized\$package_name, realized\$package_version, sep='=='); missing <- approved[!(approved_key %in% realized_key), , drop=FALSE]; extras <- realized[!(realized_key %in% approved_key), , drop=FALSE]; write.csv(missing, '${OUTPUT_DIR}/inventory-missing.csv', row.names=FALSE); write.csv(extras, '${OUTPUT_DIR}/inventory-extra.csv', row.names=FALSE); approved_count <- nrow(approved); realized_count <- nrow(realized); restored_count <- suppressWarnings(as.integer(sub('.*: *', '', grep('\"restored_packages\"[[:space:]]*:[[:space:]]*[0-9]+', readLines('${SUMMARY_JSON}', warn=FALSE), value=TRUE)[1]))); cat(sprintf('approved_package_versions=%d\nrealized_package_versions=%d\nmissing_package_versions=%d\nextra_package_versions=%d\napproved_restored_packages=%s\n', approved_count, realized_count, nrow(missing), nrow(extras), ifelse(is.na(restored_count), 'unknown', as.character(restored_count))), file='${OUTPUT_DIR}/verification-summary.txt'); if (nrow(missing) > 0) { quit(status=1) }"
+run_r -e "approved <- read.csv('${INSTALLED_CSV}', stringsAsFactors=FALSE); realized <- read.csv('${OUTPUT_DIR}/enclave-installed-packages.csv', stringsAsFactors=FALSE); approved <- unique(approved[, c('package_name','package_version')]); realized <- unique(realized[, c('package_name','package_version')]); approved_key <- paste(approved\$package_name, approved\$package_version, sep='=='); realized_key <- paste(realized\$package_name, realized\$package_version, sep='=='); missing <- approved[!(approved_key %in% realized_key), , drop=FALSE]; extras <- realized[!(realized_key %in% approved_key), , drop=FALSE]; write.csv(missing, '${OUTPUT_DIR}/inventory-missing.csv', row.names=FALSE); write.csv(extras, '${OUTPUT_DIR}/inventory-extra.csv', row.names=FALSE); approved_count <- nrow(approved); realized_count <- nrow(realized); restored_count <- suppressWarnings(as.integer(sub('.*: *', '', grep('\"restored_packages\"[[:space:]]*:[[:space:]]*[0-9]+', readLines('${SUMMARY_JSON}', warn=FALSE), value=TRUE)[1]))); cat(sprintf('approved_package_versions=%d\nrealized_package_versions=%d\nmissing_package_versions=%d\nextra_package_versions=%d\napproved_restored_packages=%s\n', approved_count, realized_count, nrow(missing), nrow(extras), ifelse(is.na(restored_count), 'unknown', as.character(restored_count))), file='${OUTPUT_DIR}/verification-summary.txt'); if (nrow(missing) > 0) { quit(status=1) }"
 
 echo "Verification completed successfully"
