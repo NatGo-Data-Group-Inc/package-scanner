@@ -267,6 +267,40 @@ def format_duration_seconds(duration_seconds: int | float | None) -> str | None:
     return f"{secs}s"
 
 
+ACTIVE_RUN_STAGE_ORDER = {
+    "r": ["preflight", "restore", "restored", "analysis", "governance", "publish", "completed"],
+    "python": ["materialize", "restored", "analysis", "governance", "publish", "completed"],
+}
+
+
+def stage_display_name(stage: str | None) -> str:
+    normalized = str(stage or "").strip().replace("-", " ").replace("_", " ")
+    if not normalized:
+        return "n/a"
+    return normalized.title()
+
+
+def stage_steps_for_run(ecosystem: str, current_stage: str | None, status: str) -> list[dict[str, str]]:
+    order = ACTIVE_RUN_STAGE_ORDER.get(ecosystem, [])
+    normalized_stage = str(current_stage or "").strip().lower()
+    normalized_status = str(status or "").strip().upper()
+    failed = normalized_status in {"FAILED", "TIMED_OUT", "ABORTED"}
+    steps: list[dict[str, str]] = []
+    for stage in order:
+        if failed and stage == normalized_stage:
+            step_status = "failed"
+        elif normalized_stage == "completed":
+            step_status = "done"
+        elif normalized_stage == stage:
+            step_status = "current"
+        elif normalized_stage in order and order.index(stage) < order.index(normalized_stage):
+            step_status = "done"
+        else:
+            step_status = "pending"
+        steps.append({"name": stage_display_name(stage), "status": step_status})
+    return steps
+
+
 def status_class(status: str) -> str:
     normalized = str(status or "").upper()
     if normalized in {"SUCCEEDED", "RUNNING"}:
@@ -1101,6 +1135,13 @@ def create_app() -> Flask:
                 return str(item.get("Value") or "")
         return ""
 
+    def checkpoint_stage_state(ecosystem: str, execution_id: str, platform: str) -> dict | None:
+        bucket = str(app.config.get("EPHEMERAL_BUCKET") or "").strip()
+        if not bucket or not execution_id or not platform:
+            return None
+        key = f"deploy/tmp/{ecosystem}/checkpoints/{ecosystem}/{execution_id}/{platform}/latest/stage-state.json"
+        return s3_get_json_optional(bucket, key)
+
     def active_runs() -> list[dict]:
         configs = [
             ("python", app.config["PYTHON_STATE_MACHINE_ARN"]),
@@ -1155,11 +1196,16 @@ def create_app() -> Flask:
                         platform = "linux-amd64"
                 if not platform:
                     platform = "linux-amd64" if ecosystem == "r" else "unknown"
+                stage_state = checkpoint_stage_state(ecosystem, str(item.get("name") or ""), platform) or {}
+                current_stage = str(stage_state.get("phase") or "").strip().lower() or None
                 item["platform_label"] = architecture_label(platform)
                 item["ecosystem_platform_badge"] = ecosystem_platform_badge(ecosystem, platform)
                 item["started_display"] = format_display_datetime(item.get("startDate"))
                 item["duration_display"] = format_duration(item.get("startDate"))
                 item["status_class"] = status_class(str(item.get("status") or ""))
+                item["current_stage"] = current_stage
+                item["current_stage_display"] = stage_display_name(current_stage)
+                item["stage_steps"] = stage_steps_for_run(ecosystem, current_stage, str(item.get("status") or ""))
                 active.append(item)
         active.sort(key=lambda row: str(row.get("startDate", "")), reverse=True)
         return active

@@ -222,6 +222,15 @@ bootstrap_packages_for_lockfile <- function(lockfile_path) {
   unique(packages)
 }
 
+lockfile_package_record <- function(lockfile_path, package_name) {
+  payload <- lockfile_payload(lockfile_path)
+  packages <- payload$Packages
+  if (is.null(packages) || is.null(packages[[package_name]])) {
+    return(NULL)
+  }
+  packages[[package_name]]
+}
+
 count_lockfile_packages <- function(lockfile_path) {
   lock <- lockfile_payload(lockfile_path)
   packages <- lock$Packages
@@ -280,6 +289,50 @@ ensure_bootstrap_packages <- function(packages, include_in_generated_lock = FALS
     snapshot_requested_environment()
     write_generated_lockfile()
   }
+}
+
+ensure_lockfile_packages_restored <- function(packages, lockfile_path) {
+  packages <- unique(packages[nzchar(packages)])
+  if (!length(packages)) {
+    return(invisible(NULL))
+  }
+
+  to_restore <- Filter(
+    f = function(package_name) {
+      record <- lockfile_package_record(lockfile_path, package_name)
+      if (is.null(record)) {
+        return(FALSE)
+      }
+      installed <- tryCatch(
+        installed.packages(lib.loc = library_dir, noCache = TRUE),
+        error = function(e) NULL
+      )
+      if (is.null(installed) || !(package_name %in% rownames(installed))) {
+        return(TRUE)
+      }
+      installed_version <- installed[package_name, "Version"]
+      recorded_version <- record$Version %||% ""
+      !identical(installed_version, recorded_version)
+    },
+    x = packages
+  )
+
+  if (!length(to_restore)) {
+    return(invisible(NULL))
+  }
+
+  message(sprintf(
+    "Restoring lockfile-bootstrap packages into the realized library: %s",
+    paste(to_restore, collapse = ", ")
+  ))
+  renv::restore(
+    project = project_dir,
+    lockfile = lockfile_path,
+    library = library_dir,
+    packages = unname(to_restore),
+    prompt = FALSE,
+    clean = FALSE
+  )
 }
 
 snapshot_requested_environment <- function() {
@@ -398,6 +451,10 @@ if (length(missing_from_repo)) {
 run_restore <- function(pkgs = packages_to_restore, clean = clean_restore) {
   if (identical(input_mode, "lockfile")) {
     return(tryCatch({
+      ensure_lockfile_packages_restored(
+        "renv",
+        file.path(project_dir, "renv.lock")
+      )
       ensure_bootstrap_packages(
         bootstrap_packages_for_lockfile(file.path(project_dir, "renv.lock")),
         include_in_generated_lock = FALSE
@@ -436,6 +493,10 @@ run_restore <- function(pkgs = packages_to_restore, clean = clean_restore) {
       )
     }
     snapshot_requested_environment()
+    ensure_lockfile_packages_restored(
+      "renv",
+      file.path(project_dir, "renv.lock")
+    )
     ensure_bootstrap_packages(
       bootstrap_packages_for_lockfile(file.path(project_dir, "renv.lock")),
       include_in_generated_lock = TRUE
