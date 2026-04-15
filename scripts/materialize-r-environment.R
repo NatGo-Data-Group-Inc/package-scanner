@@ -200,6 +200,84 @@ write_generated_lockfile <- function() {
   file.copy(generated_lockfile, file.path(output_dir, "renv.lock"), overwrite = TRUE)
 }
 
+count_lockfile_packages <- function(lockfile_path) {
+  lock <- jsonlite::fromJSON(lockfile_path, simplifyVector = FALSE)
+  packages <- lock$Packages
+  if (is.null(packages)) {
+    return(0L)
+  }
+  length(packages)
+}
+
+mirror_materialized_library_into_project <- function() {
+  project_library <- renv::paths$library(project = project_dir)
+  dir.create(project_library, recursive = TRUE, showWarnings = FALSE)
+  package_dirs <- list.files(library_dir, all.files = FALSE, no.. = TRUE)
+  for (pkg in package_dirs) {
+    src <- file.path(library_dir, pkg)
+    dest <- file.path(project_library, pkg)
+    if (dir.exists(dest) || file.exists(dest)) {
+      unlink(dest, recursive = TRUE, force = TRUE)
+    }
+    linked <- tryCatch(file.symlink(src, dest), warning = function(w) FALSE, error = function(e) FALSE)
+    if (!isTRUE(linked)) {
+      ok <- file.copy(src, dest, recursive = TRUE)
+      if (!isTRUE(ok)) {
+        stop(sprintf("Failed to mirror package %s into project library", pkg), call. = FALSE)
+      }
+    }
+  }
+  project_library
+}
+
+snapshot_requested_environment <- function() {
+  renv::snapshot(
+    project = project_dir,
+    library = library_dir,
+    lockfile = file.path(project_dir, "renv.lock"),
+    prompt = FALSE,
+    type = "all"
+  )
+
+  installed_count <- nrow(installed.packages(lib.loc = unique(c(library_dir, system_lib)), noCache = TRUE))
+  lock_count <- count_lockfile_packages(file.path(project_dir, "renv.lock"))
+
+  if (lock_count >= max(length(requested_packages), floor(installed_count * 0.8))) {
+    return(invisible(NULL))
+  }
+
+  message(
+    sprintf(
+      "Generated lockfile only captured %d packages for %d installed packages; mirroring materialized library into the project library and retrying snapshot.",
+      lock_count,
+      installed_count
+    )
+  )
+
+  project_library <- mirror_materialized_library_into_project()
+  .libPaths(unique(c(project_library, library_dir, system_lib, .libPaths())))
+  renv::snapshot(
+    project = project_dir,
+    library = project_library,
+    lockfile = file.path(project_dir, "renv.lock"),
+    prompt = FALSE,
+    type = "all",
+    force = TRUE
+  )
+
+  lock_count <- count_lockfile_packages(file.path(project_dir, "renv.lock"))
+  if (lock_count < max(length(requested_packages), floor(installed_count * 0.8))) {
+    stop(
+      sprintf(
+        "Generated renv.lock still appears truncated after retry (%d packages for %d installed packages).",
+        lock_count,
+        installed_count
+      ),
+      call. = FALSE
+    )
+  }
+}
+
 input_mode <- if (is.null(lock_file)) "requested" else "lockfile"
 lock_entries <- list()
 requested_package_refs <- character()
@@ -281,22 +359,22 @@ run_restore <- function(pkgs = packages_to_restore, clean = clean_restore) {
     }
     renv::settings$snapshot.type("all", project = project_dir)
     refs <- if (is.null(pkgs)) unname(requested_package_refs) else unname(requested_package_refs[names(requested_package_refs) %in% pkgs])
-    if (!length(refs)) {
-      refs <- unname(requested_package_refs)
+    if (length(requested_system_seed_packages)) {
+      seed_refs <- unname(requested_package_refs[names(requested_package_refs) %in% requested_system_seed_packages])
+      refs <- setdiff(refs, seed_refs)
     }
-    renv::install(
-      refs,
-      project = project_dir,
-      library = library_dir,
-      prompt = FALSE
-    )
-    renv::snapshot(
-      project = project_dir,
-      library = library_dir,
-      lockfile = file.path(project_dir, "renv.lock"),
-      prompt = FALSE,
-      type = "all"
-    )
+    if (!length(refs)) {
+      refs <- character()
+    }
+    if (length(refs)) {
+      renv::install(
+        refs,
+        project = project_dir,
+        library = library_dir,
+        prompt = FALSE
+      )
+    }
+    snapshot_requested_environment()
     write_generated_lockfile()
     NULL
   }, error = function(e) e)

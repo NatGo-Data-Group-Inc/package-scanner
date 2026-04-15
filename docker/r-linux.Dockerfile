@@ -60,6 +60,50 @@ RUN dnf install -y \
     zlib-devel && \
     dnf clean all
 
+RUN GDAL_CONFIG_BIN="$(command -v gdal-config || command -v gdal310-config || command -v gdal-config-3.10 || true)" && \
+    GDAL_CONFIG_64_BIN="$(command -v gdal-config-64 || command -v gdal310-config-64 || true)" && \
+    test -n "${GDAL_CONFIG_BIN}" && \
+    test -n "${GDAL_CONFIG_64_BIN}" && \
+    ln -sf "${GDAL_CONFIG_64_BIN}" /usr/local/bin/gdal-config-64 && \
+    ln -sf "${GDAL_CONFIG_BIN}" /usr/local/bin/gdal-config
+
+RUN cat > /usr/local/bin/udunits2-config <<'EOF' && chmod +x /usr/local/bin/udunits2-config
+#!/usr/bin/env bash
+set -euo pipefail
+
+prefix="/usr"
+includedir="${prefix}/include"
+libdir="${prefix}/lib64"
+version="$(rpm -q --queryformat '%{VERSION}\n' udunits2-devel 2>/dev/null || echo unknown)"
+
+case "${1:-}" in
+  --prefix)
+    printf '%s\n' "${prefix}"
+    ;;
+  --includedir)
+    printf '%s\n' "${includedir}"
+    ;;
+  --libdir)
+    printf '%s\n' "${libdir}"
+    ;;
+  --cflags)
+    printf '%s\n' "-I${includedir}"
+    ;;
+  --libs)
+    printf '%s\n' "-L${libdir} -ludunits2"
+    ;;
+  --version)
+    printf '%s\n' "${version}"
+    ;;
+  "")
+    printf '%s\n' "${version}"
+    ;;
+  *)
+    printf 'Unsupported option: %s\n' "${1}" >&2
+    exit 1
+    ;;
+esac
+EOF
 RUN mkdir -p /tmp/r-build /opt/R && \
     curl --retry 5 --retry-delay 2 --retry-connrefused -fsSL "https://cran.r-project.org/src/base/R-4/R-${R_VERSION}.tar.gz" -o /tmp/r-build/R-${R_VERSION}.tar.gz && \
     tar -xzf /tmp/r-build/R-${R_VERSION}.tar.gz -C /tmp/r-build && \

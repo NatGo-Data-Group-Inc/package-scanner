@@ -46,7 +46,7 @@ R artifacts (per platform/timestamp in evidence bucket):
 - Model results: `evidence/model-results/r/<platform>/<ts>/osv-report.json`, `trivy-sbom-report.json`
 - Governance: `evidence/governance/r/<platform>/<ts>/vulnerability-findings.csv`, `remediation-required.csv`, `remediation-exceptions.csv`, `remediation-spreadsheet.csv`, `governance-summary.json`
 - Traceability: `evidence/traceability/r/<platform>/<ts>/run-metadata.json`, `materialization-summary.json`
-- Offline caches: `evidence/packages/offline/r/<platform>/<ts>/renv-cache-*.tar.gz` (+ `.sha256`)
+- Offline deployables: `evidence/packages/offline/r/<platform>/<ts>/renv-cache-*.tar.gz` (+ `.sha256`) and `renv-library-*.tar.gz` (+ `.sha256`)
 
 Enclave delivery (Python): pull the Python evidence set above, plus the original `environment.yml` and any offline wheel/conda cache if produced; apply the same approval/transfer flow as R.
 
@@ -62,7 +62,7 @@ Enclave delivery (Python): pull the Python evidence set above, plus the original
   - runs sequential CodeBuild stages per platform
   - restores the environment
   - emits materialization evidence
-  - publishes the cache archive + `.sha256` file to `evidence/packages/offline/r/<platform>/<timestamp>/`
+  - publishes both the cache archive and the realized library archive, each with `.sha256`, to `evidence/packages/offline/r/<platform>/<timestamp>/`
 
 ### Refreshing R ECS image without cache issues
 
@@ -108,15 +108,17 @@ User-facing runbook effects:
 
 For an approved run, collect these artifacts from the evidence bucket:
 - `renv.lock` used for the run.
-- Offline cache tarball + checksum: `evidence/packages/offline/r/<platform>/<ts>/renv-cache.tar.gz` and `.sha256`.
+- Offline cache tarball + checksum: `evidence/packages/offline/r/<platform>/<ts>/renv-cache-*.tar.gz` and `.sha256`.
+- Offline realized library tarball + checksum: `evidence/packages/offline/r/<platform>/<ts>/renv-library-*.tar.gz` and `.sha256`.
+- Realized library tarball + checksum: `evidence/packages/offline/r/<platform>/<ts>/renv-library-*.tar.gz` and `.sha256`.
 - Requirements snapshot: `installed-packages.csv`.
 - Governance outputs: `vulnerability-findings.csv`, `remediation-required.csv`, `remediation-exceptions.csv`, `remediation-spreadsheet.csv`, `governance-summary.json`.
 - Model reports: `osv-report.json`, `trivy-sbom-report.json`.
 - Run metadata and materialization summary: `run-metadata.json`, `materialization-summary.json`.
 
 Enclave steps (offline):
-- Verify the `.sha256`, place cache, set `RENV_PATHS_CACHE`.
-- Ensure R 4.4.0 matches scanner; run `renv::restore()` using the approved `renv.lock`.
+- Verify both `.sha256` files, place cache, and preserve the realized project library tarball in the transfer set.
+- Ensure R 4.4.0 matches scanner; seed the project library from `renv-library-*.tar.gz`, then run `renv::restore()` using the approved `renv.lock`.
 - Provide governance/model artifacts to cyber for evidence and sign-off.
 
 ## Incident Procedure
@@ -173,31 +175,71 @@ For production updates:
 
 Artifact locations (R linux):
 - Evidence bucket: `s3://package-scanner-dev-scan-evidence-<acct>-<region>`
-- Offline cache: `evidence/packages/offline/r/linux-amd64/<timestamp>/renv-cache-linux-amd64-<timestamp>.tar.gz` (+ `.sha256`)
+- Offline deployables:
+  - `evidence/packages/offline/r/linux-amd64/<timestamp>/renv-cache-linux-amd64-<timestamp>.tar.gz` (+ `.sha256`)
+  - `evidence/packages/offline/r/linux-amd64/<timestamp>/renv-library-linux-amd64-<timestamp>.tar.gz` (+ `.sha256`)
 - Lockfile: `evidence/requirements/r/linux-amd64/<timestamp>/renv.lock`
 - Governance/model: `evidence/governance/r/linux-amd64/<timestamp>/...` (findings/remediation CSVs, governance-summary.json), `evidence/model-results/r/linux-amd64/<timestamp>/osv-report.json`, `trivy-sbom-report.json`
 - Traceability: `evidence/traceability/r/linux-amd64/<timestamp>/run-metadata.json`, `materialization-summary.json`, `installed-packages.csv`
 
 Transfer steps (airgapped R):
-1. Pull the lockfile, cache tarball, `.sha256`, and governance/model/traceability bundle from the evidence bucket.
+1. Pull the lockfile, cache tarball, library tarball, their `.sha256` files, and the governance/model/traceability bundle from the evidence bucket.
 2. Deliver the artifact bundle to cyber and obtain approval before any enclave install.
 3. After approval, move the approved artifacts via the sanctioned transfer path.
 4. In the enclave (per platform):
    - Linux cache path example: `/opt/renv/cache`; Windows cache path example: `C:\renv\cache`.
-   - Untar cache: Linux `tar -xzf renv-cache-linux-amd64-<timestamp>.tar.gz -C /`; Windows use 7zip/PowerShell to extract into `C:\`.
+   - Create the cache root first. Example: Linux `mkdir -p /opt/renv/cache`; Windows `New-Item -ItemType Directory -Force C:\renv\cache`.
+   - Extract the cache archive into that cache root, not into `/`. The cache archive contains cache contents only.
+   - Untar cache: Linux `tar -xzf renv-cache-linux-amd64-<timestamp>.tar.gz -C /opt/renv/cache`; Windows use 7zip/PowerShell to extract into `C:\renv\cache`.
+   - Preserve `renv-library-*.tar.gz` with the deployment bundle. For Posit/Workbench-style restores, seed the project library from that archive before running `renv::restore()`.
    - Set cache env: Linux `export RENV_PATHS_CACHE=/opt/renv/cache`; Windows `set RENV_PATHS_CACHE=C:\renv\cache`.
    - Ensure R 4.4.0 is installed and on PATH.
+   - Ensure the `renv` package is already installed on the enclave host image. The cache bundle restores the project library; it is not a bootstrap installer for `renv` itself.
+   - Do not point `repos` at `https://cloud.r-project.org` or Posit Package Manager inside the enclave. The restore validation must be no-network and use only the transferred deployables.
    - Restore:
      - Linux:
        ```bash
        R -q <<'RSCRIPT'
-       options(repos = c(CRAN = "https://cloud.r-project.org"))
+       options(repos = c(CRAN = "file:///nonexistent-cran", RSPM = "file:///nonexistent-rspm"))
+       Sys.setenv(
+         RENV_PATHS_CACHE = "/opt/renv/cache",
+         RENV_CONFIG_CACHE_SYMLINKS = "FALSE"
+       )
+       stopifnot(requireNamespace("renv", quietly = TRUE))
+       renv::consent(provided = TRUE)
        renv::restore(lockfile = "renv.lock", prompt = FALSE, clean = TRUE)
        RSCRIPT
        ```
      - Windows (PowerShell):
        ```powershell
        $env:RENV_PATHS_CACHE="C:\renv\cache"
-       Rscript -e "options(repos=c(CRAN='https://cloud.r-project.org')); renv::restore(lockfile='renv.lock', prompt=FALSE, clean=TRUE)"
+       $env:RENV_CONFIG_CACHE_SYMLINKS="FALSE"
+       Rscript -e "options(repos=c(CRAN='file:///nonexistent-cran',RSPM='file:///nonexistent-rspm')); if(!requireNamespace('renv',quietly=TRUE)) stop('renv package must be preinstalled on enclave host'); renv::consent(provided=TRUE); renv::restore(lockfile='renv.lock', prompt=FALSE, clean=TRUE)"
        ```
    - Confirm library path from `renv/library-path.txt`; default is `~/.local/share/renv/library` (Linux) or `%USERPROFILE%\\AppData\\Local\\renv\\library` (Windows).
+   - Validate the restore result against the approved evidence bundle:
+     - compare package count against `materialization-summary.json` `counts.restored_packages`
+     - compare package/version inventory against `installed-packages.csv`
+     - retain the enclave-side restore log with the transferred evidence set
+
+Air-gap restore validation steps:
+1. Before transfer, verify both tarball checksums:
+   - `sha256sum -c renv-cache-linux-amd64-<timestamp>.tar.gz.sha256`
+   - `sha256sum -c renv-library-linux-amd64-<timestamp>.tar.gz.sha256`
+2. After extraction in the enclave, confirm the cache is populated before any restore:
+   - Linux: `find /opt/renv/cache -maxdepth 3 -type d | head`
+   - Windows: `Get-ChildItem C:\renv\cache -Depth 3 | Select-Object -First 20`
+3. Run the no-network restore command above with repos set to nonexistent `file:///` URLs. This is the explicit enclave restore test.
+4. Export the realized package inventory and compare it with the approved evidence:
+   - Linux:
+     ```bash
+     Rscript -e "write.csv(as.data.frame(installed.packages()[,c('Package','Version')]), 'enclave-installed-packages.csv', row.names=FALSE)"
+     ```
+   - Windows:
+     ```powershell
+     Rscript -e "write.csv(as.data.frame(installed.packages()[,c('Package','Version')]), 'enclave-installed-packages.csv', row.names=FALSE)"
+     ```
+5. Accept the restore only if:
+   - the restore completed without any package download attempts
+   - `enclave-installed-packages.csv` matches the approved package/version rows from `installed-packages.csv`
+   - package count is consistent with `materialization-summary.json`

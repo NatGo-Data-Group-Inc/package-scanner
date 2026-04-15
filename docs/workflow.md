@@ -229,9 +229,9 @@ When an enclave cannot reach the internet, treat the `renv.lock` as your bluepri
    ```
    Commit the lockfile so every change is auditable.
 2. **Run `scripts/start-r-scan.sh`** against the lockfile. It starts the R orchestration state machine, which first plans staged restore batches from `renv.lock`, then fans out to the three platform jobs. Each platform processes those stages sequentially, checkpointing the cache and library between CodeBuild runs before the final stage emits evidence artifacts and the enclave-transferable cache bundle.
-3. **Collect the generated cache bundle** from `s3://<evidence>/evidence/packages/offline/r/<platform>/<timestamp>/`. Each run writes the platform archive (for example `renv-cache-linux-amd64-<ts>.tar.gz`) and a matching `.sha256`.
+3. **Collect the generated deployable bundle** from `s3://<evidence>/evidence/packages/offline/r/<platform>/<timestamp>/`. Each run writes both a cache archive and a realized library archive (for example `renv-cache-linux-amd64-<ts>.tar.gz` and `renv-library-linux-amd64-<ts>.tar.gz`) together with matching `.sha256` files.
 4. **Review the materialization evidence** in `evidence/env-artifacts/r/<platform>/<timestamp>/`, including `installed-packages.csv`, `session-info.txt`, `restore.log`, and `materialization-summary.json`.
-5. **Stage artifacts for the enclave** by transferring lockfile + cache archive + checksum through the approved path. Inside the enclave, set `RENV_PATHS_CACHE` to the unpacked archive, install R 4.4.0, and run `renv::restore()` offline.
+5. **Stage artifacts for the enclave** by transferring the lockfile, cache archive, realized library archive, and checksums through the approved path. Inside the enclave, set `RENV_PATHS_CACHE` to the unpacked cache, seed the project library from the realized library archive, install R 4.4.0, and run `renv::restore()` offline.
 
 ## 8) How to Scan Particular Package(s)
 
