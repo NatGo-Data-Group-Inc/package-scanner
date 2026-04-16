@@ -61,11 +61,18 @@ system_lib <- normalizePath(
 )
 Sys.setenv(
   RENV_PATHS_CACHE = cache_dir,
+  RENV_PATHS_LIBRARY_STAGING = "",
   RENV_CONFIG_CACHE_SYMLINKS = "FALSE",
   RENV_CONFIG_PAK_ENABLED = "FALSE",
-  RENV_CONFIG_EXTERNAL_LIBRARIES = system_lib
+  RENV_CONFIG_EXTERNAL_LIBRARIES = system_lib,
+  R_INSTALL_STAGED = "FALSE"
 )
+.Platform$pkgType <- "source"
 .libPaths(unique(c(library_dir, system_lib, .libPaths())))
+options(
+  install.packages.compile.from.source = "always",
+  install.opts = c("--no-staged-install")
+)
 
 if (!requireNamespace("renv", quietly = TRUE)) {
   install.packages("renv")
@@ -331,7 +338,8 @@ ensure_lockfile_packages_restored <- function(packages, lockfile_path) {
     library = library_dir,
     packages = unname(to_restore),
     prompt = FALSE,
-    clean = FALSE
+    clean = FALSE,
+    rebuild = TRUE
   )
 }
 
@@ -465,7 +473,8 @@ run_restore <- function(pkgs = packages_to_restore, clean = clean_restore) {
         library = library_dir,
         packages = pkgs,
         prompt = FALSE,
-        clean = clean
+        clean = clean,
+        rebuild = TRUE
       )
       NULL
     }, error = function(e) e))
@@ -489,7 +498,8 @@ run_restore <- function(pkgs = packages_to_restore, clean = clean_restore) {
         refs,
         project = project_dir,
         library = library_dir,
-        prompt = FALSE
+        prompt = FALSE,
+        rebuild = TRUE
       )
     }
     snapshot_requested_environment()
