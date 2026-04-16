@@ -1198,6 +1198,8 @@ def create_app() -> Flask:
                     platform = "linux-amd64" if ecosystem == "r" else "unknown"
                 stage_state = checkpoint_stage_state(ecosystem, str(item.get("name") or ""), platform) or {}
                 current_stage = str(stage_state.get("phase") or "").strip().lower() or None
+                if not current_stage and str(item.get("status") or "").upper() == "RUNNING":
+                    current_stage = "preflight" if ecosystem == "r" else "materialize"
                 item["platform_label"] = architecture_label(platform)
                 item["ecosystem_platform_badge"] = ecosystem_platform_badge(ecosystem, platform)
                 item["started_display"] = format_display_datetime(item.get("startDate"))
