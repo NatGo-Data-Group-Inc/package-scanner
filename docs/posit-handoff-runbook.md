@@ -55,6 +55,9 @@ cd /path/to/transferred/bundle
 sha256sum -c renv-cache-linux-amd64-<timestamp>.tar.gz.sha256
 sha256sum -c renv-library-linux-amd64-<timestamp>.tar.gz.sha256
 sudo tar -xzf renv-cache-linux-amd64-<timestamp>.tar.gz -C /opt/posit/renv/cache/R-4.4.0
+sudo mkdir -p /opt/posit/projects/<application-name>/renv/library/linux-rhel-8.10/R-4.4/x86_64-pc-linux-gnu
+sudo tar -xzf renv-library-linux-amd64-<timestamp>.tar.gz \
+  -C /opt/posit/projects/<application-name>/renv/library/linux-rhel-8.10/R-4.4/x86_64-pc-linux-gnu
 ```
 
 The cache tarball contains cache contents only. Extract into the cache root, not into `/`.
@@ -62,6 +65,16 @@ The cache tarball contains cache contents only. Extract into the cache root, not
 The realized library tarball is the deployment-side bootstrap for air-gapped
 restore and must be preserved in the transferred handoff bundle. The automated
 verifier seeds the project library from it before running `renv::restore()`.
+
+If the Posit host uses a different `renv` platform path than `linux-rhel-8.10`,
+determine it first and adjust the extraction target:
+
+```bash
+Rscript --vanilla -e "cat(renv::paths\$library(project='/opt/posit/projects/<application-name>'), '\n')"
+```
+
+The realized library archive must be extracted into that exact project-library
+path, not just into the project root.
 
 ### Stage the project
 
@@ -92,10 +105,16 @@ Run:
 
 ```bash
 cd /opt/posit/projects/<application-name>
-Rscript -e "options(repos=c(CRAN='file:///nonexistent-cran',RSPM='file:///nonexistent-rspm')); stopifnot(requireNamespace('renv', quietly=TRUE)); renv::consent(provided=TRUE); renv::restore(lockfile='renv.lock', prompt=FALSE, clean=TRUE)"
+Rscript --vanilla -e "options(repos=c(CRAN='file:///nonexistent-cran',RSPM='file:///nonexistent-rspm')); Sys.setenv(RENV_PATHS_CACHE='/opt/posit/renv/cache/R-4.4.0', RENV_CONFIG_CACHE_SYMLINKS='FALSE'); stopifnot(requireNamespace('renv', quietly=TRUE)); renv::consent(provided=TRUE); project <- normalizePath('.', mustWork=TRUE); library <- renv::paths\$library(project=project); .libPaths(unique(c(library, .libPaths()))); renv::restore(project=project, library=library, lockfile='renv.lock', prompt=FALSE, clean=TRUE)"
 ```
 
-This is the no-network validation. If the restore tries to reach CRAN or Posit Package Manager, treat that as a failed air-gap restore.
+This is the no-network validation. The project library should already be seeded
+from `renv-library-*.tar.gz` before this command runs. `renv::restore()` is
+then reconciling the seeded project library against the approved lockfile, not
+bootstrapping from an empty library.
+
+If the restore tries to reach CRAN or Posit Package Manager, treat that as a
+failed air-gap restore.
 
 ## 4. Validation Steps
 
@@ -103,6 +122,9 @@ After restore:
 
 1. Confirm the cache is populated:
    - `find /opt/posit/renv/cache/R-4.4.0 -maxdepth 3 -type d | head`
+2. Confirm the seeded project library exists:
+   - `Rscript --vanilla -e "project <- '/opt/posit/projects/<application-name>'; cat(renv::paths\$library(project=project), '\n')"`
+   - `find /opt/posit/projects/<application-name>/renv/library -maxdepth 4 -type d | head`
 2. Export the realized package inventory:
    - `Rscript -e "write.csv(as.data.frame(installed.packages()[,c('Package','Version')]), 'enclave-installed-packages.csv', row.names=FALSE)"`
 3. Compare the result to the approved evidence:
@@ -143,7 +165,7 @@ Directly on a Posit server after the handoff bundle has been transferred:
 
 What it does:
 
-- downloads the approved handoff bundle from S3
+- downloads the approved handoff bundle from S3, including `renv-cache` and `renv-library`
 - starts the supplied image with `--network none`
 - stages the bundle into `/opt/posit/renv/cache/R-4.4.0` and `/opt/posit/projects/<application-name>`
 - seeds the project library from the realized `renv-library-*.tar.gz` artifact
