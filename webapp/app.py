@@ -280,6 +280,22 @@ def stage_display_name(stage: str | None) -> str:
     return normalized.title()
 
 
+def stage_position(ecosystem: str, stage: str | None) -> int | None:
+    order = ACTIVE_RUN_STAGE_ORDER.get(ecosystem, [])
+    normalized = str(stage or "").strip().lower()
+    if not normalized or normalized not in order:
+        return None
+    return order.index(normalized)
+
+
+def stage_at_or_beyond(ecosystem: str, current_stage: str | None, threshold_stage: str) -> bool:
+    current_pos = stage_position(ecosystem, current_stage)
+    threshold_pos = stage_position(ecosystem, threshold_stage)
+    if current_pos is None or threshold_pos is None:
+        return False
+    return current_pos >= threshold_pos
+
+
 def stage_steps_for_run(ecosystem: str, current_stage: str | None, status: str) -> list[dict[str, str]]:
     order = ACTIVE_RUN_STAGE_ORDER.get(ecosystem, [])
     normalized_stage = str(current_stage or "").strip().lower()
@@ -1142,6 +1158,15 @@ def create_app() -> Flask:
         key = f"deploy/tmp/{ecosystem}/checkpoints/{ecosystem}/{execution_id}/{platform}/latest/stage-state.json"
         return s3_get_json_optional(bucket, key)
 
+    def should_surface_restore_failure(
+        ecosystem: str,
+        execution_id: str,
+        platform: str,
+    ) -> bool:
+        stage_state = checkpoint_stage_state(ecosystem, execution_id, platform) or {}
+        current_stage = str(stage_state.get("phase") or "").strip().lower()
+        return not stage_at_or_beyond(ecosystem, current_stage, "restored")
+
     def active_runs() -> list[dict]:
         configs = [
             ("python", app.config["PYTHON_STATE_MACHINE_ARN"]),
@@ -1200,6 +1225,11 @@ def create_app() -> Flask:
                 current_stage = str(stage_state.get("phase") or "").strip().lower() or None
                 if not current_stage and str(item.get("status") or "").upper() == "RUNNING":
                     current_stage = "preflight" if ecosystem == "r" else "materialize"
+                progress_current = stage_state.get("progress_current")
+                progress_total = stage_state.get("progress_total")
+                progress_count_display = None
+                if isinstance(progress_current, int) and isinstance(progress_total, int) and progress_total > 0:
+                    progress_count_display = f"{progress_current}/{progress_total}"
                 item["platform_label"] = architecture_label(platform)
                 item["ecosystem_platform_badge"] = ecosystem_platform_badge(ecosystem, platform)
                 item["started_display"] = format_display_datetime(item.get("startDate"))
@@ -1207,6 +1237,7 @@ def create_app() -> Flask:
                 item["status_class"] = status_class(str(item.get("status") or ""))
                 item["current_stage"] = current_stage
                 item["current_stage_display"] = stage_display_name(current_stage)
+                item["progress_count_display"] = progress_count_display
                 item["stage_steps"] = stage_steps_for_run(ecosystem, current_stage, str(item.get("status") or ""))
                 active.append(item)
         active.sort(key=lambda row: str(row.get("startDate", "")), reverse=True)
@@ -1226,8 +1257,11 @@ def create_app() -> Flask:
         if not failed_platform:
             return None
         platform_name = str(failed_platform.get("platform") or "").strip()
+        execution_id = str(row.get("execution_id") or "").strip()
         timestamp = str(row.get("scan_timestamp") or "").strip()
         if not platform_name or not timestamp:
+            return None
+        if execution_id and not should_surface_restore_failure(ecosystem, execution_id, platform_name):
             return None
         candidates = [
             f"{app.config['CATALOG_PREFIX'].rstrip('/')}/traceability/{ecosystem}/{platform_name}/{timestamp}/restore-root-cause.txt",
@@ -1265,7 +1299,7 @@ def create_app() -> Flask:
             approved_r = load_pointer("r", "current-approved")
             approved_python = load_pointer("python", "current-approved")
             active = active_runs()
-            def latest_failed(ecosystem: str, *, max_checks: int = 50) -> dict | None:
+            def latest_failed(ecosystem: str, *, max_checks: int = 10) -> dict | None:
                 """
                 Find the most recent failed run without walking the entire catalog.
                 We stream listing keys (already sorted newest-first) and stop early
@@ -1309,6 +1343,10 @@ def create_app() -> Flask:
             active_runs=active,
             auth_error=auth_error,
         )
+
+    @app.route("/healthz")
+    def healthz():
+        return jsonify({"status": "ok"}), 200
 
     def normalize_paging() -> int:
         per_page = request.args.get("per_page", "10")
@@ -1528,7 +1566,9 @@ def create_app() -> Flask:
             bucket, prefix = (triage_checkpoint_prefix(ecosystem, execution_id, triage_platform.get("platform", "")) if triage_platform else (None, None))
             if bucket and prefix:
                 checkpoint_keys = list_checkpoint_keys(bucket, prefix)
-                for candidate in ["failures/restore.log", "latest/restore.log"]:
+                can_surface_failure = should_surface_restore_failure(ecosystem, execution_id, triage_platform.get("platform", ""))
+                candidates = ["latest/restore.log"] if not can_surface_failure else ["failures/restore.log", "latest/restore.log"]
+                for candidate in candidates:
                     key = f"{prefix}{candidate}"
                     try:
                         payload = s3_get_bytes(

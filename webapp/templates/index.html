@@ -53,6 +53,9 @@
       <td class="{{ run.status_class }}">{{ run.status }}</td>
       <td>{{ run.current_stage_display }}</td>
       <td>
+        {% if run.progress_count_display %}
+        <div><strong>{{ run.progress_count_display }}</strong></div>
+        {% endif %}
         <div class="stage-list">
           {% for step in run.stage_steps %}
           <span class="stage-chip {{ step.status }}">{{ step.name }}</span>

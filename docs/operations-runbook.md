@@ -48,6 +48,11 @@ R artifacts (per platform/timestamp in evidence bucket):
 - Traceability: `evidence/traceability/r/<platform>/<ts>/run-metadata.json`, `materialization-summary.json`
 - Offline deployables: `evidence/packages/offline/r/<platform>/<ts>/renv-cache-*.tar.gz` (+ `.sha256`) and `renv-library-*.tar.gz` (+ `.sha256`)
 
+Current R Linux runtime expectations:
+- The active Posit-aligned Linux scanner image is built on an EL8-compatible base, not Amazon Linux 2023.
+- The image carries an explicit modern Python at `/usr/local/bin/python3.11`; do not rely on distro-default `python3`.
+- Requested-package materialization now runs in a conservative serial mode and clears stale `00LOCK-*` directories before retry/install to avoid retry poisoning from partial installs.
+
 Enclave delivery (Python): pull the Python evidence set above, plus the original `environment.yml` and any offline wheel/conda cache if produced; apply the same approval/transfer flow as R.
 
 ### Start R Scan
@@ -110,7 +115,6 @@ For an approved run, collect these artifacts from the evidence bucket:
 - `renv.lock` used for the run.
 - Offline cache tarball + checksum: `evidence/packages/offline/r/<platform>/<ts>/renv-cache-*.tar.gz` and `.sha256`.
 - Offline realized library tarball + checksum: `evidence/packages/offline/r/<platform>/<ts>/renv-library-*.tar.gz` and `.sha256`.
-- Realized library tarball + checksum: `evidence/packages/offline/r/<platform>/<ts>/renv-library-*.tar.gz` and `.sha256`.
 - Requirements snapshot: `installed-packages.csv`.
 - Governance outputs: `vulnerability-findings.csv`, `remediation-required.csv`, `remediation-exceptions.csv`, `remediation-spreadsheet.csv`, `governance-summary.json`.
 - Model reports: `osv-report.json`, `trivy-sbom-report.json`.
@@ -170,6 +174,56 @@ For production updates:
 - Evidence bucket should retain long-term artifacts.
 - Ephemeral bucket should purge by lifecycle policy and explicit cleanup.
 - Verify lifecycle policy in bucket configuration after deploy updates.
+
+### Explicit cleanup of failed runs
+
+Use [scripts/cleanup-failed-s3-artifacts.py](../scripts/cleanup-failed-s3-artifacts.py) to remove failed, aborted, or timed-out run artifacts that no longer need to be retained.
+
+What it deletes:
+- ephemeral checkpoints under `deploy/tmp/<ecosystem>/checkpoints/...`
+- orchestration summaries for failed executions
+- failed catalog run records
+- matching evidence prefixes for the failed run timestamp/platform when they can be derived safely
+
+Safety rules:
+- default mode is dry run
+- nothing is deleted until `--write` is passed
+- any run whose orchestration summary reports `SUCCEEDED` is skipped
+
+Dry run example for R:
+
+```bash
+python3 scripts/cleanup-failed-s3-artifacts.py \
+  --ecosystem r \
+  --state-machine-arn arn:aws:states:us-east-1:807497180525:stateMachine:package-scanner-dev-r-ecs-linux-scan-orchestrator \
+  --evidence-bucket package-scanner-dev-scan-evidence-807497180525-us-east-1 \
+  --ephemeral-bucket package-scanner-dev-scan-ephemeral-807497180525-us-east-1 \
+  --profile AdministratorAccess-807497180525
+```
+
+Actually delete:
+
+```bash
+python3 scripts/cleanup-failed-s3-artifacts.py \
+  --ecosystem r \
+  --state-machine-arn arn:aws:states:us-east-1:807497180525:stateMachine:package-scanner-dev-r-ecs-linux-scan-orchestrator \
+  --evidence-bucket package-scanner-dev-scan-evidence-807497180525-us-east-1 \
+  --ephemeral-bucket package-scanner-dev-scan-ephemeral-807497180525-us-east-1 \
+  --profile AdministratorAccess-807497180525 \
+  --write
+```
+
+Target one execution explicitly:
+
+```bash
+python3 scripts/cleanup-failed-s3-artifacts.py \
+  --ecosystem r \
+  --execution-id <execution-id> \
+  --evidence-bucket package-scanner-dev-scan-evidence-807497180525-us-east-1 \
+  --ephemeral-bucket package-scanner-dev-scan-ephemeral-807497180525-us-east-1 \
+  --profile AdministratorAccess-807497180525 \
+  --write
+```
 
 ## Enclave Transfer Checklist
 

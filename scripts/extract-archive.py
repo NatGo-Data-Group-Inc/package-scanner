@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Extract a tar archive into a target directory."""
 
+from __future__ import annotations
+
 import argparse
 import tarfile
 from pathlib import Path

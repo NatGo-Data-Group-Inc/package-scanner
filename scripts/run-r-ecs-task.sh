@@ -11,17 +11,44 @@ LIBRARY_DIR="${RUN_DIR}/library"
 CHECKPOINT_PREFIX="s3://${EPHEMERAL_BUCKET}/${EPHEMERAL_PREFIX}/checkpoints/r/${SCAN_EXECUTION_ID:-manual}/${TARGET_PLATFORM}"
 CHECKPOINT_INTERVAL_SECONDS="${CHECKPOINT_INTERVAL_SECONDS:-900}"
 SCRIPT_ROOT="${SCRIPT_ROOT:-/opt/package-scanner/scripts}"
-PYTHON_BIN="${PYTHON_BIN:-python3}"
+PYTHON_BIN="${PYTHON_BIN:-/usr/local/bin/python3.11}"
 
 checkpoint_pid=""
 INPUT_FILE=""
 INPUT_KIND=""
 INPUT_R_VERSION=""
+PROGRESS_CURRENT=""
+PROGRESS_TOTAL=""
+
+update_progress_from_restore_log() {
+  PROGRESS_CURRENT=""
+  PROGRESS_TOTAL=""
+  local restore_log="${RUN_DIR}/restore.log"
+  if [[ ! -f "${restore_log}" ]]; then
+    return 0
+  fi
+  read -r PROGRESS_CURRENT PROGRESS_TOTAL < <("${PYTHON_BIN}" - "${restore_log}" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8", errors="ignore")
+matches = re.findall(r"\((\d+)/(\d+)\)\s+Installing:", text)
+if matches:
+    current, total = matches[-1]
+    print(current, total)
+else:
+    print("", "")
+PY
+)
+}
 
 write_state() {
   local phase="$1"
+  update_progress_from_restore_log
   cat > "${RUN_DIR}/stage-state.json" <<EOF
-{"platform":"${TARGET_PLATFORM}","scan_execution_id":"${SCAN_EXECUTION_ID:-manual}","scan_timestamp":"${TS}","phase":"${phase}","checkpoint_prefix":"${CHECKPOINT_PREFIX#s3://}"}
+{"platform":"${TARGET_PLATFORM}","scan_execution_id":"${SCAN_EXECUTION_ID:-manual}","scan_timestamp":"${TS}","phase":"${phase}","checkpoint_prefix":"${CHECKPOINT_PREFIX#s3://}","progress_current":${PROGRESS_CURRENT:-null},"progress_total":${PROGRESS_TOTAL:-null}}
 EOF
 }
 

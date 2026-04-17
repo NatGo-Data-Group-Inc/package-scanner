@@ -139,6 +139,9 @@ Prerequisites:
 
 - R 4.4.0 is installed on the Posit host
 - the `renv` package is already installed into that R installation
+- if the restored package set includes Java-backed packages such as `rJava`,
+  `DatabaseConnector`, or `FeatureExtraction`, a JDK/JRE providing `libjvm.so`
+  must be installed on the Posit host
 - the restore is run from the project directory as the same Linux user who will own the project library
 
 Run:
@@ -155,6 +158,35 @@ bootstrapping from an empty library.
 
 If the restore tries to reach CRAN or Posit Package Manager, treat that as a
 failed air-gap restore.
+
+### Java-backed package note
+
+Some restored packages require a JVM at runtime even after the offline restore
+itself succeeds. In this workflow, that most commonly appears through:
+
+- `rJava`
+- `DatabaseConnector`
+- `FeatureExtraction`
+
+If package load fails with `libjvm.so: cannot open shared object file`, set the
+runtime environment before launching `Rscript`:
+
+```bash
+LIBJVM_PATH="$(find /usr/lib/jvm /usr/java -name libjvm.so 2>/dev/null | head -n 1)"
+export JAVA_HOME="$(dirname "$(dirname "$LIBJVM_PATH")")"
+export LD_LIBRARY_PATH="$(dirname "$LIBJVM_PATH"):${LD_LIBRARY_PATH:-}"
+export R_LIBS_USER=/opt/posit/projects/<application-name>/renv/library/linux-rhel-8.10/R-4.4/x86_64-pc-linux-gnu
+export RENV_PATHS_CACHE=/opt/posit/renv/cache/R-4.4.0
+export RENV_CONFIG_CACHE_SYMLINKS=FALSE
+```
+
+Then test:
+
+```bash
+cd /opt/posit/projects/<application-name>
+Rscript --vanilla -e "library(rJava); .jinit(); cat('rJava ok\n')"
+Rscript --vanilla -e "library(FeatureExtraction); cat('FeatureExtraction ok\n')"
+```
 
 ## 4. Validation Steps
 
@@ -174,8 +206,13 @@ After restore:
    - `renv::status()`
 5. Accept the restore only if:
    - the restore completed without download attempts
-   - `renv::status()` reports the project is synchronized
    - the installed package inventory matches the approved run evidence
+   - key runtime packages load successfully on the Posit host
+
+For Bioconductor-aware air-gap restores, treat `verification-summary.txt` and
+successful package loads as the primary acceptance signal. `renv::status()` can
+still attempt Bioconductor metadata/bootstrap work in ways that are not a good
+offline verification signal.
 
 ### Automated verifier
 

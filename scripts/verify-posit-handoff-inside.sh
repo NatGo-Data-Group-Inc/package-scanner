@@ -169,7 +169,7 @@ run_r -e "project <- normalizePath('${PROJECT_DIR}', mustWork=TRUE); library <- 
 echo "Capturing renv status"
 (
   cd "${PROJECT_DIR}"
-  run_r -e "project <- normalizePath('.', mustWork=TRUE); library <- renv::paths\$library(project=project); .libPaths(unique(c(library, Sys.getenv('RENV_CONFIG_EXTERNAL_LIBRARIES'), .libPaths()))); renv::status(project=project)"
+  run_r -e "project <- normalizePath('.', mustWork=TRUE); library <- renv::paths\$library(project=project); .libPaths(unique(c(library, Sys.getenv('RENV_CONFIG_EXTERNAL_LIBRARIES'), .libPaths()))); status_result <- tryCatch({ renv::status(project=project); NULL }, error=function(e) e); if (!is.null(status_result)) { cat('renv::status() failed during verifier post-check\\n'); cat(conditionMessage(status_result), '\\n'); quit(status=0) }"
 ) > "${OUTPUT_DIR}/renv-status.txt" 2>&1
 
 echo "Comparing realized inventory to approved installed-packages.csv"

@@ -64,14 +64,18 @@ Sys.setenv(
   RENV_PATHS_LIBRARY_STAGING = "",
   RENV_CONFIG_CACHE_SYMLINKS = "FALSE",
   RENV_CONFIG_PAK_ENABLED = "FALSE",
+  RENV_CONFIG_INSTALL_TRANSACTIONAL = "FALSE",
   RENV_CONFIG_EXTERNAL_LIBRARIES = system_lib,
-  R_INSTALL_STAGED = "FALSE"
+  R_INSTALL_STAGED = "FALSE",
+  MAKEFLAGS = "-j1",
+  CMAKE_BUILD_PARALLEL_LEVEL = "1"
 )
 .Platform$pkgType <- "source"
 .libPaths(unique(c(library_dir, system_lib, .libPaths())))
 options(
   install.packages.compile.from.source = "always",
-  install.opts = c("--no-staged-install")
+  install.opts = c("--no-staged-install", "--no-lock"),
+  Ncpus = 1
 )
 
 if (!requireNamespace("renv", quietly = TRUE)) {
@@ -85,7 +89,7 @@ if (!requireNamespace("jsonlite", quietly = TRUE)) {
 install_with_retry <- function(pkgs, attempts = 3) {
   for (i in seq_len(attempts)) {
     ok <- tryCatch({
-      install.packages(pkgs, dependencies = TRUE)
+      install.packages(pkgs, dependencies = TRUE, Ncpus = 1)
       TRUE
     }, error = function(e) FALSE, warning = function(w) TRUE)
     if (ok) break
@@ -275,6 +279,28 @@ package_installed_in_library <- function(package_name, lib = library_dir) {
   package_name %in% rownames(installed.packages(lib.loc = lib, noCache = TRUE))
 }
 
+remove_stale_install_locks <- function() {
+  candidate_roots <- unique(c(
+    library_dir,
+    tryCatch(renv::paths$library(project = project_dir), error = function(e) NULL)
+  ))
+  for (root in candidate_roots) {
+    if (is.null(root) || !dir.exists(root)) {
+      next
+    }
+    lock_dirs <- Sys.glob(file.path(root, "00LOCK*"))
+    if (!length(lock_dirs)) {
+      next
+    }
+    message(sprintf(
+      "Removing stale package lock directories from %s: %s",
+      root,
+      paste(basename(lock_dirs), collapse = ", ")
+    ))
+    unlink(lock_dirs, recursive = TRUE, force = TRUE)
+  }
+}
+
 ensure_bootstrap_packages <- function(packages, include_in_generated_lock = FALSE) {
   packages <- unique(packages[nzchar(packages)])
   if (!length(packages)) {
@@ -290,7 +316,8 @@ ensure_bootstrap_packages <- function(packages, include_in_generated_lock = FALS
     "Installing restore-bootstrap packages into the realized library: %s",
     paste(missing, collapse = ", ")
   ))
-  install.packages(missing, lib = library_dir, dependencies = TRUE)
+  remove_stale_install_locks()
+  install.packages(missing, lib = library_dir, dependencies = TRUE, Ncpus = 1)
 
   if (include_in_generated_lock) {
     snapshot_requested_environment()
@@ -332,6 +359,7 @@ ensure_lockfile_packages_restored <- function(packages, lockfile_path) {
     "Restoring lockfile-bootstrap packages into the realized library: %s",
     paste(to_restore, collapse = ", ")
   ))
+  remove_stale_install_locks()
   renv::restore(
     project = project_dir,
     lockfile = lockfile_path,
@@ -457,6 +485,7 @@ if (length(missing_from_repo)) {
 }
 
 run_restore <- function(pkgs = packages_to_restore, clean = clean_restore) {
+  remove_stale_install_locks()
   if (identical(input_mode, "lockfile")) {
     return(tryCatch({
       ensure_lockfile_packages_restored(
@@ -494,6 +523,7 @@ run_restore <- function(pkgs = packages_to_restore, clean = clean_restore) {
       refs <- character()
     }
     if (length(refs)) {
+      remove_stale_install_locks()
       renv::install(
         refs,
         project = project_dir,
@@ -521,6 +551,7 @@ retry_notes <- character()
 if (!is.null(restore_error)) {
   remaining <- missing_requested_packages()
   if (length(remaining)) {
+    remove_stale_install_locks()
     retry_notes <- c(
       retry_notes,
       sprintf(

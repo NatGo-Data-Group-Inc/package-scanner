@@ -164,9 +164,9 @@ host = sys.argv[1]
 port = int(sys.argv[2])
 conn = http.client.HTTPConnection(host, port, timeout=10)
 try:
-    conn.request("GET", "/")
+    conn.request("GET", "/healthz")
     resp = conn.getresponse()
-    raise SystemExit(0 if 100 <= resp.status < 600 else 1)
+    raise SystemExit(0 if resp.status == 200 else 1)
 except Exception:
     raise SystemExit(1)
 finally:
