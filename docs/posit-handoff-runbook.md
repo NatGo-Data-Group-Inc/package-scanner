@@ -60,6 +60,7 @@ under `/var/tmp/pi26.3-handoff`, then unzip it there:
 ```bash
 cd /var/tmp/pi26.3-handoff
 unzip /path/to/r-scan-<execution>-linux-amd64-posit-handoff-bundle.zip
+chmod +x scripts/verify-posit-handoff*
 ```
 
 After unzip, `/var/tmp/pi26.3-handoff` should contain:
