@@ -36,6 +36,45 @@ From the approved scan run, transfer:
 - `materialization-summary.json`
 - `run-metadata.json`
 
+## 3. Transfer To The Posit Host
+
+Use a temporary staging directory on the Posit server for the transferred
+bundle, separate from the final Posit project/cache locations.
+
+Recommended locations:
+
+- transferred bundle staging: `/var/tmp/pi26.3-handoff`
+- verifier work/log directory: `/var/tmp/pi26.3-verify`
+
+Example:
+
+```bash
+sudo rm -rf /var/tmp/pi26.3-handoff /var/tmp/pi26.3-verify
+sudo mkdir -p /var/tmp/pi26.3-handoff /var/tmp/pi26.3-verify
+sudo chown -R <your-user>:<your-group> /var/tmp/pi26.3-handoff /var/tmp/pi26.3-verify
+```
+
+Copy the downloaded `Posit handoff bundle` ZIP to the Posit host and place it
+under `/var/tmp/pi26.3-handoff`, then unzip it there:
+
+```bash
+cd /var/tmp/pi26.3-handoff
+unzip /path/to/r-scan-<execution>-linux-amd64-posit-handoff-bundle.zip
+```
+
+After unzip, `/var/tmp/pi26.3-handoff` should contain:
+
+- `renv.lock`
+- `installed-packages.csv`
+- `materialization-summary.json`
+- `run-metadata.json`
+- `renv-cache-linux-amd64-<timestamp>.tar.gz`
+- `renv-cache-linux-amd64-<timestamp>.tar.gz.sha256`
+- `renv-library-linux-amd64-<timestamp>.tar.gz`
+- `renv-library-linux-amd64-<timestamp>.tar.gz.sha256`
+- `scripts/verify-posit-handoff.sh`
+- `scripts/verify-posit-handoff-inside.sh`
+
 ## 3. Posit Workbench Restore Procedure
 
 ### Prepare directories
@@ -156,11 +195,13 @@ Example:
 Directly on a Posit server after the handoff bundle has been transferred:
 
 ```bash
+cd /var/tmp/pi26.3-handoff
+
 ./scripts/verify-posit-handoff.sh \
   --local-host \
-  --bundle-dir /path/to/transferred/bundle \
-  --app-name <application-name> \
-  --work-dir /var/tmp/posit-restore-verification
+  --bundle-dir /var/tmp/pi26.3-handoff \
+  --app-name pi26.3_full \
+  --work-dir /var/tmp/pi26.3-verify
 ```
 
 What it does:
@@ -176,6 +217,15 @@ What it does:
 With `--local-host`, the same script skips Docker and runs the restore directly
 on the current Linux host. Use that mode on the Posit server itself when you
 want a single command instead of a manual runbook procedure.
+
+After the verifier completes, inspect:
+
+```bash
+find /var/tmp/pi26.3-verify/results -maxdepth 1 -type f | sort
+cat /var/tmp/pi26.3-verify/results/verification-summary.txt
+tail -n 80 /var/tmp/pi26.3-verify/results/restore.log
+cat /var/tmp/pi26.3-verify/results/renv-status.txt
+```
 
 Use this verifier when you need proof that the enclave restore will work on the
 exact Posit-aligned runtime image, not just on the generic scanner image.
