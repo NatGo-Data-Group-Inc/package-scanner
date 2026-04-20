@@ -267,6 +267,15 @@ def format_duration_seconds(duration_seconds: int | float | None) -> str | None:
     return f"{secs}s"
 
 
+def parse_state_machine_arns(configured: str | None, legacy: str | None, defaults: list[str]) -> list[str]:
+    values = [item.strip() for item in str(configured or "").split(",") if item.strip()]
+    if values:
+        return values
+    if legacy and legacy.strip():
+        return [legacy.strip()]
+    return defaults
+
+
 ACTIVE_RUN_STAGE_ORDER = {
     "r": ["preflight", "restore", "restored", "analysis", "governance", "publish", "completed"],
     "python": ["materialize", "restored", "analysis", "governance", "publish", "completed"],
@@ -366,6 +375,22 @@ def create_app() -> Flask:
     app.config["R_STATE_MACHINE_ARN"] = os.environ.get(
         "R_STATE_MACHINE_ARN",
         "arn:aws:states:us-east-1:807497180525:stateMachine:package-scanner-dev-r-ecs-linux-scan-orchestrator",
+    )
+    app.config["PYTHON_STATE_MACHINE_ARNS"] = parse_state_machine_arns(
+        os.environ.get("PYTHON_STATE_MACHINE_ARNS"),
+        app.config["PYTHON_STATE_MACHINE_ARN"],
+        [
+            "arn:aws:states:us-east-1:807497180525:stateMachine:package-scanner-dev-python-ecs-linux-scan-orchestrator",
+        ],
+    )
+    app.config["R_STATE_MACHINE_ARNS"] = parse_state_machine_arns(
+        os.environ.get("R_STATE_MACHINE_ARNS"),
+        app.config["R_STATE_MACHINE_ARN"],
+        [
+            "arn:aws:states:us-east-1:807497180525:stateMachine:package-scanner-dev-r-ecs-scan-orchestrator",
+            "arn:aws:states:us-east-1:807497180525:stateMachine:package-scanner-dev-r-ecs-linux-scan-orchestrator",
+            "arn:aws:states:us-east-1:807497180525:stateMachine:package-scanner-dev-r-ecs-windows-scan-orchestrator",
+        ],
     )
 
     @app.before_request
@@ -479,24 +504,23 @@ def create_app() -> Flask:
         return rows
 
     def live_running_execution_map(ecosystem: str) -> dict[str, dict]:
-        arn = app.config["PYTHON_STATE_MACHINE_ARN"] if ecosystem == "python" else app.config["R_STATE_MACHINE_ARN"]
-        if not arn:
-            return {}
-        try:
-            executions = stepfunctions_list_executions(
-                arn,
-                region=app.config["AWS_REGION"],
-                profile=app.config["AWS_PROFILE"],
-                status_filter="RUNNING",
-                max_results=25,
-            )
-        except Exception:
-            return {}
         live_map: dict[str, dict] = {}
-        for execution in executions:
-            execution_id = str(execution.get("name") or "").strip()
-            if execution_id:
-                live_map[execution_id] = execution
+        arns = app.config["PYTHON_STATE_MACHINE_ARNS"] if ecosystem == "python" else app.config["R_STATE_MACHINE_ARNS"]
+        for arn in arns:
+            try:
+                executions = stepfunctions_list_executions(
+                    arn,
+                    region=app.config["AWS_REGION"],
+                    profile=app.config["AWS_PROFILE"],
+                    status_filter="RUNNING",
+                    max_results=25,
+                )
+            except Exception:
+                continue
+            for execution in executions:
+                execution_id = str(execution.get("name") or "").strip()
+                if execution_id:
+                    live_map[execution_id] = execution
         return live_map
 
     def overlay_live_status(row: dict, live_execution: dict | None) -> dict:
@@ -1169,77 +1193,78 @@ def create_app() -> Flask:
 
     def active_runs() -> list[dict]:
         configs = [
-            ("python", app.config["PYTHON_STATE_MACHINE_ARN"]),
-            ("r", app.config["R_STATE_MACHINE_ARN"]),
+            ("python", app.config["PYTHON_STATE_MACHINE_ARNS"]),
+            ("r", app.config["R_STATE_MACHINE_ARNS"]),
         ]
         active: list[dict] = []
-        for ecosystem, arn in configs:
-            if not arn:
-                continue
-            try:
-                executions = stepfunctions_list_executions(
-                    arn,
-                    region=app.config["AWS_REGION"],
-                    profile=app.config["AWS_PROFILE"],
-                    status_filter="RUNNING",
-                    max_results=10,
-                )
-            except Exception:
-                continue
-            for execution in executions:
-                item = {
-                    "ecosystem": ecosystem,
-                    "name": execution.get("name"),
-                    "executionArn": execution.get("executionArn"),
-                    "startDate": execution.get("startDate"),
-                    "status": execution.get("status"),
-                }
+        for ecosystem, arns in configs:
+            for arn in arns:
                 try:
-                    detail = stepfunctions_describe_execution(
-                        execution["executionArn"],
+                    executions = stepfunctions_list_executions(
+                        arn,
                         region=app.config["AWS_REGION"],
                         profile=app.config["AWS_PROFILE"],
+                        status_filter="RUNNING",
+                        max_results=10,
                     )
-                    item["input"] = detail.get("input")
                 except Exception:
-                    item["input"] = None
-                execution_input = item.get("input")
-                platform = ""
-                if isinstance(execution_input, str) and execution_input.strip():
+                    continue
+                for execution in executions:
+                    item = {
+                        "ecosystem": ecosystem,
+                        "name": execution.get("name"),
+                        "executionArn": execution.get("executionArn"),
+                        "startDate": execution.get("startDate"),
+                        "status": execution.get("status"),
+                    }
                     try:
-                        execution_input = json.loads(execution_input)
-                    except json.JSONDecodeError:
-                        execution_input = None
-                if isinstance(execution_input, dict):
-                    input_key = str(execution_input.get("input_object_key") or "").strip()
-                    platform_set = str(execution_input.get("platform_set") or "").strip()
-                    if "/windows-amd64/" in input_key or platform_set == "all":
-                        platform = "windows"
-                    elif "/linux-arm64/" in input_key:
-                        platform = "linux-arm64"
-                    elif "/linux-amd64/" in input_key:
-                        platform = "linux-amd64"
-                if not platform:
-                    platform = "linux-amd64" if ecosystem == "r" else "unknown"
-                stage_state = checkpoint_stage_state(ecosystem, str(item.get("name") or ""), platform) or {}
-                current_stage = str(stage_state.get("phase") or "").strip().lower() or None
-                if not current_stage and str(item.get("status") or "").upper() == "RUNNING":
-                    current_stage = "preflight" if ecosystem == "r" else "materialize"
-                progress_current = stage_state.get("progress_current")
-                progress_total = stage_state.get("progress_total")
-                progress_count_display = None
-                if isinstance(progress_current, int) and isinstance(progress_total, int) and progress_total > 0:
-                    progress_count_display = f"{progress_current}/{progress_total}"
-                item["platform_label"] = architecture_label(platform)
-                item["ecosystem_platform_badge"] = ecosystem_platform_badge(ecosystem, platform)
-                item["started_display"] = format_display_datetime(item.get("startDate"))
-                item["duration_display"] = format_duration(item.get("startDate"))
-                item["status_class"] = status_class(str(item.get("status") or ""))
-                item["current_stage"] = current_stage
-                item["current_stage_display"] = stage_display_name(current_stage)
-                item["progress_count_display"] = progress_count_display
-                item["stage_steps"] = stage_steps_for_run(ecosystem, current_stage, str(item.get("status") or ""))
-                active.append(item)
+                        detail = stepfunctions_describe_execution(
+                            execution["executionArn"],
+                            region=app.config["AWS_REGION"],
+                            profile=app.config["AWS_PROFILE"],
+                        )
+                        item["input"] = detail.get("input")
+                    except Exception:
+                        item["input"] = None
+                    execution_input = item.get("input")
+                    platform = ""
+                    if isinstance(execution_input, str) and execution_input.strip():
+                        try:
+                            execution_input = json.loads(execution_input)
+                        except json.JSONDecodeError:
+                            execution_input = None
+                    if isinstance(execution_input, dict):
+                        input_key = str(execution_input.get("input_object_key") or "").strip()
+                        platform_set = str(execution_input.get("platform_set") or "").strip()
+                        if "/windows-amd64/" in input_key or platform_set == "windows-only":
+                            platform = "windows"
+                        elif "/linux-arm64/" in input_key:
+                            platform = "linux-arm64"
+                        elif "/linux-amd64/" in input_key:
+                            platform = "linux-amd64"
+                        elif platform_set == "all":
+                            platform = "linux-amd64"
+                    if not platform:
+                        platform = "linux-amd64" if ecosystem == "r" else "unknown"
+                    stage_state = checkpoint_stage_state(ecosystem, str(item.get("name") or ""), platform) or {}
+                    current_stage = str(stage_state.get("phase") or "").strip().lower() or None
+                    if not current_stage and str(item.get("status") or "").upper() == "RUNNING":
+                        current_stage = "preflight" if ecosystem == "r" else "materialize"
+                    progress_current = stage_state.get("progress_current")
+                    progress_total = stage_state.get("progress_total")
+                    progress_count_display = None
+                    if isinstance(progress_current, int) and isinstance(progress_total, int) and progress_total > 0:
+                        progress_count_display = f"{progress_current}/{progress_total}"
+                    item["platform_label"] = architecture_label(platform)
+                    item["ecosystem_platform_badge"] = ecosystem_platform_badge(ecosystem, platform)
+                    item["started_display"] = format_display_datetime(item.get("startDate"))
+                    item["duration_display"] = format_duration(item.get("startDate"))
+                    item["status_class"] = status_class(str(item.get("status") or ""))
+                    item["current_stage"] = current_stage
+                    item["current_stage_display"] = stage_display_name(current_stage)
+                    item["progress_count_display"] = progress_count_display
+                    item["stage_steps"] = stage_steps_for_run(ecosystem, current_stage, str(item.get("status") or ""))
+                    active.append(item)
         active.sort(key=lambda row: str(row.get("startDate", "")), reverse=True)
         return active
 

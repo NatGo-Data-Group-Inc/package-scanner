@@ -60,6 +60,11 @@ This wrapper starts the local webapp without the Flask debugger or reloader and
 uses a dedicated writable AWS home under `/tmp` so refreshed SSO credentials can
 be copied in cleanly.
 
+For R ECS, the browser can watch more than one Step Functions orchestrator at
+once. By default it includes the combined, Linux-only, and Windows-only R ECS
+state machines. Override that set with `R_STATE_MACHINE_ARNS` as a comma-separated
+list if an environment uses different names.
+
 Stop it with:
 
 ```bash
