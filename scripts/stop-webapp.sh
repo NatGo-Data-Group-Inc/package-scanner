@@ -57,6 +57,20 @@ if command -v lsof >/dev/null 2>&1; then
   fi
 fi
 
+if command -v netstat >/dev/null 2>&1 && command -v taskkill >/dev/null 2>&1; then
+  lingering_pids="$(
+    netstat -ano -p tcp 2>/dev/null |
+      awk -v port=":${PORT}" '$2 ~ port "$" && $4 == "LISTENING" {print $5}' |
+      sort -u
+  )"
+  if [[ -n "${lingering_pids}" ]]; then
+    for pid in ${lingering_pids}; do
+      taskkill //PID "${pid}" //T //F >/dev/null 2>&1 || true
+    done
+    stopped="true"
+  fi
+fi
+
 if [[ "${stopped}" == "true" ]]; then
   echo "Stopped webapp on port ${PORT}"
 else

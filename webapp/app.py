@@ -982,8 +982,15 @@ def create_app() -> Flask:
             platform["paths"]["governance_summary_key"],
         ) or {}
         policy = governance_summary.get("policy") or {}
-        platform_set = "linux-only" if platform["platform"] == "linux-amd64" else "all"
-        state_machine_key = "RLinuxScanOrchestrationStateMachineArn" if platform_set == "linux-only" else "RScanOrchestrationStateMachineArn"
+        if platform["platform"] == "linux-amd64":
+            platform_set = "linux-only"
+            state_machine_key = "RLinuxScanOrchestrationStateMachineArn"
+        elif platform["platform"] == "windows-amd64":
+            platform_set = "windows-only"
+            state_machine_key = "RWindowsScanOrchestrationStateMachineArn"
+        else:
+            platform_set = "all"
+            state_machine_key = "RScanOrchestrationStateMachineArn"
         state_machine_arn = stack_output_value(stack, state_machine_key)
         execution_input = {
             "scan_execution_id": execution_id,
@@ -999,6 +1006,7 @@ def create_app() -> Flask:
             "remediate_unknown": str(policy.get("remediate_unknown", True)).lower(),
             "fail_on_unknown": str(policy.get("fail_on_unknown", False)).lower(),
             "r_stage_package_count": "25",
+            "platform_set": platform_set,
         }
         start_data = aws_json(
             [
@@ -1207,7 +1215,8 @@ def create_app() -> Flask:
                         status_filter="RUNNING",
                         max_results=10,
                     )
-                except Exception:
+                except Exception as exc:
+                    app.logger.warning("active run lookup failed ecosystem=%s state_machine=%s error=%s", ecosystem, arn, exc)
                     continue
                 for execution in executions:
                     item = {
@@ -1224,7 +1233,13 @@ def create_app() -> Flask:
                             profile=app.config["AWS_PROFILE"],
                         )
                         item["input"] = detail.get("input")
-                    except Exception:
+                    except Exception as exc:
+                        app.logger.warning(
+                            "active run detail lookup failed ecosystem=%s execution=%s error=%s",
+                            ecosystem,
+                            execution.get("executionArn"),
+                            exc,
+                        )
                         item["input"] = None
                     execution_input = item.get("input")
                     platform = ""
@@ -1237,7 +1252,7 @@ def create_app() -> Flask:
                         input_key = str(execution_input.get("input_object_key") or "").strip()
                         platform_set = str(execution_input.get("platform_set") or "").strip()
                         if "/windows-amd64/" in input_key or platform_set == "windows-only":
-                            platform = "windows"
+                            platform = "windows-amd64"
                         elif "/linux-arm64/" in input_key:
                             platform = "linux-arm64"
                         elif "/linux-amd64/" in input_key:

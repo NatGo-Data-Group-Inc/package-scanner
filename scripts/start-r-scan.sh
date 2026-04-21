@@ -48,7 +48,8 @@ Optional:
   --remediate-unknown <true|false>        (default: true)
   --fail-on-unknown <true|false>          (default: false)
   --r-stage-package-count <count>         (default: 25)
-  --platform-set <all|linux-only>         (default: all)
+  --platform-set <all|linux-only|windows-only>
+                                          (default: all)
 EOF
 }
 
@@ -104,8 +105,8 @@ if [[ -z "${DEPLOYMENT_LOCK_TOKEN}" ]]; then
   echo "Guardrail: --deployment-lock-token is required." >&2
   exit 1
 fi
-if [[ "${PLATFORM_SET}" != "all" && "${PLATFORM_SET}" != "linux-only" ]]; then
-  echo "--platform-set must be one of: all, linux-only" >&2
+if [[ "${PLATFORM_SET}" != "all" && "${PLATFORM_SET}" != "linux-only" && "${PLATFORM_SET}" != "windows-only" ]]; then
+  echo "--platform-set must be one of: all, linux-only, windows-only" >&2
   exit 1
 fi
 
@@ -185,6 +186,8 @@ start_build() {
 STATE_MACHINE_OUTPUT_KEY="RScanOrchestrationStateMachineArn"
 if [[ "${PLATFORM_SET}" == "linux-only" ]]; then
   STATE_MACHINE_OUTPUT_KEY="RLinuxScanOrchestrationStateMachineArn"
+elif [[ "${PLATFORM_SET}" == "windows-only" ]]; then
+  STATE_MACHINE_OUTPUT_KEY="RWindowsScanOrchestrationStateMachineArn"
 fi
 STATE_MACHINE_ARN="$(stack_output "${STATE_MACHINE_OUTPUT_KEY}")"
 if [[ -z "${STATE_MACHINE_ARN}" || "${STATE_MACHINE_ARN}" == "None" ]]; then
@@ -216,6 +219,7 @@ payload = {
     "remediate_unknown": ${REMEDIATE_UNKNOWN@Q},
     "fail_on_unknown": ${FAIL_ON_UNKNOWN@Q},
     "r_stage_package_count": ${R_STAGE_PACKAGE_COUNT@Q},
+    "platform_set": ${PLATFORM_SET@Q},
 }
 print(json.dumps(payload))
 PY

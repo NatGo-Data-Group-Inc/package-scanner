@@ -54,12 +54,19 @@ param(
   [bool]$FailOnUnknown = $false,
 
   [Parameter(Mandatory = $false)]
-  [int]$RStagePackageCount = 25
+  [int]$RStagePackageCount = 25,
+  [Parameter(Mandatory = $false)]
+  [ValidateSet("all", "linux-only", "windows-only")]
+  [string]$PlatformSet = "all"
 )
 
 $ErrorActionPreference = "Stop"
 
-if (-not (Get-Command bash -ErrorAction SilentlyContinue)) {
+$bashExe = "bash"
+$gitBash = "C:\Program Files\Git\bin\bash.exe"
+if (Test-Path $gitBash) {
+  $bashExe = $gitBash
+} elseif (-not (Get-Command bash -ErrorAction SilentlyContinue)) {
   throw "bash is required in PATH to run this wrapper."
 }
 
@@ -67,6 +74,10 @@ $scriptDir = Split-Path -Parent $PSCommandPath
 $bashScript = Join-Path $scriptDir "start-r-scan.sh"
 if (-not (Test-Path $bashScript)) {
   throw "Bash script not found: $bashScript"
+}
+$bashScriptForBash = $bashScript -replace "\\", "/"
+if ($bashScriptForBash -match "^([A-Za-z]):/(.*)$") {
+  $bashScriptForBash = "/" + $Matches[1].ToLowerInvariant() + "/" + $Matches[2]
 }
 
 $bashArgs = @(
@@ -91,6 +102,7 @@ $bashArgs += @("--fail-on-medium", $FailOnMedium.ToString().ToLowerInvariant())
 $bashArgs += @("--remediate-unknown", $RemediateUnknown.ToString().ToLowerInvariant())
 $bashArgs += @("--fail-on-unknown", $FailOnUnknown.ToString().ToLowerInvariant())
 $bashArgs += @("--r-stage-package-count", $RStagePackageCount.ToString())
+$bashArgs += @("--platform-set", $PlatformSet)
 
-& bash $bashScript @bashArgs
+& $bashExe $bashScriptForBash @bashArgs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

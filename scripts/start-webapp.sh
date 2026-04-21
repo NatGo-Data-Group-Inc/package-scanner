@@ -67,8 +67,17 @@ if [[ -z "${CATALOG_BUCKET}" ]]; then
   exit 1
 fi
 
-if [[ ! -x ".venv/bin/flask" ]]; then
-  echo "Missing .venv/bin/flask" >&2
+FLASK_CMD=""
+if [[ -x ".venv/bin/flask" ]]; then
+  FLASK_CMD=".venv/bin/flask"
+elif [[ -x ".venv/Scripts/flask.exe" ]]; then
+  FLASK_CMD=".venv/Scripts/flask.exe"
+elif [[ -x ".venv/Scripts/python.exe" ]]; then
+  FLASK_CMD=".venv/Scripts/python.exe -m flask"
+fi
+
+if [[ -z "${FLASK_CMD}" ]]; then
+  echo "Missing Flask executable. Expected .venv/bin/flask or .venv/Scripts/flask.exe." >&2
   exit 1
 fi
 
@@ -112,6 +121,7 @@ export CATALOG_BUCKET
 export CATALOG_PREFIX
 export EPHEMERAL_BUCKET
 export EPHEMERAL_PREFIX
+export R_STATE_MACHINE_ARNS="${R_STATE_MACHINE_ARNS:-arn:aws:states:us-east-1:807497180525:stateMachine:package-scanner-dev-r-ecs-scan-orchestrator,arn:aws:states:us-east-1:807497180525:stateMachine:package-scanner-dev-r-ecs-linux-scan-orchestrator,arn:aws:states:us-east-1:807497180525:stateMachine:package-scanner-dev-r-ecs-windows-scan-orchestrator}"
 export FLASK_APP="webapp/app.py"
 export FLASK_DEBUG="0"
 export WEBAPP_LOG_PATH="${LOG_FILE}"
@@ -120,17 +130,17 @@ if [[ -n "${PROFILE}" ]]; then
 fi
 
 app_pid="$(
-python - "${HOST}" "${PORT}" "${LOG_FILE}" <<'PY'
+python - "${HOST}" "${PORT}" "${LOG_FILE}" "${FLASK_CMD}" <<'PY'
 import os
+import shlex
 import subprocess
 import sys
 
-host, port, log_file = sys.argv[1:4]
+host, port, log_file, flask_cmd = sys.argv[1:5]
 env = os.environ.copy()
 with open(log_file, "ab", buffering=0) as log:
     proc = subprocess.Popen(
-        [
-            ".venv/bin/flask",
+        shlex.split(flask_cmd) + [
             "run",
             "--host",
             host,
@@ -152,10 +162,6 @@ PY
 echo "${app_pid}" > "${PID_FILE}"
 
 for _ in $(seq 1 30); do
-  if ! kill -0 "${app_pid}" 2>/dev/null; then
-    echo "Webapp failed to start. See ${LOG_FILE}" >&2
-    exit 1
-  fi
   if python - "${HOST}" "${PORT}" <<'PY'
 import http.client
 import sys
@@ -179,6 +185,10 @@ PY
     echo "Webapp running at http://${HOST}:${PORT}"
     echo "PID ${app_pid}"
     exit 0
+  fi
+  if ! kill -0 "${app_pid}" 2>/dev/null; then
+    echo "Webapp failed to start. See ${LOG_FILE}" >&2
+    exit 1
   fi
   sleep 1
 done

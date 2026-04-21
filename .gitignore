@@ -12,6 +12,8 @@ __pycache__/
 
 # Local test/temp artifacts
 .tmp-tests/
+.pytest_cache/
+pytest-cache-files-*/
 
 # OS/editor
 .DS_Store

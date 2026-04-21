@@ -25,7 +25,8 @@ Usage: poll-r-scan.sh [--execution-arn <arn> | --latest --stack-name <name>] [op
 Selection:
   --execution-arn <arn>                 Step Functions execution ARN to poll
   --latest                              Resolve the current/latest execution automatically
-  --platform-set <all|linux-only>       Which R state machine to inspect for --latest (default: linux-only)
+  --platform-set <all|linux-only|windows-only>
+                                        Which R state machine to inspect for --latest (default: linux-only)
 
 Optional:
   --stack-name <name>                   Resolve EvidenceBucketName from stack output
@@ -77,8 +78,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ "${PLATFORM_SET}" != "all" && "${PLATFORM_SET}" != "linux-only" ]]; then
-  echo "--platform-set must be one of: all, linux-only" >&2
+if [[ "${PLATFORM_SET}" != "all" && "${PLATFORM_SET}" != "linux-only" && "${PLATFORM_SET}" != "windows-only" ]]; then
+  echo "--platform-set must be one of: all, linux-only, windows-only" >&2
   exit 1
 fi
 if [[ "${LATEST}" != "true" && -z "${EXECUTION_ARN}" ]]; then
@@ -124,6 +125,8 @@ resolve_execution_arn() {
   local state_machine_key="RScanOrchestrationStateMachineArn"
   if [[ "${PLATFORM_SET}" == "linux-only" ]]; then
     state_machine_key="RLinuxScanOrchestrationStateMachineArn"
+  elif [[ "${PLATFORM_SET}" == "windows-only" ]]; then
+    state_machine_key="RWindowsScanOrchestrationStateMachineArn"
   fi
   local state_machine_arn
   state_machine_arn="$(stack_output "${state_machine_key}")"

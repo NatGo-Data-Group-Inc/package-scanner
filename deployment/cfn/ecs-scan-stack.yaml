@@ -941,6 +941,125 @@ Resources:
           }
         }
 
+  RWindowsScanOrchestrationStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub '${EnvironmentName}-r-ecs-windows-scan-orchestrator'
+      RoleArn: !GetAtt RScanOrchestrationRole.Arn
+      DefinitionString: !Sub |
+        {
+          "StartAt": "RunTasks",
+          "States": {
+            "RunTasks": {
+              "Type": "Parallel",
+              "Branches": [
+                {
+                  "StartAt": "RunWindowsAmd64",
+                  "States": {
+                    "RunWindowsAmd64": {
+                      "Type": "Task",
+                      "Resource": "arn:aws:states:::ecs:runTask.sync",
+                      "Retry": [
+                        {
+                          "ErrorEquals": ["ECS.AmazonECSException", "ECS.ClientException", "States.TaskFailed"],
+                          "IntervalSeconds": 30,
+                          "BackoffRate": 2.0,
+                          "MaxAttempts": 6
+                        }
+                      ],
+                      "Parameters": {
+                        "Cluster": "${RWindowsCluster.Arn}",
+                        "LaunchType": "EC2",
+                        "TaskDefinition": "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${EnvironmentName}-r-windows-amd64",
+                        "Overrides": {
+                          "ContainerOverrides": [
+                            {
+                              "Name": "scanner",
+                              "Environment": [
+                                { "Name": "INPUT_BUCKET", "Value.$": "$.input_bucket" },
+                                { "Name": "INPUT_OBJECT_KEY", "Value.$": "$.input_object_key" },
+                                { "Name": "EVIDENCE_BUCKET", "Value.$": "$.evidence_bucket" },
+                                { "Name": "EVIDENCE_PREFIX", "Value.$": "$.evidence_prefix" },
+                                { "Name": "EPHEMERAL_BUCKET", "Value.$": "$.ephemeral_bucket" },
+                                { "Name": "EPHEMERAL_PREFIX", "Value.$": "$.ephemeral_prefix" },
+                                { "Name": "REMEDIATE_MEDIUM", "Value.$": "$.remediate_medium" },
+                                { "Name": "FAIL_ON_MEDIUM", "Value.$": "$.fail_on_medium" },
+                                { "Name": "REMEDIATE_UNKNOWN", "Value.$": "$.remediate_unknown" },
+                                { "Name": "FAIL_ON_UNKNOWN", "Value.$": "$.fail_on_unknown" },
+                                { "Name": "SCAN_TIMESTAMP", "Value.$": "$.scan_timestamp" },
+                                { "Name": "SCAN_EXECUTION_ID", "Value.$": "$.scan_execution_id" }
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "ResultSelector": {
+                        "platform": "windows-amd64",
+                        "status": "SUCCEEDED",
+                        "taskArn.$": "$.TaskArn",
+                        "clusterArn": "${RWindowsCluster.Arn}"
+                      },
+                      "Catch": [
+                        {
+                          "ErrorEquals": ["States.ALL"],
+                          "ResultPath": "$.error",
+                          "Next": "WindowsAmd64Failure"
+                        }
+                      ],
+                      "End": true
+                    },
+                    "WindowsAmd64Failure": {
+                      "Type": "Pass",
+                      "Parameters": {
+                        "platform": "windows-amd64",
+                        "status": "FAILED",
+                        "error.$": "$.error.Error",
+                        "cause.$": "$.error.Cause"
+                      },
+                      "End": true
+                    }
+                  }
+                }
+              ],
+              "ResultPath": "$.results",
+              "Next": "ValidateArtifacts"
+            },
+            "ValidateArtifacts": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "OutputPath": "$.Payload",
+              "Parameters": {
+                "FunctionName": "${RScanSummaryFunction.Arn}",
+                "Payload": {
+                  "scan_execution_id.$": "$.scan_execution_id",
+                  "scan_timestamp.$": "$.scan_timestamp",
+                  "evidence_bucket.$": "$.evidence_bucket",
+                  "evidence_prefix.$": "$.evidence_prefix",
+                  "results.$": "$.results"
+                }
+              },
+              "Next": "ValidationResult"
+            },
+            "ValidationResult": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.overall_status",
+                  "StringEquals": "SUCCEEDED",
+                  "Next": "Done"
+                }
+              ],
+              "Default": "ValidationFailed"
+            },
+            "Done": { "Type": "Succeed" },
+            "ValidationFailed": {
+              "Type": "Fail",
+              "Error": "RScanValidationFailed",
+              "Cause": "One or more platform tasks failed or required artifacts were missing."
+            }
+          }
+        }
+
 Outputs:
   InputBucketName:
     Value: !If [CreateInputBucket, !Ref InputBucket, !Ref ExistingInputBucketName]
@@ -952,6 +1071,8 @@ Outputs:
     Value: !Ref RScanOrchestrationStateMachine
   RLinuxScanOrchestrationStateMachineArn:
     Value: !Ref RLinuxScanOrchestrationStateMachine
+  RWindowsScanOrchestrationStateMachineArn:
+    Value: !Ref RWindowsScanOrchestrationStateMachine
   RLinuxRepositoryUri:
     Value: !GetAtt RLinuxRepository.RepositoryUri
   RWindowsRepositoryUri:
