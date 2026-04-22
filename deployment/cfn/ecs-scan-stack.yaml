@@ -373,7 +373,7 @@ Resources:
             - -Platform
             - windows-amd64
           EntryPoint:
-            - powershell
+            - C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
             - -NoProfile
             - -ExecutionPolicy
             - Bypass

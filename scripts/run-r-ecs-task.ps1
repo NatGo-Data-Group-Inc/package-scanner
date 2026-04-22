@@ -48,7 +48,7 @@ function Publish-Checkpoint {
 
 function Stop-CheckpointLoop {
   if ($checkpointJob) {
-    Stop-Job $checkpointJob -Force -ErrorAction SilentlyContinue | Out-Null
+    Stop-Job $checkpointJob -ErrorAction SilentlyContinue | Out-Null
     Remove-Job $checkpointJob -Force -ErrorAction SilentlyContinue | Out-Null
     $script:checkpointJob = $null
   }
@@ -117,11 +117,15 @@ if ($null -ne $inputPayload.Packages -and $null -ne $inputPayload.R) {
 
 try {
   aws s3 cp "$checkpointPrefix/latest/renv-cache.tar.gz" "$runDir\checkpoint-renv-cache.tar.gz" | Out-Null
-  python "$scriptRoot\extract-archive.py" --archive "$runDir\checkpoint-renv-cache.tar.gz" --destination $cacheDir
+  if (Test-Path "$runDir\checkpoint-renv-cache.tar.gz") {
+    python "$scriptRoot\extract-archive.py" --archive "$runDir\checkpoint-renv-cache.tar.gz" --destination $cacheDir
+  }
 } catch {}
 try {
   aws s3 cp "$checkpointPrefix/latest/renv-library.tar.gz" "$runDir\checkpoint-renv-library.tar.gz" | Out-Null
-  python "$scriptRoot\extract-archive.py" --archive "$runDir\checkpoint-renv-library.tar.gz" --destination $libraryDir
+  if (Test-Path "$runDir\checkpoint-renv-library.tar.gz") {
+    python "$scriptRoot\extract-archive.py" --archive "$runDir\checkpoint-renv-library.tar.gz" --destination $libraryDir
+  }
 } catch {}
 
 $rVersion = $inputRVersion
