@@ -35,7 +35,7 @@ RUN python -m pip install --upgrade pip boto3 ; `
 
 ENV SCRIPT_ROOT=C:\package-scanner\scripts
 ENV R_SYSTEM_LIBRARY=C:\R\R-4.4.0\library
-ENV PATH=C:\R\R-4.4.0\bin;C:\rtools44\usr\bin;C:\rtools44\mingw64\bin;C:\trivy;%PATH%
+ENV PATH="C:\Windows\System32;C:\Windows;C:\Windows\System32\WindowsPowerShell\v1.0;C:\Program Files\Amazon\AWSCLIV2;C:\Program Files\Python311;C:\Program Files\Python311\Scripts;C:\R\R-4.4.0\bin;C:\rtools44\usr\bin;C:\rtools44\mingw64\bin;C:\trivy"
 
 COPY scripts\materialize-r-environment.R C:\package-scanner\scripts\materialize-r-environment.R
 COPY scripts\bundle-directory.py C:\package-scanner\scripts\bundle-directory.py
@@ -47,4 +47,4 @@ COPY scripts\preflight-r-native-deps.py C:\package-scanner\scripts\preflight-r-n
 COPY scripts\generate-r-governance-artifacts.py C:\package-scanner\scripts\generate-r-governance-artifacts.py
 COPY scripts\run-r-ecs-task.ps1 C:\package-scanner\scripts\run-r-ecs-task.ps1
 
-ENTRYPOINT ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:\\package-scanner\\scripts\\run-r-ecs-task.ps1"]
+ENTRYPOINT ["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:\\package-scanner\\scripts\\run-r-ecs-task.ps1"]
