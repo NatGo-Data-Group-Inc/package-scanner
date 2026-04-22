@@ -46,18 +46,25 @@
 </div>
 <table>
   <thead>
-    <tr><th>Execution</th><th>Started</th><th>Duration</th><th>Status</th><th>Ecosystem</th><th>Platform</th><th>Validated</th><th>Package Count</th><th>Triage</th></tr>
+    <tr><th>Execution</th><th>Started</th><th>Duration</th><th>Status</th><th>Ecosystem</th><th>Platform</th><th>Validated</th><th>Source</th><th>Package Count</th><th>Triage</th></tr>
   </thead>
   <tbody>
     {% for run in runs %}
     <tr>
-      <td><a href="/runs/{{ ecosystem }}/{{ run.execution_id }}">{{ run.execution_id }}</a></td>
+      <td>
+        {% if run.source == "step-functions" %}
+        <code>{{ run.execution_id }}</code>
+        {% else %}
+        <a href="/runs/{{ ecosystem }}/{{ run.execution_id }}">{{ run.execution_id }}</a>
+        {% endif %}
+      </td>
       <td>{{ run.scan_timestamp_display }}</td>
       <td>{{ run.duration_display or 'n/a' }}</td>
       <td class="{{ run.selected_platform_status_class }}">{{ run.selected_platform_status }}</td>
       <td><span class="chip badge-{{ ecosystem }}">{{ ecosystem|upper }}</span></td>
       <td><span class="chip badge-{{ run.selected_platform_label }}">{{ run.selected_platform_label }}</span></td>
       <td>{{ 'yes' if run.selected_platform_validated else 'no' }}</td>
+      <td>{{ run.source or 'catalog' }}</td>
       <td>{% if run.package_count is not none %}{{ run.package_count }}{% else %}<span class="muted">n/a</span>{% endif %}</td>
       {% if run.selected_platform_status == "FAILED" %}
       <td><a href="/runs/{{ ecosystem }}/{{ run.execution_id }}/triage">Triage</a></td>

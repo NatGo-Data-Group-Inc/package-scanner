@@ -504,6 +504,68 @@ def create_app() -> Flask:
         rows.sort(key=lambda row: row.get("scan_timestamp", ""), reverse=True)
         return rows
 
+    def parse_execution_input(execution_arn: str) -> dict:
+        try:
+            detail = stepfunctions_describe_execution(
+                execution_arn,
+                region=app.config["AWS_REGION"],
+                profile=app.config["AWS_PROFILE"],
+            )
+        except Exception:
+            return {}
+        raw_input = detail.get("input")
+        if isinstance(raw_input, str) and raw_input.strip():
+            try:
+                parsed = json.loads(raw_input)
+                return parsed if isinstance(parsed, dict) else {}
+            except json.JSONDecodeError:
+                return {}
+        return raw_input if isinstance(raw_input, dict) else {}
+
+    def execution_platforms(ecosystem: str, execution_input: dict) -> list[str]:
+        selected_platforms = execution_input.get("platforms")
+        if isinstance(selected_platforms, list):
+            platforms = [str(item or "").strip() for item in selected_platforms if str(item or "").strip()]
+            if platforms:
+                return sorted(set(platforms))
+        input_key = str(execution_input.get("input_object_key") or "").strip()
+        platform_set = str(execution_input.get("platform_set") or "").strip()
+        if "/windows-amd64/" in input_key or platform_set == "windows-only":
+            return ["windows-amd64"]
+        if "/linux-arm64/" in input_key:
+            return ["linux-arm64"]
+        if "/linux-amd64/" in input_key or platform_set in {"linux-only", "all"}:
+            return ["linux-amd64"]
+        return ["linux-amd64"] if ecosystem == "r" else ["unknown"]
+
+    def live_execution_row(ecosystem: str, execution: dict) -> dict:
+        execution_arn = str(execution.get("executionArn") or "")
+        execution_input = parse_execution_input(execution_arn) if execution_arn else {}
+        status = str(execution.get("status") or "RUNNING").upper()
+        return {
+            "execution_id": str(execution.get("name") or ""),
+            "execution_arn": execution_arn,
+            "status": status,
+            "source": "step-functions",
+            "scan_timestamp": execution_input.get("scan_timestamp"),
+            "started_at": execution.get("startDate"),
+            "completed_at": execution.get("stopDate"),
+            "duration_seconds": None,
+            "evidence_bucket": execution_input.get("evidence_bucket") or app.config["CATALOG_BUCKET"],
+            "evidence_prefix": execution_input.get("evidence_prefix") or app.config["CATALOG_PREFIX"],
+            "input_bucket": execution_input.get("input_bucket"),
+            "input_object_key": execution_input.get("input_object_key"),
+            "platforms": [
+                {
+                    "platform": platform,
+                    "status": status,
+                    "validated": False,
+                    "paths": {},
+                }
+                for platform in execution_platforms(ecosystem, execution_input)
+            ],
+        }
+
     def live_running_execution_map(ecosystem: str) -> dict[str, dict]:
         live_map: dict[str, dict] = {}
         arns = app.config["PYTHON_STATE_MACHINE_ARNS"] if ecosystem == "python" else app.config["R_STATE_MACHINE_ARNS"]
@@ -523,6 +585,33 @@ def create_app() -> Flask:
                 if execution_id:
                     live_map[execution_id] = execution
         return live_map
+
+    def live_filtered_rows(
+        ecosystem: str,
+        *,
+        selected_status: str,
+        selected_platform: str,
+        selected_validated: str,
+        exclude_execution_ids: set[str],
+    ) -> list[dict]:
+        if selected_status not in {"RUNNING", "ANY"}:
+            return []
+        rows = []
+        for execution_id, execution in live_running_execution_map(ecosystem).items():
+            if execution_id in exclude_execution_ids:
+                continue
+            row = select_run_row(
+                ecosystem,
+                live_execution_row(ecosystem, execution),
+                selected_status=selected_status,
+                selected_platform=selected_platform,
+                selected_validated=selected_validated,
+            )
+            if row is not None:
+                row["source"] = "step-functions"
+                rows.append(row)
+        rows.sort(key=lambda item: str(item.get("started_at") or ""), reverse=True)
+        return rows
 
     def overlay_live_status(row: dict, live_execution: dict | None) -> dict:
         if not live_execution:
@@ -617,9 +706,10 @@ def create_app() -> Flask:
         selected_platform = request.args.get("platform", "linux-amd64")
         if selected_platform not in platform_options:
             selected_platform = "linux-amd64"
-        selected_validated = request.args.get("validated", "yes").lower()
+        default_validated = "yes" if selected_status == "SUCCEEDED" else "any"
+        selected_validated = request.args.get("validated", default_validated).lower()
         if selected_validated not in {"yes", "no", "any"}:
-            selected_validated = "yes"
+            selected_validated = default_validated
         return selected_status, selected_platform, selected_validated, platform_options
 
     def select_run_row(
@@ -1761,6 +1851,17 @@ def create_app() -> Flask:
             offset, prev_cursor = normalize_cursor_state(ecosystem, cursor_id, filters)
             rows = []
             next_offset = None
+            live_execution_ids = set(live_running_execution_map(ecosystem))
+            if offset == 0:
+                rows.extend(
+                    live_filtered_rows(
+                        ecosystem,
+                        selected_status=selected_status,
+                        selected_platform=selected_platform,
+                        selected_validated=selected_validated,
+                        exclude_execution_ids=set(),
+                    )
+                )
             for index, row in iter_filtered_rows(
                 ecosystem,
                 selected_status=selected_status,
@@ -1771,6 +1872,8 @@ def create_app() -> Flask:
                 if len(rows) == per_page:
                     next_offset = index
                     break
+                if str(row.get("execution_id") or "") in live_execution_ids:
+                    continue
                 rows.append(row)
             for row in rows:
                 row["package_count"] = package_count_for_platform(row, row["selected_platform"], ecosystem)

@@ -127,6 +127,10 @@ def package_name(spec: str) -> str:
     return re.split(r"[=<>!~\s]", spec.strip(), maxsplit=1)[0].lower()
 
 
+def canonical_package_name(name: str) -> str:
+    return name.strip().lower().replace("_", "-").replace(".", "-")
+
+
 def cpu_tensorflow_spec(spec: str) -> str:
     parts = spec.strip().split("=")
     if len(parts) >= 2:
@@ -137,6 +141,29 @@ def cpu_tensorflow_spec(spec: str) -> str:
 sanitized: list[str] = []
 removed: list[str] = []
 rewritten: list[str] = []
+conda_package_names: set[str] = set()
+in_pip_section = False
+pip_indent: int | None = None
+
+for line in lines:
+    match = dependency_re.match(line)
+    if not match:
+        continue
+    indent = match.group("indent")
+    spec = match.group("spec").strip()
+    if spec == "pip:":
+        in_pip_section = True
+        pip_indent = len(indent)
+        continue
+    if in_pip_section and pip_indent is not None and len(indent) > pip_indent:
+        continue
+    in_pip_section = False
+    name = package_name(spec)
+    if name and name != "pip":
+        conda_package_names.add(canonical_package_name(name))
+
+in_pip_section = False
+pip_indent = None
 
 for line in lines:
     match = dependency_re.match(line)
@@ -148,6 +175,21 @@ for line in lines:
     spec = match.group("spec").strip()
     comment = match.group("comment") or ""
     name = package_name(spec)
+    canonical_name = canonical_package_name(name)
+
+    if spec == "pip:":
+        in_pip_section = True
+        pip_indent = len(indent)
+        sanitized.append(line)
+        continue
+
+    in_nested_pip_dependency = in_pip_section and pip_indent is not None and len(indent) > pip_indent
+    if not in_nested_pip_dependency:
+        in_pip_section = False
+
+    if in_nested_pip_dependency and canonical_name in conda_package_names:
+        removed.append(f"{spec} (pip duplicate of conda package)")
+        continue
 
     if name.startswith(gpu_package_prefixes):
         removed.append(spec)

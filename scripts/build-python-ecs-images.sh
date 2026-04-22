@@ -6,6 +6,8 @@ REGION="us-east-1"
 PROFILE=""
 ALLOW_DEFAULT_PROFILE="false"
 PLATFORMS="linux/amd64,linux/arm64"
+IMAGE_TAG=""
+PUSH_LATEST="true"
 
 usage() {
   cat <<'EOF'
@@ -17,6 +19,8 @@ Options:
   --profile <profile>
   --allow-default-profile
   --platforms <csv>                   (default: linux/amd64,linux/arm64)
+  --tag <tag>                         (default: UTC timestamp + short git sha when available)
+  --no-latest                         Do not also refresh the latest tag
 EOF
 }
 
@@ -27,6 +31,8 @@ while [[ $# -gt 0 ]]; do
     --profile) PROFILE="$2"; shift 2 ;;
     --allow-default-profile) ALLOW_DEFAULT_PROFILE="true"; shift 1 ;;
     --platforms) PLATFORMS="$2"; shift 2 ;;
+    --tag) IMAGE_TAG="$2"; shift 2 ;;
+    --no-latest) PUSH_LATEST="false"; shift 1 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
   esac
@@ -83,15 +89,31 @@ if [[ -z "${LINUX_REPO}" || "${LINUX_REPO}" == "None" ]]; then
   echo "Missing output: PythonLinuxRepositoryUri" >&2
   exit 1
 fi
+if [[ -z "${IMAGE_TAG}" ]]; then
+  GIT_SHA="$(git rev-parse --short=12 HEAD 2>/dev/null || true)"
+  if [[ -n "${GIT_SHA}" ]]; then
+    IMAGE_TAG="$(date -u +%Y%m%dT%H%M%SZ)-${GIT_SHA}"
+  else
+    IMAGE_TAG="$(date -u +%Y%m%dT%H%M%SZ)"
+  fi
+fi
 
 ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text "${AWS_ARGS[@]}")"
 aws ecr get-login-password "${AWS_ARGS[@]}" | docker login --username AWS --password-stdin "${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
 
+TAGS=(-t "${LINUX_REPO}:${IMAGE_TAG}")
+if [[ "${PUSH_LATEST}" == "true" ]]; then
+  TAGS+=(-t "${LINUX_REPO}:latest")
+fi
+
 docker buildx build \
   --platform "${PLATFORMS}" \
   -f docker/python-linux.Dockerfile \
-  -t "${LINUX_REPO}:latest" \
+  "${TAGS[@]}" \
   --push \
   .
 
-echo "Python Linux image pushed: ${LINUX_REPO}:latest"
+echo "Python Linux image pushed: ${LINUX_REPO}:${IMAGE_TAG}"
+if [[ "${PUSH_LATEST}" == "true" ]]; then
+  echo "Python Linux latest tag refreshed: ${LINUX_REPO}:latest"
+fi
