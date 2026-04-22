@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import shlex
 import subprocess
+import sys
 import time
 import uuid
 import zipfile
@@ -1591,6 +1592,98 @@ def create_app() -> Flask:
                 continue
         return None
 
+    def failed_cleanup_rows() -> list[dict]:
+        rows: list[dict] = []
+        failure_statuses = {"FAILED", "TIMED_OUT", "ABORTED"}
+        for ecosystem in ("r", "python"):
+            for row in list_runs(ecosystem):
+                platforms = row.get("platforms", []) or []
+                platform_statuses = {
+                    str(platform.get("status") or "").upper()
+                    for platform in platforms
+                    if platform.get("status")
+                }
+                row_status = str(row.get("status") or "").upper()
+                if row_status not in failure_statuses and not platform_statuses.intersection(failure_statuses):
+                    continue
+                failed_platforms = [
+                    platform
+                    for platform in platforms
+                    if str(platform.get("status") or "").upper() in failure_statuses
+                ]
+                cleanup_row = dict(row)
+                cleanup_row["ecosystem"] = ecosystem
+                cleanup_row["status"] = row_status or "UNKNOWN"
+                cleanup_row["status_class"] = status_class(row_status)
+                cleanup_row["failed_platforms"] = [
+                    architecture_label(str(platform.get("platform") or "unknown")) for platform in failed_platforms
+                ]
+                cleanup_row["started_display"] = format_display_datetime(row.get("started_at") or row.get("scan_timestamp"))
+                cleanup_row["duration_display"] = (
+                    format_duration_seconds(row.get("duration_seconds"))
+                    if isinstance(row.get("duration_seconds"), (int, float))
+                    else duration_for_row(row)
+                )
+                rows.append(cleanup_row)
+        rows.sort(key=lambda item: str(item.get("started_at") or item.get("scan_timestamp") or ""), reverse=True)
+        return rows
+
+    def cleanup_failed_command(ecosystem: str, execution_id: str, *, write: bool) -> list[str]:
+        if ecosystem not in {"r", "python"}:
+            abort(404)
+        if not app.config["CATALOG_BUCKET"]:
+            abort(500, "CATALOG_BUCKET is required for failed artifact cleanup.")
+        if not app.config["EPHEMERAL_BUCKET"]:
+            abort(500, "EPHEMERAL_BUCKET is required for failed artifact cleanup.")
+        script_path = repo_root() / "scripts" / "cleanup-failed-s3-artifacts.py"
+        cmd = [
+            sys.executable,
+            str(script_path),
+            "--ecosystem",
+            ecosystem,
+            "--execution-id",
+            execution_id,
+            "--evidence-bucket",
+            app.config["CATALOG_BUCKET"],
+            "--ephemeral-bucket",
+            app.config["EPHEMERAL_BUCKET"],
+            "--evidence-prefix",
+            app.config["CATALOG_PREFIX"],
+            "--region",
+            app.config["AWS_REGION"],
+        ]
+        if app.config["AWS_PROFILE"]:
+            cmd.extend(["--profile", app.config["AWS_PROFILE"]])
+        if write:
+            cmd.append("--write")
+        return cmd
+
+    def run_failed_cleanup(ecosystem: str, execution_id: str, *, write: bool) -> dict:
+        cmd = cleanup_failed_command(ecosystem, execution_id, write=write)
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=str(repo_root()),
+                text=True,
+                capture_output=True,
+                timeout=900,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError("Failed artifact cleanup timed out after 15 minutes.") from exc
+        output = "\n".join(part for part in [proc.stdout.strip(), proc.stderr.strip()] if part)
+        if proc.returncode == 2 and "authentication" in output.lower():
+            raise AwsAuthExpiredError(output)
+        if proc.returncode != 0:
+            raise RuntimeError(output or f"Cleanup command failed with exit code {proc.returncode}.")
+        return {
+            "command": " ".join(shlex.quote(part) for part in cmd),
+            "output": output,
+            "write": write,
+            "execution_id": execution_id,
+            "ecosystem": ecosystem,
+        }
+
     @app.route("/")
     def index():
         auth_error = None
@@ -2369,6 +2462,43 @@ def create_app() -> Flask:
         if detail.get("cause"):
             payload["cause"] = detail.get("cause")
         return jsonify(payload)
+
+    @app.route("/cleanup/failed")
+    def cleanup_failed_view():
+        auth_error = None
+        cleanup_error = None
+        rows = []
+        try:
+            rows = failed_cleanup_rows()
+        except AwsAuthExpiredError as exc:
+            auth_error = str(exc)
+        except Exception as exc:
+            cleanup_error = str(exc)
+        return render_template(
+            "cleanup_failed.html",
+            rows=rows,
+            auth_error=auth_error,
+            cleanup_error=cleanup_error,
+            catalog_bucket=app.config["CATALOG_BUCKET"],
+            ephemeral_bucket=app.config["EPHEMERAL_BUCKET"],
+        )
+
+    @app.post("/cleanup/failed/<ecosystem>/<execution_id>")
+    def cleanup_failed_run(ecosystem: str, execution_id: str):
+        action = str(request.form.get("action") or "preview").strip().lower()
+        write = action == "delete"
+        if action not in {"preview", "delete"}:
+            abort(400, "Unsupported cleanup action")
+        confirmation = str(request.form.get("confirm_execution_id") or "").strip()
+        if write and confirmation != execution_id:
+            abort(400, "Type the exact execution id to delete failed scan artifacts.")
+        try:
+            result = run_failed_cleanup(ecosystem, execution_id, write=write)
+        except AwsAuthExpiredError as exc:
+            return render_template("cleanup_failed_result.html", auth_error=str(exc), result=None, cleanup_error=None), 401
+        except Exception as exc:
+            return render_template("cleanup_failed_result.html", auth_error=None, result=None, cleanup_error=str(exc)), 500
+        return render_template("cleanup_failed_result.html", auth_error=None, result=result, cleanup_error=None)
 
     @app.route("/download")
     def download():

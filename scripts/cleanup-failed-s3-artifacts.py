@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 import subprocess
 import sys
 from typing import Iterable
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from package_scanner.catalog import ecosystem_paths
 from package_scanner.catalog_awscli import (
@@ -170,6 +173,11 @@ def main() -> int:
     ap.add_argument("--profile")
     ap.add_argument("--status", action="append", dest="statuses", help="Execution status to purge. Default: ABORTED, FAILED, TIMED_OUT.")
     ap.add_argument("--max-executions-per-status", type=int, default=100)
+    ap.add_argument(
+        "--skip-run-metadata-discovery",
+        action="store_true",
+        help="When an orchestration summary is missing, skip the slower traceability scan for run-metadata.json matches.",
+    )
     ap.add_argument("--write", action="store_true", help="Actually delete. Default is dry run.")
     args = ap.parse_args()
 
@@ -239,7 +247,7 @@ def main() -> int:
                 platform = platform_entry.get("platform")
                 if platform and timestamp:
                     platform_timestamps.append((platform, timestamp))
-        else:
+        elif not args.skip_run_metadata_discovery:
             platform_timestamps.extend(
                 discover_run_metadata_matches(
                     evidence_bucket=args.evidence_bucket,
@@ -250,6 +258,8 @@ def main() -> int:
                     profile=args.profile,
                 )
             )
+        else:
+            print(f"SKIP metadata discovery for {execution_id}: orchestration summary is missing")
 
         for platform, timestamp in platform_timestamps:
             paths = ecosystem_paths(args.evidence_prefix, args.ecosystem, platform, timestamp)

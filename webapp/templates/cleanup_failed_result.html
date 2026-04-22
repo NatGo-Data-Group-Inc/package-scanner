@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Failed Artifact Cleanup Result</h1>
+
+{% if cleanup_error %}
+<div style="margin:1rem 0; padding:0.75rem 1rem; border:1px solid var(--bad); border-radius:0.35rem; color:var(--bad);">
+  {{ cleanup_error }}
+</div>
+{% endif %}
+
+{% if result %}
+<div class="card">
+  <p><strong>Execution:</strong> <code>{{ result.execution_id }}</code></p>
+  <p><strong>Ecosystem:</strong> {{ result.ecosystem|upper }}</p>
+  <p><strong>Mode:</strong> {% if result.write %}<span class="bad">delete</span>{% else %}<span class="muted">preview</span>{% endif %}</p>
+  <p><strong>Command:</strong> <code>{{ result.command }}</code></p>
+</div>
+<h2>Output</h2>
+<pre><code>{{ result.output or 'No output.' }}</code></pre>
+{% endif %}
+
+<p><a href="/cleanup/failed">Back to failed cleanup</a></p>
+{% endblock %}

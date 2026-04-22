@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Cleanup Failed Scan Artifacts</h1>
+<p class="muted">
+  This page removes S3 artifacts for failed, timed out, or aborted scans. It deletes evidence/catalog outputs and
+  ephemeral checkpoints for the selected execution. It does not delete shared source input objects.
+</p>
+
+{% if cleanup_error %}
+<div style="margin:1rem 0; padding:0.75rem 1rem; border:1px solid var(--bad); border-radius:0.35rem; color:var(--bad);">
+  {{ cleanup_error }}
+</div>
+{% endif %}
+
+<div class="card">
+  <p><strong>Evidence bucket:</strong> <code>{{ catalog_bucket or 'not configured' }}</code></p>
+  <p><strong>Ephemeral bucket:</strong> <code>{{ ephemeral_bucket or 'not configured' }}</code></p>
+</div>
+
+{% if rows %}
+<table>
+  <thead>
+    <tr><th>Execution</th><th>Ecosystem</th><th>Status</th><th>Failed Platforms</th><th>Started</th><th>Duration</th><th>Actions</th></tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td><a href="/runs/{{ row.ecosystem }}/{{ row.execution_id }}">{{ row.execution_id }}</a></td>
+      <td><span class="chip badge-{{ row.ecosystem }}">{{ row.ecosystem|upper }}</span></td>
+      <td class="{{ row.status_class }}">{{ row.status }}</td>
+      <td>
+        {% for platform in row.failed_platforms %}
+        <span class="chip badge-{{ platform }}">{{ platform }}</span>
+        {% else %}
+        <span class="muted">run-level failure</span>
+        {% endfor %}
+      </td>
+      <td>{{ row.started_display or 'n/a' }}</td>
+      <td>{{ row.duration_display or 'n/a' }}</td>
+      <td>
+        <form method="post" action="/cleanup/failed/{{ row.ecosystem }}/{{ row.execution_id }}">
+          <button type="submit" name="action" value="preview">Preview</button>
+        </form>
+        <form method="post" action="/cleanup/failed/{{ row.ecosystem }}/{{ row.execution_id }}">
+          <label>
+            Confirm delete by typing execution id
+            <input name="confirm_execution_id" placeholder="{{ row.execution_id }}">
+          </label>
+          <button type="submit" name="action" value="delete">Delete Failed Artifacts</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No failed, timed out, or aborted catalog records found.</p>
+{% endif %}
+{% endblock %}

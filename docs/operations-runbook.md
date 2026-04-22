@@ -50,6 +50,18 @@ Buckets (dev):
 - Evidence (long-term): `package-scanner-dev-scan-evidence-<acct>-<region>`
 - Ephemeral (short-lived build outputs): `package-scanner-dev-scan-ephemeral-<acct>-<region>`
 
+### Cleanup Failed Scan Artifacts
+
+- Use the GUI `Cleanup Failed` page to preview or delete failed scan artifacts
+  for cataloged `FAILED`, `TIMED_OUT`, or `ABORTED` runs.
+- Preview is safe and shows the exact S3 objects/prefixes that would be removed.
+- Delete requires typing the exact execution id. It removes evidence/catalog
+  outputs and ephemeral checkpoints for that execution.
+- The cleanup intentionally does not remove shared source input objects under
+  the input bucket, because those files can be reused across reruns.
+- CLI equivalent:
+  `python scripts/cleanup-failed-s3-artifacts.py --ecosystem <r|python> --execution-id <execution-id> --evidence-bucket <bucket> --ephemeral-bucket <bucket> --evidence-prefix evidence --region us-east-1 --profile <profile> --write`
+
 Python artifacts (per platform/timestamp in evidence bucket):
 - Requirements: `evidence/requirements/python/<platform>/<ts>/environment.yml` (and resolved lockfile if present)
 - Model results: `evidence/model-results/python/<platform>/<ts>/trivy-sbom-report.json` (plus `safety-report.json` if enabled)
