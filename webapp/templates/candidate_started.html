@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Candidate Scan Started</h1>
+
+<div class="card">
+  <p><strong>Candidate:</strong> <code>{{ candidate_name }}</code></p>
+  <p><strong>Platform:</strong> <span class="chip badge-{{ platform }}">{{ platform }}</span></p>
+  <p><strong>Execution:</strong> <code>{{ execution_name }}</code></p>
+  <p><strong>Input:</strong> <code>{{ input_uri }}</code></p>
+  <p><strong>Summary:</strong> <code>{{ summary_uri }}</code></p>
+  {% if execution_arn %}
+  <p><strong>Execution ARN:</strong> <code>{{ execution_arn }}</code></p>
+  {% endif %}
+</div>
+
+<p><a href="/">Return to dashboard</a></p>
+{% endblock %}

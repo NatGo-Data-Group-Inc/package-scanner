@@ -26,6 +26,22 @@ Use [handoff-runbook.md](./handoff-runbook.md) as the primary day-to-day operato
 
 - Use `scripts/start-python-scan.sh`.
 - Ensure `environment.yml` is uploaded first.
+- For local YAML files under `candidates/`, the webapp also provides a
+  `Candidates` page. Use that page to upload the selected YAML and start a
+  Python ECS scan without manually pre-populating checkpoint or ephemeral
+  paths.
+- The candidate-start GUI path resolves the input, evidence, ephemeral buckets,
+  and Linux ECS state machine from the Python ECS CloudFormation stack at submit
+  time. The ephemeral bucket is used after the execution starts for checkpoints;
+  it is not required to know about the scan before submission.
+- The same `Candidates` page also traces scan history by starting artifact.
+  It groups Python and R catalog records by `input_bucket`/`input_object_key`
+  and adds recent Step Functions executions that have not published catalog
+  records yet, so an operator can follow a YAML or lockfile from submission to
+  its scan histories.
+- For CPU-only MIP workers, Python ECS materialization normalizes GPU/CUDA-pinned
+  candidate specs before solving and retains both the original YAML and the
+  normalization log in the evidence bundle.
 
 ### S3 Layout and Artifact Map
 

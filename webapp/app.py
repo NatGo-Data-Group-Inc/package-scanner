@@ -1183,8 +1183,255 @@ def create_app() -> Flask:
                 return str(item.get("Value") or "")
         return ""
 
-    def checkpoint_stage_state(ecosystem: str, execution_id: str, platform: str) -> dict | None:
-        bucket = str(app.config.get("EPHEMERAL_BUCKET") or "").strip()
+    def candidate_files() -> list[dict]:
+        candidates_dir = repo_root() / "candidates"
+        if not candidates_dir.exists():
+            return []
+        rows = []
+        for path in sorted([*candidates_dir.glob("*.yml"), *candidates_dir.glob("*.yaml")]):
+            rows.append(
+                {
+                    "name": path.stem,
+                    "filename": path.name,
+                    "size": path.stat().st_size,
+                    "ecosystem": "python",
+                }
+            )
+        return rows
+
+    def input_artifact_group(ecosystem: str, bucket: str | None, key: str | None) -> dict:
+        artifact_key = str(key or "").strip()
+        artifact_bucket = str(bucket or "").strip()
+        group_id = f"{artifact_bucket}/{artifact_key}" if artifact_bucket or artifact_key else f"{ecosystem}/unknown-input"
+        filename = artifact_key.rsplit("/", 1)[-1] if artifact_key else "unknown input"
+        candidate_name = ""
+        marker = "/candidates/"
+        if marker in artifact_key:
+            candidate_part = artifact_key.split(marker, 1)[1]
+            candidate_name = candidate_part.split("/", 1)[0]
+        elif artifact_key.startswith("inputs/python/candidates/"):
+            candidate_name = artifact_key.split("/", 3)[3].split("/", 1)[0]
+        elif artifact_key.startswith("inputs/r/candidates/"):
+            candidate_name = artifact_key.split("/", 3)[3].split("/", 1)[0]
+        if candidate_name:
+            label = f"{candidate_name} ({filename})"
+            artifact_type = f"{ecosystem.upper()} candidate"
+        elif artifact_key:
+            label = filename
+            artifact_type = f"{ecosystem.upper()} input"
+        else:
+            label = "unknown input"
+            artifact_type = f"{ecosystem.upper()} input"
+        return {
+            "id": group_id,
+            "bucket": artifact_bucket,
+            "key": artifact_key,
+            "uri": f"s3://{artifact_bucket}/{artifact_key}" if artifact_bucket and artifact_key else "",
+            "label": label,
+            "candidate_name": candidate_name,
+            "artifact_type": artifact_type,
+        }
+
+    def platform_names_from_record(row: dict) -> list[str]:
+        platforms = []
+        for platform in row.get("platforms", []) or []:
+            platform_name = str(platform.get("platform") or "").strip()
+            if platform_name:
+                platforms.append(architecture_label(platform_name))
+        return sorted(set(platforms))
+
+    def catalog_run_actions(ecosystem: str, row: dict) -> list[dict[str, str]]:
+        execution_id = str(row.get("execution_id") or "").strip()
+        if not execution_id:
+            return []
+        actions = [
+            {
+                "label": "Details",
+                "href": f"/runs/{ecosystem}/{execution_id}",
+                "kind": "primary",
+            }
+        ]
+        if any(str(platform.get("status") or "").upper() == "FAILED" for platform in row.get("platforms", []) or []):
+            actions.append(
+                {
+                    "label": "Triage failure",
+                    "href": f"/runs/{ecosystem}/{execution_id}/triage",
+                    "kind": "triage",
+                }
+            )
+        if ecosystem == "r":
+            for platform in row.get("platforms", []) or []:
+                platform_name = str(platform.get("platform") or "").strip()
+                if not platform_name:
+                    continue
+                actions.append(
+                    {
+                        "label": f"Review/remediate UNKNOWN ({architecture_label(platform_name)})",
+                        "href": f"/runs/{ecosystem}/{execution_id}/{platform_name}/unknown-findings",
+                        "kind": "remediate",
+                    }
+                )
+        return actions
+
+    def platform_names_from_execution_input(ecosystem: str, execution_input: dict) -> list[str]:
+        selected_platforms = execution_input.get("platforms")
+        if isinstance(selected_platforms, list):
+            platforms = [architecture_label(str(item or "").strip()) for item in selected_platforms if str(item or "").strip()]
+            if platforms:
+                return sorted(set(platforms))
+        input_key = str(execution_input.get("input_object_key") or "").strip()
+        platform_set = str(execution_input.get("platform_set") or "").strip()
+        if "/windows-amd64/" in input_key or platform_set == "windows-only":
+            return ["windows"]
+        if "/linux-arm64/" in input_key:
+            return ["linux-arm64"]
+        if "/linux-amd64/" in input_key or platform_set in {"linux-only", "all"}:
+            return ["linux-amd64"]
+        return ["linux-amd64"] if ecosystem == "r" else ["unknown"]
+
+    def recent_execution_history(ecosystem: str) -> list[dict]:
+        arns = app.config["PYTHON_STATE_MACHINE_ARNS"] if ecosystem == "python" else app.config["R_STATE_MACHINE_ARNS"]
+        rows: list[dict] = []
+        seen: set[str] = set()
+        for arn in arns:
+            for status_filter in ("RUNNING", "FAILED", "TIMED_OUT", "ABORTED", "SUCCEEDED"):
+                try:
+                    executions = stepfunctions_list_executions(
+                        arn,
+                        region=app.config["AWS_REGION"],
+                        profile=app.config["AWS_PROFILE"],
+                        status_filter=status_filter,
+                        max_results=10,
+                    )
+                except Exception as exc:
+                    app.logger.warning(
+                        "candidate history execution lookup failed ecosystem=%s state_machine=%s status=%s error=%s",
+                        ecosystem,
+                        arn,
+                        status_filter,
+                        exc,
+                    )
+                    continue
+                for execution in executions:
+                    execution_arn = str(execution.get("executionArn") or "")
+                    if not execution_arn or execution_arn in seen:
+                        continue
+                    seen.add(execution_arn)
+                    execution_input = {}
+                    try:
+                        detail = stepfunctions_describe_execution(
+                            execution_arn,
+                            region=app.config["AWS_REGION"],
+                            profile=app.config["AWS_PROFILE"],
+                        )
+                        raw_input = detail.get("input")
+                        if isinstance(raw_input, str) and raw_input.strip():
+                            execution_input = json.loads(raw_input)
+                        elif isinstance(raw_input, dict):
+                            execution_input = raw_input
+                    except Exception as exc:
+                        app.logger.warning(
+                            "candidate history execution detail lookup failed ecosystem=%s execution=%s error=%s",
+                            ecosystem,
+                            execution_arn,
+                            exc,
+                        )
+                    if not isinstance(execution_input, dict):
+                        execution_input = {}
+                    rows.append(
+                        {
+                            "ecosystem": ecosystem,
+                            "execution_id": execution.get("name"),
+                            "execution_arn": execution_arn,
+                            "status": execution.get("status") or status_filter,
+                            "status_class": status_class(str(execution.get("status") or status_filter)),
+                            "source": "step-functions",
+                            "catalog_link": False,
+                            "input_bucket": execution_input.get("input_bucket"),
+                            "input_object_key": execution_input.get("input_object_key"),
+                            "platforms": platform_names_from_execution_input(ecosystem, execution_input),
+                            "started_at": execution.get("startDate"),
+                            "completed_at": execution.get("stopDate"),
+                            "started_display": format_display_datetime(execution.get("startDate")),
+                            "completed_display": format_display_datetime(execution.get("stopDate")) if execution.get("stopDate") else "",
+                            "duration_display": format_duration(execution.get("startDate"), execution.get("stopDate")),
+                        }
+                    )
+        return rows
+
+    def candidate_history() -> list[dict]:
+        groups: dict[str, dict] = {}
+
+        def ensure_group(ecosystem: str, bucket: str | None, key: str | None) -> dict:
+            group = input_artifact_group(ecosystem, bucket, key)
+            existing = groups.get(group["id"])
+            if existing:
+                return existing
+            group["runs"] = []
+            group["latest_sort"] = ""
+            groups[group["id"]] = group
+            return group
+
+        for candidate in candidate_files():
+            key = f"inputs/python/candidates/{candidate['name']}/environment.yml"
+            group = ensure_group("python", "", key)
+            group["local_filename"] = candidate["filename"]
+
+        seen_catalog_runs: set[tuple[str, str]] = set()
+        for ecosystem in ("python", "r"):
+            for row in list_runs(ecosystem):
+                execution_id = str(row.get("execution_id") or "")
+                if execution_id:
+                    seen_catalog_runs.add((ecosystem, execution_id))
+                group = ensure_group(ecosystem, row.get("input_bucket"), row.get("input_object_key"))
+                started_at = row.get("started_at") or row.get("scan_timestamp")
+                completed_at = row.get("completed_at")
+                run = {
+                    "ecosystem": ecosystem,
+                    "execution_id": execution_id,
+                    "status": row.get("status") or "UNKNOWN",
+                    "status_class": status_class(str(row.get("status") or "")),
+                    "source": "catalog",
+                    "catalog_link": bool(execution_id),
+                    "actions": catalog_run_actions(ecosystem, row),
+                    "platforms": platform_names_from_record(row),
+                    "started_at": started_at,
+                    "completed_at": completed_at,
+                    "started_display": format_display_datetime(started_at),
+                    "completed_display": format_display_datetime(completed_at) if completed_at else "",
+                    "duration_display": (
+                        format_duration_seconds(row.get("duration_seconds"))
+                        if isinstance(row.get("duration_seconds"), (int, float))
+                        else format_duration(started_at, completed_at) if completed_at else None
+                    ),
+                }
+                group["runs"].append(run)
+                group["latest_sort"] = max(str(group.get("latest_sort") or ""), str(started_at or ""))
+
+        for ecosystem in ("python", "r"):
+            for run in recent_execution_history(ecosystem):
+                execution_id = str(run.get("execution_id") or "")
+                if execution_id and (ecosystem, execution_id) in seen_catalog_runs:
+                    continue
+                group = ensure_group(ecosystem, run.get("input_bucket"), run.get("input_object_key"))
+                group["runs"].append(run)
+                group["latest_sort"] = max(str(group.get("latest_sort") or ""), str(run.get("started_at") or ""))
+
+        history = list(groups.values())
+        for group in history:
+            group["runs"].sort(key=lambda run: str(run.get("started_at") or ""), reverse=True)
+            group["run_count"] = len(group["runs"])
+        history.sort(key=lambda group: (str(group.get("latest_sort") or ""), group.get("key") or ""), reverse=True)
+        return history
+
+    def checkpoint_stage_state(
+        ecosystem: str,
+        execution_id: str,
+        platform: str,
+        *,
+        bucket_override: str | None = None,
+    ) -> dict | None:
+        bucket = str(bucket_override or app.config.get("EPHEMERAL_BUCKET") or "").strip()
         if not bucket or not execution_id or not platform:
             return None
         key = f"deploy/tmp/{ecosystem}/checkpoints/{ecosystem}/{execution_id}/{platform}/latest/stage-state.json"
@@ -1248,20 +1495,34 @@ def create_app() -> Flask:
                             execution_input = json.loads(execution_input)
                         except json.JSONDecodeError:
                             execution_input = None
+                    checkpoint_bucket = None
                     if isinstance(execution_input, dict):
+                        checkpoint_bucket = str(execution_input.get("ephemeral_bucket") or "").strip() or None
                         input_key = str(execution_input.get("input_object_key") or "").strip()
                         platform_set = str(execution_input.get("platform_set") or "").strip()
-                        if "/windows-amd64/" in input_key or platform_set == "windows-only":
+                        selected_platforms = execution_input.get("platforms")
+                        if (
+                            ecosystem == "python"
+                            and isinstance(selected_platforms, list)
+                            and len(selected_platforms) == 1
+                        ):
+                            platform = str(selected_platforms[0] or "").strip()
+                        elif "/windows-amd64/" in input_key or platform_set == "windows-only":
                             platform = "windows-amd64"
                         elif "/linux-arm64/" in input_key:
                             platform = "linux-arm64"
                         elif "/linux-amd64/" in input_key:
                             platform = "linux-amd64"
-                        elif platform_set == "all":
+                        elif platform_set in ("all", "linux-only"):
                             platform = "linux-amd64"
                     if not platform:
                         platform = "linux-amd64" if ecosystem == "r" else "unknown"
-                    stage_state = checkpoint_stage_state(ecosystem, str(item.get("name") or ""), platform) or {}
+                    stage_state = checkpoint_stage_state(
+                        ecosystem,
+                        str(item.get("name") or ""),
+                        platform,
+                        bucket_override=checkpoint_bucket,
+                    ) or {}
                     current_stage = str(stage_state.get("phase") or "").strip().lower() or None
                     if not current_stage and str(item.get("status") or "").upper() == "RUNNING":
                         current_stage = "preflight" if ecosystem == "r" else "materialize"
@@ -1444,6 +1705,97 @@ def create_app() -> Flask:
             current_cursor=cursor_id,
             prev_cursor=prev_cursor,
             next_cursor=next_cursor,
+        )
+
+    @app.route("/candidates")
+    def candidates():
+        auth_error = None
+        history = []
+        try:
+            history = candidate_history()
+        except AwsAuthExpiredError as exc:
+            auth_error = str(exc)
+        except Exception as exc:
+            app.logger.warning("candidate history lookup failed error=%s", exc)
+        return render_template(
+            "candidates.html",
+            candidates=candidate_files(),
+            history=history,
+            auth_error=auth_error,
+        )
+
+    @app.route("/candidates/python/<candidate_name>/start", methods=["POST"])
+    def start_python_candidate(candidate_name: str):
+        safe_name = candidate_name.strip()
+        if not safe_name or "/" in safe_name or "\\" in safe_name:
+            abort(400, "Invalid candidate name")
+
+        candidate_path = repo_root() / "candidates" / f"{safe_name}.yml"
+        if not candidate_path.exists():
+            candidate_path = repo_root() / "candidates" / f"{safe_name}.yaml"
+        if not candidate_path.exists():
+            abort(404, "Candidate YAML not found")
+
+        platform = request.form.get("platform", "linux-amd64")
+        if platform not in {"linux-amd64", "linux-arm64"}:
+            abort(400, "Unsupported Python ECS platform")
+
+        stack = describe_stack(app.config["PYTHON_STACK_NAME"])
+        input_bucket = stack_output_value(stack, "InputBucketName")
+        evidence_bucket = stack_output_value(stack, "EvidenceBucketName")
+        ephemeral_bucket = stack_output_value(stack, "EphemeralBucketName")
+        state_machine_arn = stack_output_value(stack, "PythonLinuxScanOrchestrationStateMachineArn")
+        if not all([input_bucket, evidence_bucket, ephemeral_bucket, state_machine_arn]):
+            abort(500, f"Python ECS stack {app.config['PYTHON_STACK_NAME']} is missing required outputs")
+
+        timestamp = utc_compact_timestamp()
+        execution_name = f"python-scan-{timestamp}-{uuid.uuid4().hex[:8]}"
+        input_object_key = f"inputs/python/candidates/{safe_name}/environment.yml"
+        s3_put_bytes(
+            input_bucket,
+            input_object_key,
+            candidate_path.read_bytes(),
+            region=app.config["AWS_REGION"],
+            profile=app.config["AWS_PROFILE"],
+            content_type="application/x-yaml",
+        )
+        execution_input = {
+            "input_bucket": input_bucket,
+            "input_object_key": input_object_key,
+            "evidence_bucket": evidence_bucket,
+            "evidence_prefix": app.config["CATALOG_PREFIX"],
+            "ephemeral_bucket": ephemeral_bucket,
+            "ephemeral_prefix": "deploy/tmp/python",
+            "remediate_medium": request.form.get("remediate_medium", "true"),
+            "fail_on_medium": request.form.get("fail_on_medium", "false"),
+            "safety_api_key": "",
+            "scan_timestamp": timestamp,
+            "scan_execution_id": execution_name,
+            "platforms": [platform],
+        }
+        start_data = aws_json(
+            [
+                "stepfunctions",
+                "start-execution",
+                "--state-machine-arn",
+                state_machine_arn,
+                "--name",
+                execution_name,
+                "--input",
+                json.dumps(execution_input),
+            ],
+            region=app.config["AWS_REGION"],
+            profile=app.config["AWS_PROFILE"],
+        )
+        return render_template(
+            "candidate_started.html",
+            candidate_name=safe_name,
+            platform=platform,
+            execution_name=execution_name,
+            execution_arn=start_data.get("executionArn"),
+            input_uri=f"s3://{input_bucket}/{input_object_key}",
+            summary_uri=f"s3://{evidence_bucket}/{app.config['CATALOG_PREFIX']}/orchestration/python/{execution_name}/orchestration-summary.json",
+            auth_error=None,
         )
 
     @app.route("/runs/<ecosystem>/<execution_id>")

@@ -12,6 +12,7 @@ CHECKPOINT_INTERVAL_SECONDS="${CHECKPOINT_INTERVAL_SECONDS:-900}"
 SCRIPT_ROOT="${SCRIPT_ROOT:-/opt/package-scanner/scripts}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 MAMBA_BIN="${MAMBA_BIN:-/usr/local/bin/micromamba}"
+PYTHON_CPU_ONLY="${PYTHON_CPU_ONLY:-true}"
 
 checkpoint_pid=""
 
@@ -85,6 +86,96 @@ mkdir -p "${RUN_DIR}" "${ROOT_PREFIX}" /tmp/scan-input
 aws s3 cp "s3://${INPUT_BUCKET}/${INPUT_OBJECT_KEY}" /tmp/scan-input/environment.yml >/dev/null
 cp /tmp/scan-input/environment.yml "${RUN_DIR}/environment.yml"
 
+if [[ "${PYTHON_CPU_ONLY}" == "true" ]]; then
+  cp "${RUN_DIR}/environment.yml" "${RUN_DIR}/environment.original.yml"
+  "${PYTHON_BIN}" - "${RUN_DIR}/environment.yml" <<'PY'
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+lines = path.read_text(encoding="utf-8").splitlines()
+
+gpu_package_prefixes = (
+    "cuda",
+    "cudnn",
+    "cudatoolkit",
+    "cupy",
+    "libcublas",
+    "libcufft",
+    "libcurand",
+    "libcusolver",
+    "libcusparse",
+    "libnpp",
+    "libnvjitlink",
+    "libnvjpeg",
+    "nccl",
+    "pytorch-cuda",
+)
+tensorflow_packages = {
+    "tensorflow",
+    "tensorflow-base",
+    "tensorflow-estimator",
+    "tensorflow-gpu",
+}
+dependency_re = re.compile(r"^(?P<indent>\s*)-\s+(?P<spec>[^#\s][^#]*?)(?P<comment>\s+#.*)?$")
+
+
+def package_name(spec: str) -> str:
+    return re.split(r"[=<>!~\s]", spec.strip(), maxsplit=1)[0].lower()
+
+
+def cpu_tensorflow_spec(spec: str) -> str:
+    parts = spec.strip().split("=")
+    if len(parts) >= 2:
+        return f"{parts[0]}={parts[1]}"
+    return spec.strip().replace("tensorflow-gpu", "tensorflow")
+
+
+sanitized: list[str] = []
+removed: list[str] = []
+rewritten: list[str] = []
+
+for line in lines:
+    match = dependency_re.match(line)
+    if not match:
+        sanitized.append(line)
+        continue
+
+    indent = match.group("indent")
+    spec = match.group("spec").strip()
+    comment = match.group("comment") or ""
+    name = package_name(spec)
+
+    if name.startswith(gpu_package_prefixes):
+        removed.append(spec)
+        continue
+
+    if name in tensorflow_packages and "cuda" in spec.lower():
+        replacement = cpu_tensorflow_spec(spec)
+        rewritten.append(f"{spec} -> {replacement}")
+        sanitized.append(f"{indent}- {replacement}{comment}")
+        continue
+
+    sanitized.append(line)
+
+path.write_text("\n".join(sanitized) + "\n", encoding="utf-8")
+if removed or rewritten:
+    log_path = path.with_name("environment.cpu-normalization.log")
+    with log_path.open("w", encoding="utf-8") as handle:
+        if removed:
+            handle.write("Removed GPU-only dependencies:\n")
+            for item in removed:
+                handle.write(f"- {item}\n")
+        if rewritten:
+            handle.write("Rewritten GPU-pinned dependencies:\n")
+            for item in rewritten:
+                handle.write(f"- {item}\n")
+PY
+fi
+
 if aws s3 ls "${CHECKPOINT_PREFIX}/latest/python-pkgs.tar.gz" >/dev/null 2>&1; then
   aws s3 cp "${CHECKPOINT_PREFIX}/latest/python-pkgs.tar.gz" "${RUN_DIR}/checkpoint-python-pkgs.tar.gz" >/dev/null
   mkdir -p "${ROOT_PREFIX}/pkgs"
@@ -147,10 +238,12 @@ write_state "publish"
   --source-dir "${ENV_PREFIX}" \
   --output-file "${RUN_DIR}/python-env-${TARGET_PLATFORM}-${TS}.tar.gz" \
   --checksum-file "${RUN_DIR}/python-env-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
-tar -czf "${RUN_DIR}/environment-artifacts.tar.gz" -C "${RUN_DIR}" environment.yml requirements.lock.txt conda-list.json python-packages.cdx.json materialization-summary.json || true
+tar -czf "${RUN_DIR}/environment-artifacts.tar.gz" -C "${RUN_DIR}" environment.yml requirements.lock.txt conda-list.json python-packages.cdx.json materialization-summary.json environment.original.yml environment.cpu-normalization.log || true
 
 aws s3 cp "${RUN_DIR}/" "s3://${EPHEMERAL_BUCKET}/${EPHEMERAL_PREFIX}/${TARGET_PLATFORM}/${TS}/" --recursive >/dev/null
 aws s3 cp "${RUN_DIR}/environment.yml" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/python/${TARGET_PLATFORM}/${TS}/environment.yml" >/dev/null
+upload_if_exists "${RUN_DIR}/environment.original.yml" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/python/${TARGET_PLATFORM}/${TS}/environment.original.yml"
+upload_if_exists "${RUN_DIR}/environment.cpu-normalization.log" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/python/${TARGET_PLATFORM}/${TS}/environment.cpu-normalization.log"
 upload_if_exists "${RUN_DIR}/requirements.lock.txt" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/python/${TARGET_PLATFORM}/${TS}/requirements.lock.txt"
 upload_if_exists "${RUN_DIR}/approval-candidate-packages.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/python/${TARGET_PLATFORM}/${TS}/approval-candidate-packages.csv"
 upload_if_exists "${RUN_DIR}/python-packages.cdx.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/python/${TARGET_PLATFORM}/${TS}/python-packages.cdx.json"

@@ -581,6 +581,8 @@ Resources:
                 Resource:
                   - !Ref PythonLinuxAmd64TaskDefinition
                   - !Ref PythonLinuxArm64TaskDefinition
+                  - !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${EnvironmentName}-python-linux-amd64:*'
+                  - !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${EnvironmentName}-python-linux-arm64:*'
               - Effect: Allow
                 Action: ecs:RunTask
                 Resource:
@@ -612,142 +614,177 @@ Resources:
       RoleArn: !GetAtt PythonScanOrchestrationRole.Arn
       DefinitionString: !Sub |
         {
-          "StartAt": "RunTasks",
+          "StartAt": "RunSelectedPlatforms",
           "States": {
-            "RunTasks": {
-              "Type": "Parallel",
-              "Branches": [
-                {
-                  "StartAt": "RunLinuxAmd64",
-                  "States": {
-                    "RunLinuxAmd64": {
-                      "Type": "Task",
-                      "Resource": "arn:aws:states:::ecs:runTask.sync",
-                      "Retry": [
-                        {
-                          "ErrorEquals": ["ECS.AmazonECSException", "ECS.ClientException", "States.TaskFailed"],
-                          "IntervalSeconds": 30,
-                          "BackoffRate": 2.0,
-                          "MaxAttempts": 6
-                        }
-                      ],
-                      "Parameters": {
-                        "Cluster": "${PythonLinuxAmd64Cluster.Arn}",
-                        "TaskDefinition": "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${EnvironmentName}-python-linux-amd64",
-                        "Overrides": {
-                          "ContainerOverrides": [
-                            {
-                              "Name": "scanner",
-                              "Environment": [
-                                { "Name": "INPUT_BUCKET", "Value.$": "$.input_bucket" },
-                                { "Name": "INPUT_OBJECT_KEY", "Value.$": "$.input_object_key" },
-                                { "Name": "EVIDENCE_BUCKET", "Value.$": "$.evidence_bucket" },
-                                { "Name": "EVIDENCE_PREFIX", "Value.$": "$.evidence_prefix" },
-                                { "Name": "EPHEMERAL_BUCKET", "Value.$": "$.ephemeral_bucket" },
-                                { "Name": "EPHEMERAL_PREFIX", "Value.$": "$.ephemeral_prefix" },
-                                { "Name": "REMEDIATE_MEDIUM", "Value.$": "$.remediate_medium" },
-                                { "Name": "FAIL_ON_MEDIUM", "Value.$": "$.fail_on_medium" },
-                                { "Name": "SAFETY_API_KEY", "Value.$": "$.safety_api_key" },
-                                { "Name": "SCAN_TIMESTAMP", "Value.$": "$.scan_timestamp" },
-                                { "Name": "SCAN_EXECUTION_ID", "Value.$": "$.scan_execution_id" }
-                              ]
-                            }
-                          ]
-                        }
+            "RunSelectedPlatforms": {
+              "Type": "Map",
+              "ItemsPath": "$.platforms",
+              "MaxConcurrency": 2,
+              "Parameters": {
+                "platform.$": "$$.Map.Item.Value",
+                "input_bucket.$": "$.input_bucket",
+                "input_object_key.$": "$.input_object_key",
+                "evidence_bucket.$": "$.evidence_bucket",
+                "evidence_prefix.$": "$.evidence_prefix",
+                "ephemeral_bucket.$": "$.ephemeral_bucket",
+                "ephemeral_prefix.$": "$.ephemeral_prefix",
+                "remediate_medium.$": "$.remediate_medium",
+                "fail_on_medium.$": "$.fail_on_medium",
+                "safety_api_key.$": "$.safety_api_key",
+                "scan_timestamp.$": "$.scan_timestamp",
+                "scan_execution_id.$": "$.scan_execution_id"
+              },
+              "Iterator": {
+                "StartAt": "SelectPlatform",
+                "States": {
+                  "SelectPlatform": {
+                    "Type": "Choice",
+                    "Choices": [
+                      {
+                        "Variable": "$.platform",
+                        "StringEquals": "linux-amd64",
+                        "Next": "RunLinuxAmd64"
                       },
-                      "ResultSelector": {
-                        "platform": "linux-amd64",
-                        "status": "SUCCEEDED",
-                        "taskArn.$": "$.TaskArn",
-                        "clusterArn": "${PythonLinuxAmd64Cluster.Arn}"
-                      },
-                      "Catch": [
-                        {
-                          "ErrorEquals": ["States.ALL"],
-                          "ResultPath": "$.error",
-                          "Next": "LinuxAmd64Failure"
-                        }
-                      ],
-                      "End": true
+                      {
+                        "Variable": "$.platform",
+                        "StringEquals": "linux-arm64",
+                        "Next": "RunLinuxArm64"
+                      }
+                    ],
+                    "Default": "UnsupportedPlatform"
+                  },
+                  "RunLinuxAmd64": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::ecs:runTask.sync",
+                    "Retry": [
+                      {
+                        "ErrorEquals": ["ECS.AmazonECSException", "ECS.ClientException", "States.TaskFailed"],
+                        "IntervalSeconds": 30,
+                        "BackoffRate": 2.0,
+                        "MaxAttempts": 6
+                      }
+                    ],
+                    "Parameters": {
+                      "Cluster": "${PythonLinuxAmd64Cluster.Arn}",
+                      "TaskDefinition": "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${EnvironmentName}-python-linux-amd64",
+                      "Overrides": {
+                        "ContainerOverrides": [
+                          {
+                            "Name": "scanner",
+                            "Environment": [
+                              { "Name": "INPUT_BUCKET", "Value.$": "$.input_bucket" },
+                              { "Name": "INPUT_OBJECT_KEY", "Value.$": "$.input_object_key" },
+                              { "Name": "EVIDENCE_BUCKET", "Value.$": "$.evidence_bucket" },
+                              { "Name": "EVIDENCE_PREFIX", "Value.$": "$.evidence_prefix" },
+                              { "Name": "EPHEMERAL_BUCKET", "Value.$": "$.ephemeral_bucket" },
+                              { "Name": "EPHEMERAL_PREFIX", "Value.$": "$.ephemeral_prefix" },
+                              { "Name": "REMEDIATE_MEDIUM", "Value.$": "$.remediate_medium" },
+                              { "Name": "FAIL_ON_MEDIUM", "Value.$": "$.fail_on_medium" },
+                              { "Name": "SAFETY_API_KEY", "Value.$": "$.safety_api_key" },
+                              { "Name": "SCAN_TIMESTAMP", "Value.$": "$.scan_timestamp" },
+                              { "Name": "SCAN_EXECUTION_ID", "Value.$": "$.scan_execution_id" }
+                            ]
+                          }
+                        ]
+                      }
                     },
-                    "LinuxAmd64Failure": {
-                      "Type": "Pass",
-                      "Parameters": {
-                        "platform": "linux-amd64",
-                        "status": "FAILED",
-                        "error.$": "$.error.Error",
-                        "cause.$": "$.error.Cause"
-                      },
-                      "End": true
-                    }
-                  }
-                },
-                {
-                  "StartAt": "RunLinuxArm64",
-                  "States": {
-                    "RunLinuxArm64": {
-                      "Type": "Task",
-                      "Resource": "arn:aws:states:::ecs:runTask.sync",
-                      "Retry": [
-                        {
-                          "ErrorEquals": ["ECS.AmazonECSException", "ECS.ClientException", "States.TaskFailed"],
-                          "IntervalSeconds": 30,
-                          "BackoffRate": 2.0,
-                          "MaxAttempts": 6
-                        }
-                      ],
-                      "Parameters": {
-                        "Cluster": "${PythonLinuxArm64Cluster.Arn}",
-                        "TaskDefinition": "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${EnvironmentName}-python-linux-arm64",
-                        "Overrides": {
-                          "ContainerOverrides": [
-                            {
-                              "Name": "scanner",
-                              "Environment": [
-                                { "Name": "INPUT_BUCKET", "Value.$": "$.input_bucket" },
-                                { "Name": "INPUT_OBJECT_KEY", "Value.$": "$.input_object_key" },
-                                { "Name": "EVIDENCE_BUCKET", "Value.$": "$.evidence_bucket" },
-                                { "Name": "EVIDENCE_PREFIX", "Value.$": "$.evidence_prefix" },
-                                { "Name": "EPHEMERAL_BUCKET", "Value.$": "$.ephemeral_bucket" },
-                                { "Name": "EPHEMERAL_PREFIX", "Value.$": "$.ephemeral_prefix" },
-                                { "Name": "REMEDIATE_MEDIUM", "Value.$": "$.remediate_medium" },
-                                { "Name": "FAIL_ON_MEDIUM", "Value.$": "$.fail_on_medium" },
-                                { "Name": "SAFETY_API_KEY", "Value.$": "$.safety_api_key" },
-                                { "Name": "SCAN_TIMESTAMP", "Value.$": "$.scan_timestamp" },
-                                { "Name": "SCAN_EXECUTION_ID", "Value.$": "$.scan_execution_id" }
-                              ]
-                            }
-                          ]
-                        }
-                      },
-                      "ResultSelector": {
-                        "platform": "linux-arm64",
-                        "status": "SUCCEEDED",
-                        "taskArn.$": "$.TaskArn",
-                        "clusterArn": "${PythonLinuxArm64Cluster.Arn}"
-                      },
-                      "Catch": [
-                        {
-                          "ErrorEquals": ["States.ALL"],
-                          "ResultPath": "$.error",
-                          "Next": "LinuxArm64Failure"
-                        }
-                      ],
-                      "End": true
+                    "ResultSelector": {
+                      "platform": "linux-amd64",
+                      "status": "SUCCEEDED",
+                      "taskArn.$": "$.TaskArn",
+                      "clusterArn": "${PythonLinuxAmd64Cluster.Arn}"
                     },
-                    "LinuxArm64Failure": {
-                      "Type": "Pass",
-                      "Parameters": {
-                        "platform": "linux-arm64",
-                        "status": "FAILED",
-                        "error.$": "$.error.Error",
-                        "cause.$": "$.error.Cause"
-                      },
-                      "End": true
-                    }
+                    "Catch": [
+                      {
+                        "ErrorEquals": ["States.ALL"],
+                        "ResultPath": "$.error",
+                        "Next": "LinuxAmd64Failure"
+                      }
+                    ],
+                    "End": true
+                  },
+                  "LinuxAmd64Failure": {
+                    "Type": "Pass",
+                    "Parameters": {
+                      "platform": "linux-amd64",
+                      "status": "FAILED",
+                      "error.$": "$.error.Error",
+                      "cause.$": "$.error.Cause"
+                    },
+                    "End": true
+                  },
+                  "RunLinuxArm64": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::ecs:runTask.sync",
+                    "Retry": [
+                      {
+                        "ErrorEquals": ["ECS.AmazonECSException", "ECS.ClientException", "States.TaskFailed"],
+                        "IntervalSeconds": 30,
+                        "BackoffRate": 2.0,
+                        "MaxAttempts": 6
+                      }
+                    ],
+                    "Parameters": {
+                      "Cluster": "${PythonLinuxArm64Cluster.Arn}",
+                      "TaskDefinition": "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${EnvironmentName}-python-linux-arm64",
+                      "Overrides": {
+                        "ContainerOverrides": [
+                          {
+                            "Name": "scanner",
+                            "Environment": [
+                              { "Name": "INPUT_BUCKET", "Value.$": "$.input_bucket" },
+                              { "Name": "INPUT_OBJECT_KEY", "Value.$": "$.input_object_key" },
+                              { "Name": "EVIDENCE_BUCKET", "Value.$": "$.evidence_bucket" },
+                              { "Name": "EVIDENCE_PREFIX", "Value.$": "$.evidence_prefix" },
+                              { "Name": "EPHEMERAL_BUCKET", "Value.$": "$.ephemeral_bucket" },
+                              { "Name": "EPHEMERAL_PREFIX", "Value.$": "$.ephemeral_prefix" },
+                              { "Name": "REMEDIATE_MEDIUM", "Value.$": "$.remediate_medium" },
+                              { "Name": "FAIL_ON_MEDIUM", "Value.$": "$.fail_on_medium" },
+                              { "Name": "SAFETY_API_KEY", "Value.$": "$.safety_api_key" },
+                              { "Name": "SCAN_TIMESTAMP", "Value.$": "$.scan_timestamp" },
+                              { "Name": "SCAN_EXECUTION_ID", "Value.$": "$.scan_execution_id" }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    "ResultSelector": {
+                      "platform": "linux-arm64",
+                      "status": "SUCCEEDED",
+                      "taskArn.$": "$.TaskArn",
+                      "clusterArn": "${PythonLinuxArm64Cluster.Arn}"
+                    },
+                    "Catch": [
+                      {
+                        "ErrorEquals": ["States.ALL"],
+                        "ResultPath": "$.error",
+                        "Next": "LinuxArm64Failure"
+                      }
+                    ],
+                    "End": true
+                  },
+                  "LinuxArm64Failure": {
+                    "Type": "Pass",
+                    "Parameters": {
+                      "platform": "linux-arm64",
+                      "status": "FAILED",
+                      "error.$": "$.error.Error",
+                      "cause.$": "$.error.Cause"
+                    },
+                    "End": true
+                  },
+                  "UnsupportedPlatform": {
+                    "Type": "Pass",
+                    "Parameters": {
+                      "platform.$": "$.platform",
+                      "status": "FAILED",
+                      "error": "UnsupportedPlatform",
+                      "cause": "Supported Python ECS Linux platforms are linux-amd64 and linux-arm64."
+                    },
+                    "End": true
                   }
                 }
-              ],
+              },
               "ResultPath": "$.results",
               "Next": "ValidateArtifacts"
             },

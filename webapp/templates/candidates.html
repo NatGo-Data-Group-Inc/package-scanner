@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Build Candidates</h1>
+<p class="muted">
+  Start scans from YAML files in the local <code>candidates/</code> directory.
+  The GUI resolves S3 buckets and the Python ECS state machine from the deployed stack when you submit.
+</p>
+
+{% if candidates %}
+<table>
+  <thead>
+    <tr><th>Candidate</th><th>Type</th><th>Size</th><th>Start Scan</th></tr>
+  </thead>
+  <tbody>
+    {% for candidate in candidates %}
+    <tr>
+      <td><code>{{ candidate.filename }}</code></td>
+      <td><span class="chip badge-python">{{ candidate.ecosystem }}</span></td>
+      <td>{{ candidate.size }} bytes</td>
+      <td>
+        <form method="post" action="/candidates/python/{{ candidate.name }}/start">
+          <label>
+            Platform
+            <select name="platform">
+              <option value="linux-amd64" selected>linux-amd64</option>
+              <option value="linux-arm64">linux-arm64</option>
+            </select>
+          </label>
+          <label>
+            Remediate medium
+            <select name="remediate_medium">
+              <option value="true" selected>true</option>
+              <option value="false">false</option>
+            </select>
+          </label>
+          <label>
+            Fail on medium
+            <select name="fail_on_medium">
+              <option value="false" selected>false</option>
+              <option value="true">true</option>
+            </select>
+          </label>
+          <button type="submit">Start</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No YAML candidates found under <code>candidates/</code>.</p>
+{% endif %}
+
+<h2>Scan History By Starting Artifact</h2>
+<p class="muted">
+  This trace groups Python and R scans by the original input object submitted to the orchestrator.
+  Catalog rows are durable history; Step Functions rows are recent executions that may not have published catalog records yet.
+</p>
+
+{% if history %}
+  {% for artifact in history %}
+  <div class="card">
+    <h3>{{ artifact.label }}</h3>
+    <div class="chip-row">
+      <span class="chip badge-{{ 'python' if artifact.artifact_type.startswith('PYTHON') else 'r' }}">{{ artifact.artifact_type }}</span>
+      <span class="chip">{{ artifact.run_count }} run{{ '' if artifact.run_count == 1 else 's' }}</span>
+      {% if artifact.local_filename %}
+      <span class="chip">local: {{ artifact.local_filename }}</span>
+      {% endif %}
+    </div>
+    {% if artifact.uri %}
+    <p><code>{{ artifact.uri }}</code></p>
+    {% else %}
+    <p><code>{{ artifact.key or 'input artifact not recorded' }}</code></p>
+    {% endif %}
+    {% if artifact.runs %}
+    <table>
+      <thead>
+        <tr><th>Execution</th><th>Ecosystem</th><th>Status</th><th>Platforms</th><th>Started</th><th>Completed</th><th>Duration</th><th>History Source</th><th>Actions</th></tr>
+      </thead>
+      <tbody>
+        {% for run in artifact.runs %}
+        <tr>
+          <td>
+            {% if run.catalog_link %}
+            <a href="/runs/{{ run.ecosystem }}/{{ run.execution_id }}">{{ run.execution_id }}</a>
+            {% else %}
+            {{ run.execution_id or 'n/a' }}
+            {% endif %}
+          </td>
+          <td><span class="chip badge-{{ run.ecosystem }}">{{ run.ecosystem|upper }}</span></td>
+          <td class="{{ run.status_class }}">{{ run.status }}</td>
+          <td>
+            {% for platform in run.platforms %}
+            <span class="chip badge-{{ platform }}">{{ platform }}</span>
+            {% else %}
+            <span class="muted">n/a</span>
+            {% endfor %}
+          </td>
+          <td>{{ run.started_display or 'n/a' }}</td>
+          <td>{{ run.completed_display or 'n/a' }}</td>
+          <td>{{ run.duration_display or 'n/a' }}</td>
+          <td>{{ run.source }}</td>
+          <td>
+            {% if run.actions %}
+            <div class="action-list">
+              {% for action in run.actions %}
+              <a href="{{ action.href }}">{{ action.label }}</a>
+              {% endfor %}
+            </div>
+            {% elif run.source == 'step-functions' %}
+            <span class="muted">Catalog pending</span>
+            {% else %}
+            <span class="muted">n/a</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No submitted scans found for this artifact yet.</p>
+    {% endif %}
+  </div>
+  {% endfor %}
+{% else %}
+<p class="muted">No scan history found. Reauthenticate if AWS SSO expired, then refresh.</p>
+{% endif %}
+{% endblock %}
