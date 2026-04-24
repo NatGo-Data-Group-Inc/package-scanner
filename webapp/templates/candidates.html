@@ -18,29 +18,38 @@
       <td><span class="chip badge-python">{{ candidate.ecosystem }}</span></td>
       <td>{{ candidate.size }} bytes</td>
       <td>
+        {% if candidate.active_run %}
+        <p class="muted">
+          Active scan already running:
+          <code>{{ candidate.active_run.execution_id }}</code>
+          {% if candidate.active_run.started_display %}started {{ candidate.active_run.started_display }}{% endif %}
+        </p>
+        {% endif %}
         <form method="post" action="/candidates/python/{{ candidate.name }}/start">
           <label>
             Platform
-            <select name="platform">
+            <select name="platform" {% if candidate.start_disabled %}disabled{% endif %}>
               <option value="linux-amd64" selected>linux-amd64</option>
               <option value="linux-arm64">linux-arm64</option>
             </select>
           </label>
           <label>
             Remediate medium
-            <select name="remediate_medium">
+            <select name="remediate_medium" {% if candidate.start_disabled %}disabled{% endif %}>
               <option value="true" selected>true</option>
               <option value="false">false</option>
             </select>
           </label>
           <label>
             Fail on medium
-            <select name="fail_on_medium">
+            <select name="fail_on_medium" {% if candidate.start_disabled %}disabled{% endif %}>
               <option value="false" selected>false</option>
               <option value="true">true</option>
             </select>
           </label>
-          <button type="submit">Start</button>
+          <button type="submit" {% if candidate.start_disabled %}disabled{% endif %}>
+            {{ 'Already Running' if candidate.start_disabled else 'Start' }}
+          </button>
         </form>
       </td>
     </tr>

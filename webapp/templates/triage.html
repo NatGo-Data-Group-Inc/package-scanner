@@ -40,14 +40,22 @@
 
 <div class="card">
   <h3>Checkpoint Logs</h3>
+  {% if placement_failure %}
+    <p class="bad">{{ placement_failure }}</p>
+  {% endif %}
   {% if checkpoint_keys %}
+    <p class="muted">Bucket: <code>{{ checkpoint_bucket }}</code></p>
     <ul>
     {% for key in checkpoint_keys %}
       <li><code>{{ key }}</code></li>
     {% endfor %}
     </ul>
   {% else %}
-    <p class="muted">No checkpoint keys listed. Ensure EPHEMERAL_BUCKET is configured.</p>
+    {% if checkpoint_bucket %}
+      <p class="muted">No checkpoint keys were found under <code>{{ checkpoint_bucket }}</code>.</p>
+    {% else %}
+      <p class="muted">No checkpoint bucket could be resolved for this run.</p>
+    {% endif %}
   {% endif %}
 </div>
 
@@ -57,7 +65,11 @@
     <p class="muted">Source: <code>{{ restore_log_key }}</code></p>
     <pre><code>{{ restore_log_tail }}</code></pre>
   {% else %}
-    <p class="muted">No restore log available. Check EPHEMERAL_BUCKET and checkpoint paths.</p>
+    {% if placement_failure %}
+      <p class="muted">No restore log exists because the ECS task never started.</p>
+    {% else %}
+      <p class="muted">No restore log was found for this run.</p>
+    {% endif %}
   {% endif %}
 </div>
 

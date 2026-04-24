@@ -287,6 +287,14 @@ def stage_display_name(stage: str | None) -> str:
     normalized = str(stage or "").strip().replace("-", " ").replace("_", " ")
     if not normalized:
         return "n/a"
+    special = {
+        "queued": "Queued",
+        "starting": "Starting",
+        "retrying": "Retrying",
+        "failed": "Failed",
+    }
+    if normalized.lower() in special:
+        return special[normalized.lower()]
     return normalized.title()
 
 
@@ -324,6 +332,8 @@ def stage_steps_for_run(ecosystem: str, current_stage: str | None, status: str) 
         else:
             step_status = "pending"
         steps.append({"name": stage_display_name(stage), "status": step_status})
+    if normalized_status == "RUNNING" and normalized_stage in {"queued", "starting", "retrying"} and steps:
+        steps[0]["status"] = "current"
     return steps
 
 
@@ -351,6 +361,8 @@ def create_app() -> Flask:
     record_cache: dict[str, dict] = {}
     cursor_cache: dict[str, dict] = {}
     head_cache: dict[str, dict] = {}
+    execution_history_cache: dict[str, dict] = {}
+    ecs_task_cache: dict[str, dict] = {}
     log_path = os.environ.get("WEBAPP_LOG_PATH", "/tmp/package-scanner-webapp.log")
     if not app.logger.handlers:
         stream_handler = logging.StreamHandler()
@@ -538,10 +550,200 @@ def create_app() -> Flask:
             return ["linux-amd64"]
         return ["linux-amd64"] if ecosystem == "r" else ["unknown"]
 
+    def stepfunctions_execution_history(execution_arn: str, *, max_results: int = 50) -> list[dict]:
+        now = time.time()
+        cached = execution_history_cache.get(execution_arn)
+        if cached and cached["expires_at"] > now:
+            return cached["events"]
+        data = aws_json(
+            [
+                "stepfunctions",
+                "get-execution-history",
+                "--execution-arn",
+                execution_arn,
+                "--max-results",
+                str(max_results),
+                "--reverse-order",
+            ],
+            region=app.config["AWS_REGION"],
+            profile=app.config["AWS_PROFILE"],
+        )
+        events = data.get("events") or []
+        execution_history_cache[execution_arn] = {
+            "expires_at": now + 15,
+            "events": events,
+        }
+        return events
+
+    def ecs_describe_task(cluster: str, task_arn: str) -> dict | None:
+        cache_key = f"{cluster}|{task_arn}"
+        now = time.time()
+        cached = ecs_task_cache.get(cache_key)
+        if cached and cached["expires_at"] > now:
+            return cached["task"]
+        data = aws_json(
+            [
+                "ecs",
+                "describe-tasks",
+                "--cluster",
+                cluster,
+                "--tasks",
+                task_arn,
+            ],
+            region=app.config["AWS_REGION"],
+            profile=app.config["AWS_PROFILE"],
+        )
+        tasks = data.get("tasks") or []
+        task = tasks[0] if tasks else None
+        ecs_task_cache[cache_key] = {
+            "expires_at": now + 15,
+            "task": task,
+        }
+        return task
+
+    def stepfunctions_execution_task_context(execution_arn: str) -> dict:
+        try:
+            events = stepfunctions_execution_history(execution_arn)
+        except Exception:
+            return {}
+
+        context: dict[str, str | bool | None] = {
+            "task_arn": None,
+            "cluster": None,
+            "task_last_status": None,
+            "container_last_status": None,
+            "worker_attempt_failed": False,
+            "task_started": False,
+            "task_submitted": False,
+        }
+        for event in events:
+            event_type = str(event.get("type") or "")
+            if event_type == "TaskScheduled":
+                details = event.get("taskScheduledEventDetails") or {}
+                if str(details.get("resource") or "") != "runTask.sync":
+                    continue
+                parameters_raw = details.get("parameters")
+                if isinstance(parameters_raw, str) and parameters_raw.strip():
+                    try:
+                        parameters = json.loads(parameters_raw)
+                    except json.JSONDecodeError:
+                        parameters = {}
+                    cluster = str(parameters.get("Cluster") or "").strip()
+                    if cluster:
+                        context["cluster"] = cluster.rsplit("/", 1)[-1]
+            elif event_type == "TaskStarted":
+                details = event.get("taskStartedEventDetails") or {}
+                if str(details.get("resource") or "") == "runTask.sync":
+                    context["task_started"] = True
+            elif event_type == "TaskSubmitted":
+                details = event.get("taskSubmittedEventDetails") or {}
+                if str(details.get("resource") or "") != "runTask.sync":
+                    continue
+                context["task_submitted"] = True
+                output_raw = details.get("output")
+                if isinstance(output_raw, str) and output_raw.strip():
+                    try:
+                        output = json.loads(output_raw)
+                    except json.JSONDecodeError:
+                        output = {}
+                    tasks = output.get("Tasks") or []
+                    if tasks:
+                        first = tasks[0] or {}
+                        task_arn = str(first.get("TaskArn") or "").strip()
+                        cluster = str(first.get("ClusterArn") or "").strip()
+                        if task_arn:
+                            context["task_arn"] = task_arn
+                        if cluster:
+                            context["cluster"] = cluster.rsplit("/", 1)[-1]
+            elif event_type in {"TaskFailed", "TaskTimedOut"}:
+                details = event.get("taskFailedEventDetails") or event.get("taskTimedOutEventDetails") or {}
+                if str(details.get("resource") or "") == "runTask.sync":
+                    context["worker_attempt_failed"] = True
+
+        cluster = str(context.get("cluster") or "").strip()
+        task_arn = str(context.get("task_arn") or "").strip()
+        if cluster and task_arn:
+            try:
+                task = ecs_describe_task(cluster, task_arn)
+            except Exception:
+                task = None
+            if isinstance(task, dict):
+                context["task_last_status"] = str(task.get("lastStatus") or "").upper() or None
+                containers = task.get("containers") or []
+                if containers:
+                    context["container_last_status"] = str((containers[0] or {}).get("lastStatus") or "").upper() or None
+        return context
+
+    def derive_live_execution_state(
+        ecosystem: str,
+        execution: dict,
+        execution_input: dict,
+    ) -> dict:
+        lifecycle_status = str(execution.get("status") or "UNKNOWN").upper()
+        execution_id = str(execution.get("name") or "")
+        checkpoint_bucket = str(execution_input.get("ephemeral_bucket") or "").strip() or None
+        platforms = execution_platforms(ecosystem, execution_input)
+        primary_platform = platforms[0] if platforms else ("linux-amd64" if ecosystem == "r" else "unknown")
+        stage_state = checkpoint_stage_state(
+            ecosystem,
+            execution_id,
+            primary_platform,
+            bucket_override=checkpoint_bucket,
+        ) or {}
+        checkpoint_phase = str(stage_state.get("phase") or "").strip().lower() or None
+        progress_current = stage_state.get("progress_current")
+        progress_total = stage_state.get("progress_total")
+        progress_count_display = None
+        if isinstance(progress_current, int) and isinstance(progress_total, int) and progress_total > 0:
+            progress_count_display = f"{progress_current}/{progress_total}"
+
+        phase = checkpoint_phase
+        phase_detail = None
+        task_context = stepfunctions_execution_task_context(str(execution.get("executionArn") or "")) if execution.get("executionArn") else {}
+
+        if lifecycle_status == "RUNNING":
+            task_last_status = str(task_context.get("task_last_status") or "").upper()
+            container_last_status = str(task_context.get("container_last_status") or "").upper()
+            worker_attempt_failed = bool(task_context.get("worker_attempt_failed"))
+            if checkpoint_phase == "failed":
+                checkpoint_phase = None
+            if task_last_status == "RUNNING" or container_last_status == "RUNNING":
+                phase = checkpoint_phase or "starting"
+            elif task_last_status == "PENDING" or container_last_status == "PENDING":
+                phase = "starting"
+                phase_detail = "Task placed; container is starting."
+            elif task_last_status == "STOPPED":
+                phase = "retrying"
+                phase_detail = "Latest worker attempt stopped; Step Functions is still retrying."
+            elif bool(task_context.get("task_submitted")) or bool(task_context.get("task_started")):
+                phase = checkpoint_phase or "starting"
+            elif worker_attempt_failed:
+                phase = "retrying"
+                phase_detail = "Worker attempt failed; orchestration is still active."
+            else:
+                phase = checkpoint_phase or "queued"
+                phase_detail = "Execution started; waiting for the active worker checkpoint."
+        elif lifecycle_status == "SUCCEEDED":
+            phase = "completed"
+            progress_count_display = None
+        elif lifecycle_status in {"FAILED", "TIMED_OUT", "ABORTED"}:
+            phase = checkpoint_phase or "failed"
+            progress_count_display = None
+
+        return {
+            "lifecycle_status": lifecycle_status,
+            "phase": phase,
+            "phase_display": stage_display_name(phase),
+            "phase_detail": phase_detail,
+            "progress_count_display": progress_count_display,
+            "stage_steps": stage_steps_for_run(ecosystem, phase, lifecycle_status),
+        }
+
     def live_execution_row(ecosystem: str, execution: dict) -> dict:
         execution_arn = str(execution.get("executionArn") or "")
         execution_input = parse_execution_input(execution_arn) if execution_arn else {}
-        status = str(execution.get("status") or "RUNNING").upper()
+        state = derive_live_execution_state(ecosystem, execution, execution_input)
+        status = state["lifecycle_status"]
         return {
             "execution_id": str(execution.get("name") or ""),
             "execution_arn": execution_arn,
@@ -555,6 +757,11 @@ def create_app() -> Flask:
             "evidence_prefix": execution_input.get("evidence_prefix") or app.config["CATALOG_PREFIX"],
             "input_bucket": execution_input.get("input_bucket"),
             "input_object_key": execution_input.get("input_object_key"),
+            "current_phase": state["phase"],
+            "current_phase_display": state["phase_display"],
+            "phase_detail": state["phase_detail"],
+            "progress_count_display": state["progress_count_display"],
+            "stage_steps": state["stage_steps"],
             "platforms": [
                 {
                     "platform": platform,
@@ -616,17 +823,25 @@ def create_app() -> Flask:
     def overlay_live_status(row: dict, live_execution: dict | None) -> dict:
         if not live_execution:
             return row
+        execution_arn = str(live_execution.get("executionArn") or "")
+        execution_input = parse_execution_input(execution_arn) if execution_arn else {}
+        state = derive_live_execution_state(row.get("ecosystem", ""), live_execution, execution_input)
         updated = dict(row)
-        updated["status"] = "RUNNING"
+        updated["status"] = state["lifecycle_status"]
         updated["completed_at"] = None
         updated["duration_seconds"] = None
         started = live_execution.get("startDate")
         if started:
             updated["started_at"] = started
+        updated["current_phase"] = state["phase"]
+        updated["current_phase_display"] = state["phase_display"]
+        updated["phase_detail"] = state["phase_detail"]
+        updated["progress_count_display"] = state["progress_count_display"]
+        updated["stage_steps"] = state["stage_steps"]
         platforms = []
         for platform in row.get("platforms", []):
             platform_row = dict(platform)
-            platform_row["status"] = "RUNNING"
+            platform_row["status"] = state["lifecycle_status"]
             platform_row["validated"] = False
             platform_row.pop("validation_error", None)
             platform_row.pop("error", None)
@@ -755,6 +970,12 @@ def create_app() -> Flask:
         row["duration_display"] = duration_for_row(row)
         row["selected_platform_status_class"] = status_class(str(row.get("selected_platform_status") or ""))
         row["ecosystem_platform_badge"] = ecosystem_platform_badge(ecosystem, row.get("selected_platform_label", ""))
+        row["current_phase_display"] = row.get("current_phase_display") or (
+            stage_display_name("completed")
+            if str(row.get("selected_platform_status") or "").upper() == "SUCCEEDED"
+            else stage_display_name(row.get("current_phase"))
+        )
+        row["phase_detail"] = row.get("phase_detail")
         return row
 
     def normalize_cursor_state(ecosystem: str, cursor_id: str | None, filters: tuple[str, str, str, int]) -> tuple[int, str | None]:
@@ -1290,6 +1511,40 @@ def create_app() -> Flask:
             )
         return rows
 
+    def active_python_candidate_runs() -> dict[str, dict]:
+        active_by_candidate: dict[str, dict] = {}
+        for execution in live_running_execution_map("python").values():
+            execution_arn = str(execution.get("executionArn") or "")
+            execution_input = parse_execution_input(execution_arn) if execution_arn else {}
+            input_key = str(execution_input.get("input_object_key") or "").strip()
+            marker = "inputs/python/candidates/"
+            if not input_key.startswith(marker):
+                continue
+            remainder = input_key[len(marker):]
+            candidate_name = remainder.split("/", 1)[0]
+            if not candidate_name:
+                continue
+            active_by_candidate[candidate_name] = {
+                "execution_id": execution.get("name"),
+                "execution_arn": execution_arn,
+                "status": execution.get("status") or "RUNNING",
+                "started_at": execution.get("startDate"),
+                "started_display": format_display_datetime(execution.get("startDate")),
+                "input_object_key": input_key,
+            }
+        return active_by_candidate
+
+    def candidate_files_with_active_state() -> list[dict]:
+        active_by_candidate = active_python_candidate_runs()
+        rows = []
+        for candidate in candidate_files():
+            row = dict(candidate)
+            active_run = active_by_candidate.get(row["name"])
+            row["active_run"] = active_run
+            row["start_disabled"] = active_run is not None
+            rows.append(row)
+        return rows
+
     def input_artifact_group(ecosystem: str, bucket: str | None, key: str | None) -> dict:
         artifact_key = str(key or "").strip()
         artifact_bucket = str(bucket or "").strip()
@@ -1557,81 +1812,28 @@ def create_app() -> Flask:
                     app.logger.warning("active run lookup failed ecosystem=%s state_machine=%s error=%s", ecosystem, arn, exc)
                     continue
                 for execution in executions:
-                    item = {
-                        "ecosystem": ecosystem,
-                        "name": execution.get("name"),
-                        "executionArn": execution.get("executionArn"),
-                        "startDate": execution.get("startDate"),
-                        "status": execution.get("status"),
-                    }
-                    try:
-                        detail = stepfunctions_describe_execution(
-                            execution["executionArn"],
-                            region=app.config["AWS_REGION"],
-                            profile=app.config["AWS_PROFILE"],
-                        )
-                        item["input"] = detail.get("input")
-                    except Exception as exc:
-                        app.logger.warning(
-                            "active run detail lookup failed ecosystem=%s execution=%s error=%s",
-                            ecosystem,
-                            execution.get("executionArn"),
-                            exc,
-                        )
-                        item["input"] = None
-                    execution_input = item.get("input")
-                    platform = ""
-                    if isinstance(execution_input, str) and execution_input.strip():
-                        try:
-                            execution_input = json.loads(execution_input)
-                        except json.JSONDecodeError:
-                            execution_input = None
-                    checkpoint_bucket = None
-                    if isinstance(execution_input, dict):
-                        checkpoint_bucket = str(execution_input.get("ephemeral_bucket") or "").strip() or None
-                        input_key = str(execution_input.get("input_object_key") or "").strip()
-                        platform_set = str(execution_input.get("platform_set") or "").strip()
-                        selected_platforms = execution_input.get("platforms")
-                        if (
-                            ecosystem == "python"
-                            and isinstance(selected_platforms, list)
-                            and len(selected_platforms) == 1
-                        ):
-                            platform = str(selected_platforms[0] or "").strip()
-                        elif "/windows-amd64/" in input_key or platform_set == "windows-only":
-                            platform = "windows-amd64"
-                        elif "/linux-arm64/" in input_key:
-                            platform = "linux-arm64"
-                        elif "/linux-amd64/" in input_key:
-                            platform = "linux-amd64"
-                        elif platform_set in ("all", "linux-only"):
-                            platform = "linux-amd64"
-                    if not platform:
-                        platform = "linux-amd64" if ecosystem == "r" else "unknown"
-                    stage_state = checkpoint_stage_state(
-                        ecosystem,
-                        str(item.get("name") or ""),
-                        platform,
-                        bucket_override=checkpoint_bucket,
-                    ) or {}
-                    current_stage = str(stage_state.get("phase") or "").strip().lower() or None
-                    if not current_stage and str(item.get("status") or "").upper() == "RUNNING":
-                        current_stage = "preflight" if ecosystem == "r" else "materialize"
-                    progress_current = stage_state.get("progress_current")
-                    progress_total = stage_state.get("progress_total")
-                    progress_count_display = None
-                    if isinstance(progress_current, int) and isinstance(progress_total, int) and progress_total > 0:
-                        progress_count_display = f"{progress_current}/{progress_total}"
-                    item["platform_label"] = architecture_label(platform)
-                    item["ecosystem_platform_badge"] = ecosystem_platform_badge(ecosystem, platform)
-                    item["started_display"] = format_display_datetime(item.get("startDate"))
-                    item["duration_display"] = format_duration(item.get("startDate"))
-                    item["status_class"] = status_class(str(item.get("status") or ""))
-                    item["current_stage"] = current_stage
-                    item["current_stage_display"] = stage_display_name(current_stage)
-                    item["progress_count_display"] = progress_count_display
-                    item["stage_steps"] = stage_steps_for_run(ecosystem, current_stage, str(item.get("status") or ""))
-                    active.append(item)
+                    row = live_execution_row(ecosystem, execution)
+                    platforms = row.get("platforms") or []
+                    platform = str((platforms[0] or {}).get("platform") or "") if platforms else ""
+                    active.append(
+                        {
+                            "ecosystem": ecosystem,
+                            "name": execution.get("name"),
+                            "executionArn": execution.get("executionArn"),
+                            "startDate": execution.get("startDate"),
+                            "status": row.get("status"),
+                            "platform_label": architecture_label(platform),
+                            "ecosystem_platform_badge": ecosystem_platform_badge(ecosystem, platform),
+                            "started_display": format_display_datetime(execution.get("startDate")),
+                            "duration_display": format_duration(execution.get("startDate")),
+                            "status_class": status_class(str(row.get("status") or "")),
+                            "current_stage": row.get("current_phase"),
+                            "current_stage_display": row.get("current_phase_display"),
+                            "phase_detail": row.get("phase_detail"),
+                            "progress_count_display": row.get("progress_count_display"),
+                            "stage_steps": row.get("stage_steps") or [],
+                        }
+                    )
         active.sort(key=lambda row: str(row.get("startDate", "")), reverse=True)
         return active
 
@@ -1915,7 +2117,7 @@ def create_app() -> Flask:
             app.logger.warning("candidate history lookup failed error=%s", exc)
         return render_template(
             "candidates.html",
-            candidates=candidate_files(),
+            candidates=candidate_files_with_active_state(),
             history=history,
             auth_error=auth_error,
         )
@@ -1947,6 +2149,19 @@ def create_app() -> Flask:
         timestamp = utc_compact_timestamp()
         execution_name = f"python-scan-{timestamp}-{uuid.uuid4().hex[:8]}"
         input_object_key = f"inputs/python/candidates/{safe_name}/environment.yml"
+        active_run = active_python_candidate_runs().get(safe_name)
+        if active_run:
+            return render_template(
+                "candidate_started.html",
+                candidate_name=safe_name,
+                platform=platform,
+                execution_name=active_run.get("execution_id"),
+                execution_arn=active_run.get("execution_arn"),
+                input_uri=f"s3://{input_bucket}/{input_object_key}",
+                summary_uri="",
+                auth_error=None,
+                already_running=True,
+            ), 409
         s3_put_bytes(
             input_bucket,
             input_object_key,
@@ -1992,6 +2207,7 @@ def create_app() -> Flask:
             input_uri=f"s3://{input_bucket}/{input_object_key}",
             summary_uri=f"s3://{evidence_bucket}/{app.config['CATALOG_PREFIX']}/orchestration/python/{execution_name}/orchestration-summary.json",
             auth_error=None,
+            already_running=False,
         )
 
     @app.route("/runs/<ecosystem>/<execution_id>")
@@ -2106,11 +2322,39 @@ def create_app() -> Flask:
         return redirect(f"/runs/{ecosystem}/{execution_id}")
 
     def triage_checkpoint_prefix(ecosystem: str, execution_id: str, platform: str) -> tuple[str | None, str | None]:
-        bucket = app.config.get("EPHEMERAL_BUCKET") or None
+        bucket = resolve_triage_ephemeral_bucket(ecosystem)
         if not bucket:
             return None, None
         prefix = f"deploy/tmp/{ecosystem}/checkpoints/{ecosystem}/{execution_id}/{platform}/"
         return bucket, prefix
+
+    def resolve_triage_ephemeral_bucket(ecosystem: str) -> str | None:
+        bucket = str(app.config.get("EPHEMERAL_BUCKET") or "").strip()
+        if bucket:
+            return bucket
+        stack_name = app.config["PYTHON_STACK_NAME"] if ecosystem == "python" else app.config["R_STACK_NAME"]
+        try:
+            stack = describe_stack(stack_name)
+        except Exception:
+            return None
+        bucket = str(stack_output_value(stack, "EphemeralBucketName") or "").strip()
+        return bucket or None
+
+    def triage_platform_failure_message(platform_summary: dict | None) -> str | None:
+        if not isinstance(platform_summary, dict):
+            return None
+        cause = str(platform_summary.get("cause") or "").strip()
+        error = str(platform_summary.get("error") or "").strip()
+        task_arn = platform_summary.get("task_arn")
+        if task_arn:
+            return None
+        if "RESOURCE:MEMORY" in cause:
+            return "ECS never launched the worker. This failed at placement because no container instance had enough free memory for the requested task size."
+        if "RESOURCE:" in cause:
+            return "ECS never launched the worker. This failed at placement before the container started."
+        if error == "ECS.AmazonECSException":
+            return "ECS did not start the worker task, so no checkpoint or restore logs were created."
+        return None
 
     def list_checkpoint_keys(bucket: str, prefix: str, limit: int = 50) -> list[str]:
         keys: list[str] = []
@@ -2141,6 +2385,8 @@ def create_app() -> Flask:
         checkpoint_keys = []
         restore_log_tail = None
         restore_log_key = None
+        checkpoint_bucket = None
+        placement_failure = None
         try:
             record = load_record(ecosystem, execution_id)
             summary = s3_get_json(
@@ -2151,16 +2397,24 @@ def create_app() -> Flask:
             )
             platforms = record.get("platforms", [])
             triage_platform = next((p for p in platforms if p.get("status") == "FAILED"), platforms[0] if platforms else None)
-            bucket, prefix = (triage_checkpoint_prefix(ecosystem, execution_id, triage_platform.get("platform", "")) if triage_platform else (None, None))
-            if bucket and prefix:
-                checkpoint_keys = list_checkpoint_keys(bucket, prefix)
+            summary_platforms = summary.get("platforms") if isinstance(summary, dict) else []
+            summary_platform = None
+            if triage_platform and isinstance(summary_platforms, list):
+                summary_platform = next(
+                    (p for p in summary_platforms if str(p.get("platform") or "") == str(triage_platform.get("platform") or "")),
+                    summary_platforms[0] if summary_platforms else None,
+                )
+            placement_failure = triage_platform_failure_message(summary_platform)
+            checkpoint_bucket, prefix = (triage_checkpoint_prefix(ecosystem, execution_id, triage_platform.get("platform", "")) if triage_platform else (None, None))
+            if checkpoint_bucket and prefix:
+                checkpoint_keys = list_checkpoint_keys(checkpoint_bucket, prefix)
                 can_surface_failure = should_surface_restore_failure(ecosystem, execution_id, triage_platform.get("platform", ""))
                 candidates = ["latest/restore.log"] if not can_surface_failure else ["failures/restore.log", "latest/restore.log"]
                 for candidate in candidates:
                     key = f"{prefix}{candidate}"
                     try:
                         payload = s3_get_bytes(
-                            bucket,
+                            checkpoint_bucket,
                             key,
                             region=app.config["AWS_REGION"],
                             profile=app.config["AWS_PROFILE"],
@@ -2181,8 +2435,10 @@ def create_app() -> Flask:
             summary=summary,
             triage_platform=triage_platform,
             checkpoint_keys=checkpoint_keys,
+            checkpoint_bucket=checkpoint_bucket,
             restore_log_tail=restore_log_tail,
             restore_log_key=restore_log_key,
+            placement_failure=placement_failure,
             auth_error=auth_error,
             architecture_label=architecture_label,
         )

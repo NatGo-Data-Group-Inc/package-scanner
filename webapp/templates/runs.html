@@ -46,7 +46,7 @@
 </div>
 <table>
   <thead>
-    <tr><th>Execution</th><th>Started</th><th>Duration</th><th>Status</th><th>Ecosystem</th><th>Platform</th><th>Validated</th><th>Source</th><th>Package Count</th><th>Triage</th></tr>
+    <tr><th>Execution</th><th>Started</th><th>Duration</th><th>Status</th><th>Phase</th><th>Ecosystem</th><th>Platform</th><th>Validated</th><th>Source</th><th>Package Count</th><th>Triage</th></tr>
   </thead>
   <tbody>
     {% for run in runs %}
@@ -61,6 +61,12 @@
       <td>{{ run.scan_timestamp_display }}</td>
       <td>{{ run.duration_display or 'n/a' }}</td>
       <td class="{{ run.selected_platform_status_class }}">{{ run.selected_platform_status }}</td>
+      <td>
+        <div>{{ run.current_phase_display or 'n/a' }}</div>
+        {% if run.phase_detail %}
+        <div class="muted">{{ run.phase_detail }}</div>
+        {% endif %}
+      </td>
       <td><span class="chip badge-{{ ecosystem }}">{{ ecosystem|upper }}</span></td>
       <td><span class="chip badge-{{ run.selected_platform_label }}">{{ run.selected_platform_label }}</span></td>
       <td>{{ 'yes' if run.selected_platform_validated else 'no' }}</td>

@@ -50,8 +50,8 @@ dependencies:
 - babel
 - backports.zstd
 - bcbio-gff
-- bcftools
 - beautifulsoup4
+- bcftools
 - bedtools
 - binutils_impl_linux-64
 - bioconductor-biobase
@@ -90,16 +90,11 @@ dependencies:
 - bzip2
 - c-ares
 - ca-certificates
-- cached-property
-- cachetools
 - cairo
 - capnproto
-- certifi
 - cffi
-- charset-normalizer
 - choreographer
 - clair3
-- click
 - clint
 - cmseq
 - coin-or-cbc
@@ -107,13 +102,7 @@ dependencies:
 - coin-or-clp
 - coin-or-osi
 - coin-or-utils
-- colorama
-- coloredlogs
-- colormath
-- comm
 - contourpy
-- coverage
-- coveralls
 - cpython
 - cryptography
 - cuda-crt-tools
@@ -130,20 +119,12 @@ dependencies:
 - cycler
 - cyvcf2
 - dbus
-- debugpy
-- decorator
-- defusedxml
 - dendropy
-- deprecation
 - diamond
 - dnaio
-- dnspython
-- docutils
 - entrez-direct
 - enum-compat
 - epoxy
-- exceptiongroup
-- executing
 - expat
 - fastp
 - fastqc
@@ -158,12 +139,9 @@ dependencies:
 - fonts-conda-ecosystem
 - fonts-conda-forge
 - fonttools
-- fqdn
 - freetype
 - freetype-py
 - fribidi
-- frozenlist
-- gast
 - gawk
 - gcc_impl_linux-64
 - gdk-pixbuf
@@ -174,9 +152,6 @@ dependencies:
 - glog
 - glpk
 - gmp
-- google-auth
-- google-auth-oauthlib
-- google-pasta
 - gperftools
 - graphite2
 - graphviz
@@ -185,38 +160,18 @@ dependencies:
 - gtk3
 - gts
 - gxx_impl_linux-64
-- h11
-- h2
 - h5py
 - harfbuzz
 - hclust2
 - hdf5
 - hicolor-icon-theme
-- hpack
 - htslib
-- httpcore
-- httpx
-- humanfriendly
-- humanize
-- hyperframe
 - icu
-- idna
-- importlib-metadata
-- importlib_resources
-- iniconfig
 - ipykernel
 - ipython
 - iqtree
 - isa-l
-- isoduration
-- jedi
-- jinja2
 - jq
-- json5
-- jsonpointer
-- jsonschema
-- jsonschema-specifications
-- jsonschema-with-format-nongpl
 - jupyter-lsp
 - jupyter_client
 - jupyter_core
@@ -235,7 +190,6 @@ dependencies:
 - kraken2
 - krb5
 - krona
-- lark
 - lcms2
 - ld_impl_linux-64
 - lerc
@@ -341,36 +295,24 @@ dependencies:
 - lzo
 - mafft
 - make
-- markdown
-- markdown-it-py
-- markupsafe
 - mash
 - mathjax
 - matplotlib-base
-- matplotlib-inline
-- mdurl
 - megahit
 - metaphlan
 - minimap2
-- mistune
 - ml_dtypes
-- mockextras
 - mpfr
-- multidict
 - multiqc
-- munkres
 - muscle
 - nanoget
 - nanoplot
-- narwhals
-- natsort
 - nbclient
 - nbconvert-core
 - nbformat
 - ncbi-vdb
 - nccl
 - ncurses
-- nest-asyncio
 - networkx
 - nomkl
 - notebook
@@ -379,21 +321,16 @@ dependencies:
 - nss
 - numexpr
 - numpy
-- oauthlib
 - openjdk
 - openjpeg
 - openssl
 - opt_einsum
 - orc
 - orjson
-- overrides
-- packaging
 - pandas
 - pandoc
-- pandocfilters
 - pango
 - parallel
-- parso
 - patsy
 - pbzip2
 - pcre2
@@ -417,14 +354,12 @@ dependencies:
 - perl-pathtools
 - perl-scalar-list-utils
 - perl-types-serialiser
-- pexpect
 - phylophlan
 - pickleshare
 - pigz
 - pillow
 - pip
 - pixman
-- platformdirs
 - plotly
 - pluggy
 - polars
@@ -433,26 +368,17 @@ dependencies:
 - polars-runtime-compat
 - popt
 - primalbedtools
-- prometheus_client
-- prompt-toolkit
-- propcache
 - protobuf
 - psutil
 - pthread-stubs
-- ptyprocess
 - pulp
 - pure_eval
-- pyaml-env
 - pyarrow
-- pyasn1
-- pyasn1-modules
 - pycairo
 - pycparser
-- pydantic
 - pydantic-core
 - pyfaidx
 - pygments
-- pyjwt
 - pymongo
 - pyopenssl
 - pyparsing
@@ -463,22 +389,12 @@ dependencies:
 - pytest-cov
 - pytest-timeout
 - python
-- python-dateutil
-- python-dotenv
-- python-fastjsonschema
 - python-flatbuffers
 - python-gil
 - python-isal
-- python-json-logger
 - python-kaleido
-- python-tzdata
 - python-zlib-ng
 - python_abi
-- pytz
-- pyu2f
-- pyvcf3
-- pyyaml
-- pyzmq
 - qhull
 - r-ade4
 - r-ape
@@ -711,13 +627,6 @@ dependencies:
 - referencing
 - regex
 - reportlab
-- requests
-- requests-oauthlib
-- rfc3339-validator
-- rfc3986-validator
-- rfc3987-syntax
-- rich
-- rich-click
 - rlpycairo
 - rpds-py
 - rsa
@@ -729,21 +638,15 @@ dependencies:
 - seaborn
 - seaborn-base
 - sed
-- send2trash
 - seqtk
 - setuptools
-- shellingham
-- simplejson
 - six
 - skani
 - snappy
-- sniffio
-- soupsieve
 - sourmash
 - sourmash-minimal
 - spectra
 - sqlite
-- stack_data
 - statsmodels
 - sysroot_linux-64
 - tar
@@ -752,44 +655,25 @@ dependencies:
 - tensorflow
 - tensorflow-base
 - tensorflow-estimator
-- termcolor
-- terminado
 - tibs
 - tiktoken
 - tinycss2
 - tk
 - tktable
-- toml
-- tomli
-- tomlkit
-- tornado
-- tqdm
 - traitlets
 - trim-galore
 - trimal
-- typeguard
 - typer
-- typing-extensions
-- typing-inspection
 - typing_utils
 - tzdata
-- tzlocal
 - ucx
 - unicodedata2
-- uri-template
-- urllib3
 - wayland
-- wcwidth
-- webcolors
-- webencodings
-- websocket-client
-- werkzeug
 - wget
 - whatshap
 - wheel
 - wrapt
 - xkeyboard-config
-- xmltodict
 - xopen
 - xorg-libice
 - xorg-libsm
@@ -814,67 +698,181 @@ dependencies:
 - xz-gpl-tools
 - xz-tools
 - yaml
-- yarl
 - yq
 - zeromq
-- zipp
 - zlib
 - zlib-ng
 - zstandard
 - zstd
 - pip:
   - 23andme-to-vcf
+  - cached-property
+  - cachetools
+  - certifi
+  - charset-normalizer
+  - click
+  - colorama
+  - coloredlogs
+  - colormath
+  - comm
   - aiosqlite
   - autograd
   - autograd-gamma
   - chardet
   - cryptograpy
+  - coverage
+  - coveralls
   - cssselect2
   - cvxopt
+  - debugpy
+  - decorator
+  - defusedxml
+  - deprecation
   - distlib
+  - dnspython
+  - docutils
   - et-xmlfile
+  - exceptiongroup
+  - executing
   - fastjsonschema
   - filelock
   - formulaic
+  - fqdn
+  - frozenlist
+  - gast
+  - google-auth
+  - google-auth-oauthlib
+  - google-pasta
+  - h11
+  - h2
+  - hpack
   - html5lib
+  - httpcore
+  - httpx
+  - humanfriendly
+  - humanize
+  - hyperframe
+  - idna
+  - importlib-metadata
+  - importlib_resources
+  - iniconfig
   - interface-meta
   - intervaltree
   - isal
   - isodate
+  - isoduration
+  - jedi
+  - Jinja2
   - joblib
+  - json5
+  - jsonpointer
+  - jsonschema
+  - jsonschema-specifications
+  - jsonschema-with-format-nongpl
   - jupyter
   - jupyter-console
+  - lark
   - lifelines
   - matplotlib
+  - Markdown
+  - markdown-it-py
+  - MarkupSafe
+  - matplotlib-inline
+  - mdurl
   - mpmath
+  - mistune
+  - mockextras
+  - multidict
   - nbconvert
+  - narwhals
+  - natsort
+  - nest-asyncio
   - nextstrain-augur
+  - oauthlib
   - open-cravat
   - opencv-python-headless
   - openpyxl
+  - overrides
   - oyaml
+  - packaging
   - Paver
+  - pandocfilters
+  - parso
   - phylo-treetime
   - pipdeptree
+  - platformdirs
   - plumbum
   - ply
+  - prometheus_client
+  - prompt-toolkit
+  - propcache
   - pydyf
+  - pyaml-env
+  - pyasn1
+  - pyasn1-modules
   - pyfastx
   - pylance
   - pyliftover
+  - pexpect
   - pyphen
+  - pydantic
+  - pyjwt
   - pyrsistent
+  - python-dateutil
+  - python-dotenv
+  - python-fastjsonschema
+  - python-json-logger
+  - python-tzdata
+  - pytz
+  - pyu2f
+  - PyVCF3
+  - PyYAML
+  - pyzmq
   - qtconsole
   - QtPy
+  - requests
   - requests-toolbelt
+  - requests-oauthlib
+  - rfc3339-validator
+  - rfc3986-validator
+  - rfc3987-syntax
+  - rich
+  - rich-click
   - scikit-plot
+  - Send2Trash
+  - shellingham
+  - simplejson
+  - sniffio
   - sortedcontainers
+  - soupsieve
+  - stack-data
+  - termcolor
+  - terminado
   - threadpoolctl
+  - toml
+  - tomli
+  - tomlkit
+  - tornado
+  - tqdm
+  - typeguard
+  - typing-extensions
+  - typing-inspection
   - twobitreader
+  - tzlocal
+  - uri-template
+  - urllib3
   - types-python-dateutil
   - virtualenv
+  - wcwidth
   - weasyprint
+  - webcolors
+  - webencodings
+  - websocket-client
+  - Werkzeug
   - websockets
+  - xmltodict
   - XlsxWriter
+  - yarl
+  - zipp
   - zopfli
 prefix: /home/kpagel/micromamba/envs/taxtriage

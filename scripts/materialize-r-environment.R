@@ -209,6 +209,7 @@ write_generated_lockfile <- function() {
   if (!file.exists(generated_lockfile)) {
     stop("Expected generated renv.lock after materialization", call. = FALSE)
   }
+  sanitize_lockfile_records(generated_lockfile)
   file.copy(generated_lockfile, file.path(output_dir, "renv.lock"), overwrite = TRUE)
 }
 
@@ -239,16 +240,87 @@ lockfile_package_record <- function(lockfile_path, package_name) {
   if (is.null(packages) || is.null(packages[[package_name]])) {
     return(NULL)
   }
-  packages[[package_name]]
+  record <- packages[[package_name]]
+  if (!is.list(record)) {
+    return(NULL)
+  }
+  record
 }
 
 count_lockfile_packages <- function(lockfile_path) {
   lock <- lockfile_payload(lockfile_path)
+  if (is.null(lock)) {
+    return(0L)
+  }
   packages <- lock$Packages
   if (is.null(packages)) {
     return(0L)
   }
   length(packages)
+}
+
+installed_package_record <- function(package_name) {
+  installed <- tryCatch(
+    installed.packages(lib.loc = unique(c(library_dir, system_lib)), noCache = TRUE),
+    error = function(e) NULL
+  )
+  if (is.null(installed) || !(package_name %in% rownames(installed))) {
+    return(NULL)
+  }
+  row <- installed[package_name, , drop = FALSE]
+  repository <- row[package_name, "Repository"] %||% ""
+  record <- list(
+    Package = package_name,
+    Version = row[package_name, "Version"] %||% "",
+    Source = if (nzchar(repository)) "Repository" else "unknown"
+  )
+  if (nzchar(repository)) {
+    record$Repository <- repository
+  }
+  record
+}
+
+sanitize_lockfile_records <- function(lockfile_path) {
+  payload <- lockfile_payload(lockfile_path)
+  packages <- payload$Packages
+  if (is.null(payload) || is.null(packages)) {
+    return(invisible(FALSE))
+  }
+
+  changed <- FALSE
+  for (package_name in names(packages)) {
+    record <- packages[[package_name]]
+    if (is.list(record)) {
+      record$Package <- record$Package %||% package_name
+      if (is.null(record$Version) || !isTRUE(nzchar(record$Version))) {
+        installed_record <- installed_package_record(package_name)
+        if (!is.null(installed_record)) {
+          record$Version <- installed_record$Version
+        }
+      }
+      packages[[package_name]] <- record
+      next
+    }
+
+    installed_record <- installed_package_record(package_name)
+    if (is.null(installed_record)) {
+      version <- as.character(record %||% "")
+      installed_record <- list(
+        Package = package_name,
+        Version = version,
+        Source = "unknown"
+      )
+    }
+    packages[[package_name]] <- installed_record
+    changed <- TRUE
+  }
+
+  payload$Packages <- packages
+  if (changed) {
+    message(sprintf("Sanitized malformed generated renv.lock records: %s", lockfile_path))
+    jsonlite::write_json(payload, lockfile_path, auto_unbox = TRUE, pretty = TRUE, null = "null")
+  }
+  invisible(changed)
 }
 
 mirror_materialized_library_into_project <- function() {
@@ -379,6 +451,7 @@ snapshot_requested_environment <- function() {
     prompt = FALSE,
     type = "all"
   )
+  sanitize_lockfile_records(file.path(project_dir, "renv.lock"))
 
   installed_count <- nrow(installed.packages(lib.loc = unique(c(library_dir, system_lib)), noCache = TRUE))
   lock_count <- count_lockfile_packages(file.path(project_dir, "renv.lock"))
@@ -405,6 +478,7 @@ snapshot_requested_environment <- function() {
     type = "all",
     force = TRUE
   )
+  sanitize_lockfile_records(file.path(project_dir, "renv.lock"))
 
   lock_count <- count_lockfile_packages(file.path(project_dir, "renv.lock"))
   if (lock_count < max(length(requested_packages), floor(installed_count * 0.8))) {
@@ -612,5 +686,17 @@ installed_out <- installed_out[order(tolower(installed_out$package_name)), ]
 write.csv(installed_out, file.path(output_dir, "installed-packages.csv"), row.names = FALSE)
 writeLines(normalizePath(project_library, winslash = "/", mustWork = FALSE), file.path(output_dir, "library-path.txt"))
 capture.output(sessionInfo(), file = file.path(output_dir, "session-info.txt"))
-capture.output(renv::status(project = project_dir), file = file.path(output_dir, "renv-status.txt"))
+status_error <- tryCatch({
+  capture.output(renv::status(project = project_dir), file = file.path(output_dir, "renv-status.txt"))
+  NULL
+}, error = function(e) e)
+if (!is.null(status_error)) {
+  writeLines(
+    c(
+      "renv::status() failed during post-materialization reporting.",
+      conditionMessage(status_error)
+    ),
+    file.path(output_dir, "renv-status.txt")
+  )
+}
 writeLines(sprintf("platform=%s", platform), file.path(output_dir, "restore-platform.txt"))

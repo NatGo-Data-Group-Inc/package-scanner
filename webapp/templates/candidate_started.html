@@ -1,13 +1,18 @@
 {% extends "base.html" %}
 {% block body %}
-<h1>Candidate Scan Started</h1>
+<h1>{{ 'Candidate Scan Already Running' if already_running else 'Candidate Scan Started' }}</h1>
 
 <div class="card">
+  {% if already_running %}
+  <p class="bad">A scan for this candidate is already active. A duplicate scan was not submitted.</p>
+  {% endif %}
   <p><strong>Candidate:</strong> <code>{{ candidate_name }}</code></p>
   <p><strong>Platform:</strong> <span class="chip badge-{{ platform }}">{{ platform }}</span></p>
   <p><strong>Execution:</strong> <code>{{ execution_name }}</code></p>
   <p><strong>Input:</strong> <code>{{ input_uri }}</code></p>
+  {% if summary_uri %}
   <p><strong>Summary:</strong> <code>{{ summary_uri }}</code></p>
+  {% endif %}
   {% if execution_arn %}
   <p><strong>Execution ARN:</strong> <code>{{ execution_arn }}</code></p>
   {% endif %}

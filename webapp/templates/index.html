@@ -51,7 +51,12 @@
       <td><span class="chip badge-{{ run.platform_label }}">{{ run.platform_label }}</span></td>
       <td><code>{{ run.name }}</code></td>
       <td class="{{ run.status_class }}">{{ run.status }}</td>
-      <td>{{ run.current_stage_display }}</td>
+      <td>
+        <div>{{ run.current_stage_display }}</div>
+        {% if run.phase_detail %}
+        <div class="muted">{{ run.phase_detail }}</div>
+        {% endif %}
+      </td>
       <td>
         {% if run.progress_count_display %}
         <div><strong>{{ run.progress_count_display }}</strong></div>

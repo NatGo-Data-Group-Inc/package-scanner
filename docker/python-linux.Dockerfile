@@ -28,7 +28,7 @@ RUN case "${TARGETARCH}" in \
       | tar -xvj -C /usr/local/bin --strip-components=1 bin/micromamba && \
     chmod +x /usr/local/bin/micromamba
 
-RUN python3 -m pip install --no-cache-dir --ignore-installed boto3 cyclonedx-bom safety && \
+RUN python3 -m pip install --no-cache-dir --ignore-installed boto3 cyclonedx-bom pyyaml safety && \
     case "${TARGETARCH}" in \
       amd64) TRIVY_ARCH="64bit" ;; \
       arm64) TRIVY_ARCH="ARM64" ;; \

@@ -5,12 +5,8 @@ channels:
 - pkgs/main
 dependencies:
 - _openmp_mutex
-- about-time
-- alive-progress
-- annotated-types
 - aragorn
 - archspec
-- attrs
 - backports.zstd
 - bakta
 - bbmap
@@ -22,16 +18,10 @@ dependencies:
 - bzip2
 - c-ares
 - ca-certificates
-- certifi
 - cffi
 - cgecore
-- charset-normalizer
-- click
-- coloredlogs
-- colormath
 - contourpy
 - curl
-- cycler
 - diamond
 - entrez-direct
 - expat
@@ -45,23 +35,10 @@ dependencies:
 - fonttools
 - freetype
 - git
-- gitdb
-- gitpython
 - gperftools
-- grapheme
-- h2
 - hmmer
-- hpack
-- humanfriendly
-- humanize
-- hyperframe
-- idna
-- importlib-metadata
 - infernal
 - isa-l
-- jinja2
-- jsonschema
-- jsonschema-specifications
 - kaleido-core
 - keyutils
 - kiwisolver
@@ -111,16 +88,10 @@ dependencies:
 - libxcrypt
 - libzlib
 - lz4-c
-- markdown
-- markdown-it-py
 - markupsafe
 - mathjax
 - matplotlib-base
-- mdurl
 - multiqc
-- munkres
-- narwhals
-- natsort
 - ncbi-amrfinderplus
 - ncbi-vdb
 - ncurses
@@ -131,7 +102,6 @@ dependencies:
 - openjdk
 - openjpeg
 - openssl
-- packaging
 - pandas
 - pbzip2
 - pcre2
@@ -163,8 +133,6 @@ dependencies:
 - popt
 - psutil
 - pthread-stubs
-- pyaml-env
-- pycirclize
 - pycparser
 - pydantic
 - pydantic-core
@@ -174,27 +142,18 @@ dependencies:
 - pyrodigal
 - pysocks
 - python
-- python-dateutil
-- python-dotenv
 - python-isal
 - python-kaleido
-- python-tzdata
 - python-zlib-ng
 - python_abi
-- pytz
 - pyyaml
 - qhull
 - readline
-- referencing
 - regex
-- requests
-- rich
-- rich-click
 - rpds-py
 - rsync
 - setuptools
 - six
-- smmap
 - spectra
 - sqlite
 - sra-human-scrubber
@@ -204,9 +163,6 @@ dependencies:
 - tk
 - tqdm
 - trnascan-se
-- typeguard
-- typing-extensions
-- typing-inspection
 - tzdata
 - unicodedata2
 - urllib3
@@ -231,15 +187,19 @@ dependencies:
 - zstd
 - pip:
   - 23andme-to-vcf
+  - about-time
   - aiohappyeyeballs
   - aiohttp
   - aiosignal
   - aiosqlite
+  - alive-progress
+  - annotated-types
   - anyio
   - argon2-cffi
   - argon2-cffi-bindings
   - arrow
   - asttokens
+  - attrs
   - async-lru
   - async-timeout
   - autograd
@@ -248,10 +208,16 @@ dependencies:
   - bcbio-gff
   - beautifulsoup4
   - bleach
+  - certifi
   - chardet
+  - charset-normalizer
+  - click
+  - coloredlogs
+  - colormath
   - comm
   - cryptography
   - cryptograpy
+  - cycler
   - cssselect2
   - cvxopt
   - debugpy
@@ -266,10 +232,20 @@ dependencies:
   - formulaic
   - fqdn
   - frozenlist
+  - gitdb
+  - GitPython
+  - grapheme
+  - h2
   - h11
   - html5lib
   - httpcore
   - httpx
+  - hpack
+  - humanfriendly
+  - humanize
+  - hyperframe
+  - idna
+  - importlib-metadata
   - importlib_resources
   - interface-meta
   - intervaltree
@@ -278,9 +254,12 @@ dependencies:
   - isodate
   - isoduration
   - jedi
+  - Jinja2
   - joblib
   - json5
   - jsonpointer
+  - jsonschema
+  - jsonschema-specifications
   - jupyter
   - jupyter-console
   - jupyter-events
@@ -293,8 +272,11 @@ dependencies:
   - jupyterlab_pygments
   - jupyterlab_server
   - lifelines
+  - Markdown
+  - markdown-it-py
   - matplotlib
   - matplotlib-inline
+  - mdurl
   - mistune
   - mpmath
   - multidict
@@ -304,6 +286,7 @@ dependencies:
   - nbformat
   - nest-asyncio
   - nextstrain-augur
+  - natsort
   - notebook
   - notebook_shim
   - open-cravat
@@ -311,6 +294,7 @@ dependencies:
   - openpyxl
   - overrides
   - oyaml
+  - packaging
   - pandoc
   - pandocfilters
   - parso
@@ -329,24 +313,34 @@ dependencies:
   - pyarrow
   - pydyf
   - pyfastx
+  - pyaml-env
+  - pycirclize
   - pylance
   - pyliftover
   - pyOpenSSL
   - pyphen
   - pyrsistent
   - python-json-logger
+  - python-dateutil
+  - python-dotenv
+  - pytz
   - PyVCF3
   - pyzmq
   - qtconsole
   - QtPy
+  - referencing
+  - requests
   - requests-toolbelt
   - rfc3339-validator
   - rfc3986-validator
+  - rich
+  - rich-click
   - scikit-plot
   - scipy
   - seaborn
   - Send2Trash
   - sniffio
+  - smmap
   - sortedcontainers
   - soupsieve
   - stack-data
@@ -358,6 +352,9 @@ dependencies:
   - tornado
   - traitlets
   - twobitreader
+  - typeguard
+  - typing-extensions
+  - typing-inspection
   - types-python-dateutil
   - uri-template
   - virtualenv
