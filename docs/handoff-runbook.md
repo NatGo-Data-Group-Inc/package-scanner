@@ -166,6 +166,10 @@ Key files:
 - `remediation-spreadsheet.csv`
 - `governance-summary.json`
 - `run-metadata.json`
+- `safety-report.json`
+
+For Cyber interpretation of the Python review bundle, use
+`docs/cyber-artifacts.md` as the authoritative file-by-file reference.
 
 ## 7. R Scan Procedure
 

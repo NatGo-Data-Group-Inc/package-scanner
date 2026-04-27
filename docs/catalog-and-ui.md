@@ -185,7 +185,14 @@ together with `renv.lock`, `installed-packages.csv`, `materialization-summary.js
 
 ### For Cyber: Artifact Reference
 
-See `docs/cyber-artifacts.md` for a concise handoff guide describing every file in the download bundle (findings CSVs, remediation CSVs, OSV/Trivy reports, materialization/governance summaries, run metadata, preflight results, and offline bundles).
+See `docs/cyber-artifacts.md` for the authoritative handoff guide describing
+every file in the review bundle, including:
+
+- the full package inventory via `approval-candidate-packages.csv`
+- Python `safety-report.json`
+- Trivy/OSV raw scanner outputs
+- governance and remediation CSVs
+- materialization and run metadata context
 
 ### Default Filters
 

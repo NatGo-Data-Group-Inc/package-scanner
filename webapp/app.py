@@ -47,11 +47,16 @@ def artifact_bundle_entries(platform: dict) -> list[tuple[str, str]]:
         ("materialization-summary.json", paths.get("materialization_summary_key")),
         ("governance-summary.json", paths.get("governance_summary_key")),
         ("run-metadata.json", paths.get("run_metadata_key")),
+        (
+            "approval-candidate-packages.csv",
+            f"{paths.get('requirements_prefix', '')}approval-candidate-packages.csv" if paths.get("requirements_prefix") else None,
+        ),
         ("vulnerability-findings.csv", paths.get("vulnerability_findings_key")),
         ("remediation-required.csv", paths.get("remediation_required_key")),
         ("remediation-exceptions.csv", paths.get("remediation_exceptions_key")),
         ("remediation-spreadsheet.csv", paths.get("remediation_spreadsheet_key")),
         ("trivy-sbom-report.json", paths.get("trivy_report_key")),
+        ("safety-report.json", paths.get("safety_report_key")),
         ("osv-report.json", paths.get("osv_report_key")),
     ]
     return [(filename, key) for filename, key in entries if key]
