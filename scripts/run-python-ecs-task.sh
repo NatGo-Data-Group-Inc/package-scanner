@@ -13,6 +13,7 @@ SCRIPT_ROOT="${SCRIPT_ROOT:-/opt/package-scanner/scripts}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 MAMBA_BIN="${MAMBA_BIN:-/usr/local/bin/micromamba}"
 PYTHON_CPU_ONLY="${PYTHON_CPU_ONLY:-true}"
+CONDA_PACK_BIN="${CONDA_PACK_BIN:-conda-pack}"
 
 checkpoint_pid=""
 
@@ -32,6 +33,49 @@ upload_if_exists() {
   return 0
 }
 
+pack_python_env() {
+  local output_file="$1"
+  local checksum_file="$2"
+  if [[ ! -d "${ENV_PREFIX}" ]]; then
+    return 0
+  fi
+  "${CONDA_PACK_BIN}" \
+    --prefix "${ENV_PREFIX}" \
+    --output "${output_file}" \
+    --format tar.gz \
+    --force >/dev/null
+  "${PYTHON_BIN}" - "${output_file}" "${checksum_file}" <<'PY'
+from __future__ import annotations
+
+import hashlib
+import sys
+from pathlib import Path
+
+archive = Path(sys.argv[1])
+checksum_file = Path(sys.argv[2])
+h = hashlib.sha256()
+with archive.open("rb") as handle:
+    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+        h.update(chunk)
+checksum_file.write_text(f"{h.hexdigest()}  {archive.name}\n", encoding="utf-8")
+PY
+}
+
+restore_packed_python_env() {
+  local archive_path="$1"
+  rm -rf "${ENV_PREFIX}"
+  mkdir -p "${ENV_PREFIX}"
+  "${PYTHON_BIN}" "${SCRIPT_ROOT}/extract-archive.py" --archive "${archive_path}" --destination "${ENV_PREFIX}"
+  if [[ -x "${ENV_PREFIX}/bin/conda-unpack" ]]; then
+    "${ENV_PREFIX}/bin/conda-unpack" >/dev/null
+  elif [[ -x "${ENV_PREFIX}/Scripts/conda-unpack.exe" ]]; then
+    "${ENV_PREFIX}/Scripts/conda-unpack.exe" >/dev/null
+  else
+    echo "conda-unpack was not found in restored environment ${ENV_PREFIX}" >&2
+    exit 2
+  fi
+}
+
 publish_checkpoint() {
   local phase="${1:-materialize}"
   write_state "${phase}"
@@ -44,10 +88,7 @@ publish_checkpoint() {
     aws s3 cp "${RUN_DIR}/checkpoint-python-pkgs.tar.gz.sha256" "${CHECKPOINT_PREFIX}/latest/python-pkgs.tar.gz.sha256" >/dev/null
   fi
   if [[ -d "${ENV_PREFIX}" ]]; then
-    "${PYTHON_BIN}" "${SCRIPT_ROOT}/bundle-directory.py" \
-      --source-dir "${ENV_PREFIX}" \
-      --output-file "${RUN_DIR}/checkpoint-python-env.tar.gz" \
-      --checksum-file "${RUN_DIR}/checkpoint-python-env.tar.gz.sha256"
+    pack_python_env "${RUN_DIR}/checkpoint-python-env.tar.gz" "${RUN_DIR}/checkpoint-python-env.tar.gz.sha256"
     aws s3 cp "${RUN_DIR}/checkpoint-python-env.tar.gz" "${CHECKPOINT_PREFIX}/latest/python-env.tar.gz" >/dev/null
     aws s3 cp "${RUN_DIR}/checkpoint-python-env.tar.gz.sha256" "${CHECKPOINT_PREFIX}/latest/python-env.tar.gz.sha256" >/dev/null
   fi
@@ -443,8 +484,7 @@ if aws s3 ls "${CHECKPOINT_PREFIX}/latest/python-pkgs.tar.gz" >/dev/null 2>&1; t
 fi
 if aws s3 ls "${CHECKPOINT_PREFIX}/latest/python-env.tar.gz" >/dev/null 2>&1; then
   aws s3 cp "${CHECKPOINT_PREFIX}/latest/python-env.tar.gz" "${RUN_DIR}/checkpoint-python-env.tar.gz" >/dev/null
-  mkdir -p "${ENV_PREFIX}"
-  "${PYTHON_BIN}" "${SCRIPT_ROOT}/extract-archive.py" --archive "${RUN_DIR}/checkpoint-python-env.tar.gz" --destination "${ENV_PREFIX}"
+  restore_packed_python_env "${RUN_DIR}/checkpoint-python-env.tar.gz"
 fi
 
 write_state "materialize"
@@ -509,10 +549,7 @@ write_state "publish"
   --source-dir "${ROOT_PREFIX}/pkgs" \
   --output-file "${RUN_DIR}/python-pkgs-${TARGET_PLATFORM}-${TS}.tar.gz" \
   --checksum-file "${RUN_DIR}/python-pkgs-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
-"${PYTHON_BIN}" "${SCRIPT_ROOT}/bundle-directory.py" \
-  --source-dir "${ENV_PREFIX}" \
-  --output-file "${RUN_DIR}/python-env-${TARGET_PLATFORM}-${TS}.tar.gz" \
-  --checksum-file "${RUN_DIR}/python-env-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
+pack_python_env "${RUN_DIR}/python-env-${TARGET_PLATFORM}-${TS}.tar.gz" "${RUN_DIR}/python-env-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
 tar -czf "${RUN_DIR}/environment-artifacts.tar.gz" -C "${RUN_DIR}" environment.yml requirements.lock.txt conda-list.json python-packages.cdx.json materialization-summary.json environment.original.yml environment.cpu-normalization.log || true
 
 aws s3 cp "${RUN_DIR}/" "s3://${EPHEMERAL_BUCKET}/${EPHEMERAL_PREFIX}/${TARGET_PLATFORM}/${TS}/" --recursive >/dev/null

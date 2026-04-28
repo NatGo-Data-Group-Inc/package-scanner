@@ -67,6 +67,16 @@ Python artifacts (per platform/timestamp in evidence bucket):
 - Model results: `evidence/model-results/python/<platform>/<ts>/trivy-sbom-report.json` (plus `safety-report.json` if enabled)
 - Governance: `evidence/governance/python/<platform>/<ts>/vulnerability-findings.csv`, `remediation-required.csv`, `remediation-exceptions.csv`, `remediation-spreadsheet.csv`, `governance-summary.json`
 - Traceability: `evidence/traceability/python/<platform>/<ts>/run-metadata.json`, `materialization-summary.json`
+- Offline/cache artifacts:
+  - `evidence/packages/offline/python/<platform>/<ts>/python-pkgs-<platform>-<ts>.tar.gz`
+  - `evidence/env-artifacts/python/<platform>/<ts>/python-env-<platform>-<ts>.tar.gz`
+
+Python packaging semantics:
+
+- `python-env-*.tar.gz` is now produced with `conda-pack`.
+- Restore/reuse of that environment must run `conda-unpack` after extraction at the target prefix.
+- This makes the Python environment bundle relocatable in a way the previous plain tar/extract approach was not.
+- `python-pkgs-*.tar.gz` remains a package-cache archive, not a relocatable environment by itself.
 
 R artifacts (per platform/timestamp in evidence bucket):
 - Requirements: `evidence/requirements/r/<platform>/<ts>/renv.lock`, `installed-packages.csv`

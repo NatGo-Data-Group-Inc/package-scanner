@@ -289,6 +289,11 @@ Accuracy/safety behavior:
 - governance generation fails closed on schema mismatches.
 - CodeBuild verifies governance script integrity (`SHA-256`) before execution.
 
+Python environment artifact behavior:
+- the Python target environment bundle is produced with `conda-pack`
+- after extraction at the destination prefix, run `conda-unpack`
+- this replaces the older plain tar/extract behavior and is intended for relocatable Python environment delivery
+
 Deployment guardrails:
 - `deploy-cfn.sh`, `start-python-scan.sh`, and `start-r-scan.sh` require `--deployment-lock-token`.
 - stack deploy writes CloudFormation tag `DeploymentLockToken=<token>` and all scan starts must match it.

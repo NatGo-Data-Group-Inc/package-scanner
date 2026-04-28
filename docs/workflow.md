@@ -124,6 +124,14 @@ Evidence paths:
 - `s3://<evidence-bucket>/evidence/traceability/python/<platform>/<timestamp>/...`
 - `s3://<evidence-bucket>/evidence/model-results/python/<platform>/<timestamp>/...`
 - `s3://<evidence-bucket>/evidence/requirements/python/<platform>/<timestamp>/...`
+- `s3://<evidence-bucket>/evidence/packages/offline/python/<platform>/<timestamp>/...`
+- `s3://<evidence-bucket>/evidence/env-artifacts/python/<platform>/<timestamp>/...`
+
+Python offline environment note:
+
+- `python-env-<platform>-<timestamp>.tar.gz` is a `conda-pack` archive of the realized target environment.
+- Extract it at the destination prefix and run `conda-unpack` from inside that extracted environment.
+- `python-pkgs-<platform>-<timestamp>.tar.gz` is the Micromamba/Conda package cache archive and can be used alongside the packed environment, but it is not itself the relocatable environment.
 
 ## 6) R Scan: Example (`tidyverse`)
 
