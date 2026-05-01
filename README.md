@@ -2,8 +2,8 @@
 
 Redeployable AWS infrastructure for package scanning across Python and R with
 platform-specific execution paths:
-- Python currently runs on CodeBuild for all-platform scans and can run on ECS
-  on EC2 for Linux-only scans.
+- Python supports the legacy CodeBuild path and the newer ECS on EC2 path for
+  linux/amd64, linux/arm64, and windows/amd64 scans.
 - R is migrating to ECS on EC2 for long-running materialization and scan work.
 
 Operator documentation:
@@ -54,11 +54,11 @@ Project policies:
   - `s3://<input-bucket>/inputs/python/environment.yml`
   - `s3://<input-bucket>/inputs/r/renv.lock`
 - Evidence bucket (long-term):
-  - `evidence/requirements/python/<platform>/<timestamp>/...`
-  - `evidence/model-results/python/<platform>/<timestamp>/...`
-  - `evidence/env-artifacts/python/<platform>/<timestamp>/...`
-  - `evidence/governance/python/<platform>/<timestamp>/...`
-  - `evidence/traceability/python/<platform>/<timestamp>/run-metadata.json`
+  - `evidence/requirements/python/<platform>/<timestamp>/<execution-id>/...`
+  - `evidence/model-results/python/<platform>/<timestamp>/<execution-id>/...`
+  - `evidence/env-artifacts/python/<platform>/<timestamp>/<execution-id>/...`
+  - `evidence/governance/python/<platform>/<timestamp>/<execution-id>/...`
+  - `evidence/traceability/python/<platform>/<timestamp>/<execution-id>/run-metadata.json`
   - reserved for future OCR/raw extraction: `evidence/raw-harvest/...`
 - Ephemeral bucket (short-lived):
   - `deploy/tmp/python/<platform>/<timestamp>/...`
@@ -69,7 +69,8 @@ Project policies:
 ## Why this design
 
 - Fully redeployable with CloudFormation.
-- Python stays on a simple CodeBuild path.
+- Python ECS now carries the same staged materialization, checkpointing, and
+  relocatable environment model across Linux and Windows workers.
 - R uses ECS on EC2 because package materialization can exceed practical CodeBuild limits.
 - Traceability is retained while temporary deploy artifacts are removed.
 - Evidence paths cleanly separate requirements, model results, and environment packages.
@@ -77,7 +78,7 @@ Project policies:
 ## Project Layout
 
 - `deployment/cfn/python-scan-stack.yaml`: Python scan infrastructure and the preserved CodeBuild-based path.
-- `deployment/cfn/python-ecs-scan-stack.yaml`: Python ECS infrastructure for Linux amd64/arm64 scanning.
+- `deployment/cfn/python-ecs-scan-stack.yaml`: Python ECS infrastructure for Linux amd64/arm64 and Windows amd64 scanning.
 - `deployment/cfn/ecs-scan-stack.yaml`: R ECS infrastructure and orchestration.
 - `webapp/app.py`: read-only Flask browser for the scan catalog.
 - `api/openapi.yaml`: control-plane API contract for UI/backend integration.
@@ -86,6 +87,7 @@ Project policies:
 - `scripts/deploy-r-ecs-cfn.sh`: deploy/update entrypoint for the R ECS stack.
 - `scripts/start-python-scan.sh`: canonical scan start entrypoint.
 - `scripts/build-python-ecs-images.sh`: build/push entrypoint for the Python ECS Linux image.
+- `scripts/build-python-ecs-windows-image.ps1`: build/push entrypoint for the Python ECS Windows image from a Windows Docker host.
 - `scripts/start-r-scan.sh`: canonical R scan start entrypoint. Starts the Step Functions orchestration for the ECS R workflow.
 - `scripts/deploy-cfn.ps1`: PowerShell wrapper for `deploy-cfn.sh`.
 - `scripts/start-python-scan.ps1`: PowerShell wrapper for `start-python-scan.sh`.
@@ -101,9 +103,9 @@ Project policies:
 - Python stack:
   - CodeBuild projects for Python platform scans
 - Python ECS stack:
-  - ECS clusters for Linux Python workers
-  - ECR repository for Linux Python image
-  - Step Functions state machine for Linux-only Python ECS scans
+  - ECS clusters for Linux and Windows Python workers
+  - ECR repositories for Linux and Windows Python images
+  - Step Functions state machine for Python ECS scans across linux/amd64, linux/arm64, and windows/amd64
 - R ECS stack:
   - ECS clusters for Linux and Windows R workers
   - ECR repositories for Linux and Windows R images
@@ -156,7 +158,7 @@ Only include `--safety-api-key` when supplying your licensed Safety token; omit 
 flag to run without authenticated Safety.
 Pass them only when overriding to alternate buckets.
 
-Linux-only Python ECS path:
+Python ECS path:
 
 4. Deploy the Python ECS stack:
 
@@ -183,7 +185,16 @@ Linux-only Python ECS path:
   --profile <aws-profile>
 ```
 
-6. Start a Linux-only Python ECS scan:
+Build and push the Windows Python image from a Windows Docker host:
+
+```powershell
+.\scripts\build-python-ecs-windows-image.ps1 `
+  -StackName cyber-scanner-dev-python-ecs `
+  -Region us-east-1 `
+  -Profile <aws-profile>
+```
+
+6. Start a Python ECS scan:
 
 ```bash
 ./scripts/start-python-scan.sh \
@@ -197,13 +208,15 @@ Linux-only Python ECS path:
   --platform-set linux-only
 ```
 
+Use `--platform-set windows-only` for the Windows ECS worker path.
+
 7. Review Python evidence outputs:
 
-- `s3://<evidence-bucket>/evidence/requirements/python/<platform>/<timestamp>/...`
-- `s3://<evidence-bucket>/evidence/model-results/python/<platform>/<timestamp>/...`
-- `s3://<evidence-bucket>/evidence/env-artifacts/python/<platform>/<timestamp>/...`
-- `s3://<evidence-bucket>/evidence/governance/python/<platform>/<timestamp>/...`
-- `s3://<evidence-bucket>/evidence/traceability/python/<platform>/<timestamp>/run-metadata.json`
+- `s3://<evidence-bucket>/evidence/requirements/python/<platform>/<timestamp>/<execution-id>/...`
+- `s3://<evidence-bucket>/evidence/model-results/python/<platform>/<timestamp>/<execution-id>/...`
+- `s3://<evidence-bucket>/evidence/env-artifacts/python/<platform>/<timestamp>/<execution-id>/...`
+- `s3://<evidence-bucket>/evidence/governance/python/<platform>/<timestamp>/<execution-id>/...`
+- `s3://<evidence-bucket>/evidence/traceability/python/<platform>/<timestamp>/<execution-id>/run-metadata.json`
 - `s3://<evidence-bucket>/evidence/catalog/python/...`
 - `s3://<evidence-bucket>/evidence/catalog/r/...`
 

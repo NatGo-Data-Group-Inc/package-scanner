@@ -46,7 +46,7 @@ Optional:
   --remediate-medium <true|false>         (default: true)
   --fail-on-medium <true|false>           (default: false)
   --safety-api-key <key>                  (default: empty/unauthenticated)
-  --platform-set <all|linux-only|linux-amd64|linux-arm64>
+  --platform-set <all|linux-only|linux-amd64|linux-arm64|windows-only>
                                            (default: all)
 EOF
 }
@@ -90,8 +90,8 @@ if [[ -z "${DEPLOYMENT_LOCK_TOKEN}" ]]; then
   echo "Guardrail: --deployment-lock-token is required." >&2
   exit 1
 fi
-if [[ "${PLATFORM_SET}" != "all" && "${PLATFORM_SET}" != "linux-only" && "${PLATFORM_SET}" != "linux-amd64" && "${PLATFORM_SET}" != "linux-arm64" ]]; then
-  echo "Guardrail: --platform-set must be one of: all, linux-only, linux-amd64, linux-arm64" >&2
+if [[ "${PLATFORM_SET}" != "all" && "${PLATFORM_SET}" != "linux-only" && "${PLATFORM_SET}" != "linux-amd64" && "${PLATFORM_SET}" != "linux-arm64" && "${PLATFORM_SET}" != "windows-only" ]]; then
+  echo "Guardrail: --platform-set must be one of: all, linux-only, linux-amd64, linux-arm64, windows-only" >&2
   exit 1
 fi
 if [[ -n "${SOURCE_ENVIRONMENT_FILE}" && ! -f "${SOURCE_ENVIRONMENT_FILE}" ]]; then
@@ -200,13 +200,16 @@ start_build() {
   printf '%-16s %-48s %s\n' "${platform}" "${project_name}" "${build_id}"
 }
 
-start_linux_ecs_scan() {
+start_ecs_scan() {
   local state_machine_arn execution_name execution_arn timestamp
   local platforms_json
 
-  state_machine_arn="$(stack_output PythonLinuxScanOrchestrationStateMachineArn)"
+  state_machine_arn="$(stack_output PythonScanOrchestrationStateMachineArn)"
   if [[ -z "${state_machine_arn}" || "${state_machine_arn}" == "None" ]]; then
-    echo "Missing stack output: PythonLinuxScanOrchestrationStateMachineArn" >&2
+    state_machine_arn="$(stack_output PythonLinuxScanOrchestrationStateMachineArn)"
+  fi
+  if [[ -z "${state_machine_arn}" || "${state_machine_arn}" == "None" ]]; then
+    echo "Missing stack output: PythonScanOrchestrationStateMachineArn" >&2
     exit 1
   fi
 
@@ -215,9 +218,11 @@ start_linux_ecs_scan() {
   case "${PLATFORM_SET}" in
     linux-amd64) platforms_json='["linux-amd64"]' ;;
     linux-arm64) platforms_json='["linux-arm64"]' ;;
-    *) platforms_json='["linux-amd64","linux-arm64"]' ;;
+    windows-only) platforms_json='["windows-amd64"]' ;;
+    linux-only) platforms_json='["linux-amd64","linux-arm64"]' ;;
+    *) platforms_json='["linux-amd64","linux-arm64","windows-amd64"]' ;;
   esac
-  echo "Starting linux-only Python ECS scan: ${state_machine_arn}"
+  echo "Starting Python ECS scan: ${state_machine_arn}"
   execution_arn="$(
     aws stepfunctions start-execution \
       --state-machine-arn "${state_machine_arn}" \
@@ -235,8 +240,8 @@ EOF
   printf '%-18s s3://%s/%s/orchestration/python/%s/orchestration-summary.json\n' "SummaryPath" "${EVIDENCE_BUCKET}" "${EVIDENCE_PREFIX}" "${execution_name}"
 }
 
-if [[ "${PLATFORM_SET}" == "linux-only" || "${PLATFORM_SET}" == "linux-amd64" || "${PLATFORM_SET}" == "linux-arm64" ]]; then
-  start_linux_ecs_scan
+if [[ "${PLATFORM_SET}" == "linux-only" || "${PLATFORM_SET}" == "linux-amd64" || "${PLATFORM_SET}" == "linux-arm64" || "${PLATFORM_SET}" == "windows-only" || "${STACK_NAME}" == *"-python-ecs" ]]; then
+  start_ecs_scan
 else
   printf '%-16s %-48s %s\n' "Platform" "ProjectName" "BuildId"
   start_build "linux-amd64" "LinuxAmd64ProjectName"

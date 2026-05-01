@@ -1,9 +1,9 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  ECS on EC2 infrastructure for Linux Python package scanning. This stack
-  provisions ECS-backed worker pools for linux/amd64 and linux/arm64 Python
-  package scanning, along with Step Functions orchestration and reusable
-  evidence publication.
+  ECS on EC2 infrastructure for Python package scanning. This stack
+  provisions ECS-backed worker pools for linux/amd64, linux/arm64, and
+  windows/amd64 Python package scanning, along with Step Functions
+  orchestration and reusable evidence publication.
 
 Parameters:
   EnvironmentName:
@@ -28,6 +28,9 @@ Parameters:
   LinuxSubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
 
+  WindowsSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+
   LinuxAmd64InstanceType:
     Type: String
     Default: m7i.xlarge
@@ -36,10 +39,20 @@ Parameters:
     Type: String
     Default: m7g.xlarge
 
+  WindowsAmd64InstanceType:
+    Type: String
+    Default: m7i.xlarge
+
   LinuxRootVolumeSize:
     Type: Number
     Default: 250
     MinValue: 80
+    MaxValue: 1000
+
+  WindowsRootVolumeSize:
+    Type: Number
+    Default: 300
+    MinValue: 100
     MaxValue: 1000
 
 Conditions:
@@ -206,6 +219,11 @@ Resources:
     Properties:
       ClusterName: !Sub '${EnvironmentName}-python-linux-arm64'
 
+  PythonWindowsAmd64Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub '${EnvironmentName}-python-windows-amd64'
+
   PythonLinuxAmd64LaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
     Properties:
@@ -258,6 +276,32 @@ Resources:
             echo "ECS_IMAGE_PULL_BEHAVIOR=always" >> /etc/ecs/ecs.config
             mkdir -p /var/lib/package-scanner
 
+  PythonWindowsAmd64LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub '${EnvironmentName}-python-windows-amd64'
+      LaunchTemplateData:
+        IamInstanceProfile:
+          Arn: !GetAtt ECSInstanceProfile.Arn
+        ImageId: !Sub '{{resolve:ssm:/aws/service/ami-windows-latest/Windows_Server-2022-English-Full-ECS_Optimized/image_id}}'
+        InstanceType: !Ref WindowsAmd64InstanceType
+        SecurityGroupIds:
+          - !Ref PythonWorkerSecurityGroup
+        BlockDeviceMappings:
+          - DeviceName: /dev/sda1
+            Ebs:
+              VolumeSize: !Ref WindowsRootVolumeSize
+              VolumeType: gp3
+              DeleteOnTermination: true
+        UserData:
+          Fn::Base64: !Sub |
+            <powershell>
+            Import-Module ECSTools
+            Initialize-ECSAgent -Cluster '${PythonWindowsAmd64Cluster}' -EnableTaskIAMRole -LoggingDrivers '["json-file","awslogs"]'
+            [Environment]::SetEnvironmentVariable("ECS_IMAGE_PULL_BEHAVIOR", "always", "Machine")
+            New-Item -ItemType Directory -Force -Path C:\package-scanner-data | Out-Null
+            </powershell>
+
   PythonLinuxAmd64ASG:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
@@ -290,10 +334,33 @@ Resources:
           Value: !Sub '${EnvironmentName}-python-linux-arm64'
           PropagateAtLaunch: true
 
+  PythonWindowsAmd64ASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub '${EnvironmentName}-python-windows-amd64'
+      MinSize: '1'
+      MaxSize: '1'
+      DesiredCapacity: '1'
+      VPCZoneIdentifier: !Ref WindowsSubnetIds
+      LaunchTemplate:
+        LaunchTemplateId: !Ref PythonWindowsAmd64LaunchTemplate
+        Version: !GetAtt PythonWindowsAmd64LaunchTemplate.LatestVersionNumber
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-python-windows-amd64'
+          PropagateAtLaunch: true
+
   PythonLinuxRepository:
     Type: AWS::ECR::Repository
     Properties:
       RepositoryName: !Sub '${EnvironmentName}/python-scan-linux'
+      ImageScanningConfiguration:
+        ScanOnPush: true
+
+  PythonWindowsRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub '${EnvironmentName}/python-scan-windows'
       ImageScanningConfiguration:
         ScanOnPush: true
 
@@ -307,6 +374,12 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub '/ecs/${EnvironmentName}/python/linux-arm64'
+      RetentionInDays: 30
+
+  PythonWindowsAmd64LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/${EnvironmentName}/python/windows-amd64'
       RetentionInDays: 30
 
   PythonLinuxAmd64TaskDefinition:
@@ -362,6 +435,34 @@ Resources:
             LogDriver: awslogs
             Options:
               awslogs-group: !Ref PythonLinuxArm64LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: scanner
+
+  PythonWindowsAmd64TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${EnvironmentName}-python-windows-amd64'
+      Cpu: '4096'
+      Memory: '8192'
+      NetworkMode: bridge
+      RequiresCompatibilities: [EC2]
+      ExecutionRoleArn: !GetAtt PythonTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt PythonTaskRole.Arn
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: WINDOWS_SERVER_2022_CORE
+      ContainerDefinitions:
+        - Name: scanner
+          Image: !Sub '${PythonWindowsRepository.RepositoryUri}:latest'
+          Essential: true
+          Command: ['windows-amd64']
+          Environment:
+            - Name: SCRIPT_ROOT
+              Value: C:\package-scanner\scripts
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref PythonWindowsAmd64LogGroup
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: scanner
 
@@ -585,13 +686,16 @@ Resources:
                 Resource:
                   - !Ref PythonLinuxAmd64TaskDefinition
                   - !Ref PythonLinuxArm64TaskDefinition
+                  - !Ref PythonWindowsAmd64TaskDefinition
                   - !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${EnvironmentName}-python-linux-amd64:*'
                   - !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${EnvironmentName}-python-linux-arm64:*'
+                  - !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${EnvironmentName}-python-windows-amd64:*'
               - Effect: Allow
                 Action: ecs:RunTask
                 Resource:
                   - !GetAtt PythonLinuxAmd64Cluster.Arn
                   - !GetAtt PythonLinuxArm64Cluster.Arn
+                  - !GetAtt PythonWindowsAmd64Cluster.Arn
               - Effect: Allow
                 Action: iam:PassRole
                 Resource:
@@ -614,7 +718,7 @@ Resources:
   PythonLinuxScanOrchestrationStateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
-      StateMachineName: !Sub '${EnvironmentName}-python-ecs-linux-scan-orchestrator'
+      StateMachineName: !Sub '${EnvironmentName}-python-ecs-scan-orchestrator'
       RoleArn: !GetAtt PythonScanOrchestrationRole.Arn
       DefinitionString: !Sub |
         {
@@ -653,6 +757,11 @@ Resources:
                         "Variable": "$.platform",
                         "StringEquals": "linux-arm64",
                         "Next": "RunLinuxArm64"
+                      },
+                      {
+                        "Variable": "$.platform",
+                        "StringEquals": "windows-amd64",
+                        "Next": "RunWindowsAmd64"
                       }
                     ],
                     "Default": "UnsupportedPlatform"
@@ -777,13 +886,73 @@ Resources:
                     },
                     "End": true
                   },
+                  "RunWindowsAmd64": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::ecs:runTask.sync",
+                    "Retry": [
+                      {
+                        "ErrorEquals": ["ECS.AmazonECSException", "ECS.ClientException", "States.TaskFailed"],
+                        "IntervalSeconds": 30,
+                        "BackoffRate": 2.0,
+                        "MaxAttempts": 6
+                      }
+                    ],
+                    "Parameters": {
+                      "Cluster": "${PythonWindowsAmd64Cluster.Arn}",
+                      "TaskDefinition": "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${EnvironmentName}-python-windows-amd64",
+                      "Overrides": {
+                        "ContainerOverrides": [
+                          {
+                            "Name": "scanner",
+                            "Environment": [
+                              { "Name": "INPUT_BUCKET", "Value.$": "$.input_bucket" },
+                              { "Name": "INPUT_OBJECT_KEY", "Value.$": "$.input_object_key" },
+                              { "Name": "EVIDENCE_BUCKET", "Value.$": "$.evidence_bucket" },
+                              { "Name": "EVIDENCE_PREFIX", "Value.$": "$.evidence_prefix" },
+                              { "Name": "EPHEMERAL_BUCKET", "Value.$": "$.ephemeral_bucket" },
+                              { "Name": "EPHEMERAL_PREFIX", "Value.$": "$.ephemeral_prefix" },
+                              { "Name": "REMEDIATE_MEDIUM", "Value.$": "$.remediate_medium" },
+                              { "Name": "FAIL_ON_MEDIUM", "Value.$": "$.fail_on_medium" },
+                              { "Name": "SAFETY_API_KEY", "Value.$": "$.safety_api_key" },
+                              { "Name": "SCAN_TIMESTAMP", "Value.$": "$.scan_timestamp" },
+                              { "Name": "SCAN_EXECUTION_ID", "Value.$": "$.scan_execution_id" }
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    "ResultSelector": {
+                      "platform": "windows-amd64",
+                      "status": "SUCCEEDED",
+                      "taskArn.$": "$.TaskArn",
+                      "clusterArn": "${PythonWindowsAmd64Cluster.Arn}"
+                    },
+                    "Catch": [
+                      {
+                        "ErrorEquals": ["States.ALL"],
+                        "ResultPath": "$.error",
+                        "Next": "WindowsAmd64Failure"
+                      }
+                    ],
+                    "End": true
+                  },
+                  "WindowsAmd64Failure": {
+                    "Type": "Pass",
+                    "Parameters": {
+                      "platform": "windows-amd64",
+                      "status": "FAILED",
+                      "error.$": "$.error.Error",
+                      "cause.$": "$.error.Cause"
+                    },
+                    "End": true
+                  },
                   "UnsupportedPlatform": {
                     "Type": "Pass",
                     "Parameters": {
                       "platform.$": "$.platform",
                       "status": "FAILED",
                       "error": "UnsupportedPlatform",
-                      "cause": "Supported Python ECS Linux platforms are linux-amd64 and linux-arm64."
+                      "cause": "Supported Python ECS platforms are linux-amd64, linux-arm64, and windows-amd64."
                     },
                     "End": true
                   }
@@ -801,6 +970,8 @@ Resources:
                 "Payload": {
                   "scan_execution_id.$": "$.scan_execution_id",
                   "scan_timestamp.$": "$.scan_timestamp",
+                  "input_bucket.$": "$.input_bucket",
+                  "input_object_key.$": "$.input_object_key",
                   "evidence_bucket.$": "$.evidence_bucket",
                   "evidence_prefix.$": "$.evidence_prefix",
                   "results.$": "$.results"
@@ -837,9 +1008,15 @@ Outputs:
     Value: !If [CreateEphemeralBucket, !Ref EphemeralBucket, !Ref ExistingEphemeralBucketName]
   PythonLinuxScanOrchestrationStateMachineArn:
     Value: !Ref PythonLinuxScanOrchestrationStateMachine
+  PythonScanOrchestrationStateMachineArn:
+    Value: !Ref PythonLinuxScanOrchestrationStateMachine
   PythonLinuxRepositoryUri:
     Value: !GetAtt PythonLinuxRepository.RepositoryUri
+  PythonWindowsRepositoryUri:
+    Value: !GetAtt PythonWindowsRepository.RepositoryUri
   PythonLinuxAmd64ClusterArn:
     Value: !GetAtt PythonLinuxAmd64Cluster.Arn
   PythonLinuxArm64ClusterArn:
     Value: !GetAtt PythonLinuxArm64Cluster.Arn
+  PythonWindowsAmd64ClusterArn:
+    Value: !GetAtt PythonWindowsAmd64Cluster.Arn

@@ -9,6 +9,9 @@ param(
   [string]$InputObjectKey = "inputs/python/environment.yml",
 
   [Parameter(Mandatory = $false)]
+  [string]$SourceEnvironmentFile = "",
+
+  [Parameter(Mandatory = $false)]
   [string]$EvidenceBucket = "",
 
   [Parameter(Mandatory = $false)]
@@ -48,12 +51,20 @@ param(
   [bool]$FailOnMedium = $false,
 
   [Parameter(Mandatory = $false)]
-  [string]$SafetyApiKey = ""
+  [string]$SafetyApiKey = "",
+
+  [Parameter(Mandatory = $false)]
+  [ValidateSet("all", "linux-only", "linux-amd64", "linux-arm64", "windows-only")]
+  [string]$PlatformSet = "all"
 )
 
 $ErrorActionPreference = "Stop"
 
-if (-not (Get-Command bash -ErrorAction SilentlyContinue)) {
+$bashExe = "bash"
+$gitBash = "C:\Program Files\Git\bin\bash.exe"
+if (Test-Path $gitBash) {
+  $bashExe = $gitBash
+} elseif (-not (Get-Command bash -ErrorAction SilentlyContinue)) {
   throw "bash is required in PATH to run this wrapper."
 }
 
@@ -61,6 +72,10 @@ $scriptDir = Split-Path -Parent $PSCommandPath
 $bashScript = Join-Path $scriptDir "start-python-scan.sh"
 if (-not (Test-Path $bashScript)) {
   throw "Bash script not found: $bashScript"
+}
+$bashScriptForBash = $bashScript -replace "\\", "/"
+if ($bashScriptForBash -match "^([A-Za-z]):/(.*)$") {
+  $bashScriptForBash = "/" + $Matches[1].ToLowerInvariant() + "/" + $Matches[2]
 }
 
 $bashArgs = @(
@@ -72,6 +87,7 @@ $bashArgs = @(
   "--region", $Region
 )
 
+if ($SourceEnvironmentFile -ne "") { $bashArgs += @("--source-environment-file", $SourceEnvironmentFile) }
 if ($Profile -ne "") { $bashArgs += @("--profile", $Profile) }
 if ($AllowDefaultProfile) { $bashArgs += "--allow-default-profile" }
 if ($ExpectedAccountId -ne "") { $bashArgs += @("--expected-account-id", $ExpectedAccountId) }
@@ -83,6 +99,7 @@ if ($FortifyCommand -ne "") { $bashArgs += @("--fortify-command", $FortifyComman
 $bashArgs += @("--remediate-medium", $RemediateMedium.ToString().ToLowerInvariant())
 $bashArgs += @("--fail-on-medium", $FailOnMedium.ToString().ToLowerInvariant())
 if ($SafetyApiKey -ne "") { $bashArgs += @("--safety-api-key", $SafetyApiKey) }
+$bashArgs += @("--platform-set", $PlatformSet)
 
-& bash $bashScript @bashArgs
+& $bashExe $bashScriptForBash @bashArgs
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

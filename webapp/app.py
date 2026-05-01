@@ -420,7 +420,7 @@ def create_app() -> Flask:
     app.config["EPHEMERAL_BUCKET"] = os.environ.get("EPHEMERAL_BUCKET", "")
     app.config["PYTHON_STATE_MACHINE_ARN"] = os.environ.get(
         "PYTHON_STATE_MACHINE_ARN",
-        "arn:aws:states:us-east-1:807497180525:stateMachine:package-scanner-dev-python-ecs-linux-scan-orchestrator",
+        "arn:aws:states:us-east-1:807497180525:stateMachine:package-scanner-dev-python-ecs-scan-orchestrator",
     )
     app.config["R_STATE_MACHINE_ARN"] = os.environ.get(
         "R_STATE_MACHINE_ARN",
@@ -430,6 +430,7 @@ def create_app() -> Flask:
         os.environ.get("PYTHON_STATE_MACHINE_ARNS"),
         app.config["PYTHON_STATE_MACHINE_ARN"],
         [
+            "arn:aws:states:us-east-1:807497180525:stateMachine:package-scanner-dev-python-ecs-scan-orchestrator",
             "arn:aws:states:us-east-1:807497180525:stateMachine:package-scanner-dev-python-ecs-linux-scan-orchestrator",
         ],
     )
@@ -2248,14 +2249,14 @@ def create_app() -> Flask:
             abort(404, "Candidate YAML not found")
 
         platform = request.form.get("platform", "linux-amd64")
-        if platform not in {"linux-amd64", "linux-arm64"}:
+        if platform not in {"linux-amd64", "linux-arm64", "windows-amd64"}:
             abort(400, "Unsupported Python ECS platform")
 
         stack = describe_stack(app.config["PYTHON_STACK_NAME"])
         input_bucket = stack_output_value(stack, "InputBucketName")
         evidence_bucket = stack_output_value(stack, "EvidenceBucketName")
         ephemeral_bucket = stack_output_value(stack, "EphemeralBucketName")
-        state_machine_arn = stack_output_value(stack, "PythonLinuxScanOrchestrationStateMachineArn")
+        state_machine_arn = stack_output_value(stack, "PythonScanOrchestrationStateMachineArn") or stack_output_value(stack, "PythonLinuxScanOrchestrationStateMachineArn")
         if not all([input_bucket, evidence_bucket, ephemeral_bucket, state_machine_arn]):
             abort(500, f"Python ECS stack {app.config['PYTHON_STACK_NAME']} is missing required outputs")
 
