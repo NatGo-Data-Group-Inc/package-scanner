@@ -134,6 +134,39 @@ Python offline environment note:
 - `python-pkgs-<platform>-<timestamp>.tar.gz` is the Micromamba/Conda package cache archive and can be used alongside the packed environment, but it is not itself the relocatable environment.
 - GUI/operator expectation: the primary surfaced Python handoff download should be the direct `python-env-<platform>-<timestamp>.tar.gz` file plus its checksum, not the package-cache tarball.
 
+Python environment change policy:
+
+- When a requester asks to add packages to an existing approved Python environment, the default workflow is to produce a new environment artifact, not to patch the enclave copy in place.
+- The correct default sequence is:
+  1. update the Python input artifact (`environment.yml`)
+  2. resolve and materialize the changed environment in the build plane
+  3. scan and govern the full realized environment
+  4. deliver a new relocatable `conda-pack` archive
+- This applies to both Linux and Windows Python environments.
+
+Why this is the default:
+
+- A single added package can force upgrades or downgrades of transitive dependencies.
+- Conda and pip resolution outcomes are environment-wide decisions, not isolated package installs.
+- Enclave-side wheel installation shifts compatibility risk to the least observable stage of the process.
+- Cyber approval should cover the final realized environment that will actually be deployed, not only the originally approved base plus an informal add-on.
+
+Overlay / wheel-only exception:
+
+- A wheel-only or overlay-only delivery can be considered only when all of these are true:
+  - the added package is pure Python
+  - it does not force changes to already approved package versions
+  - it does not introduce native-library, compiler, or ABI coupling
+  - the target interpreter and dependency set are already known to be compatible
+  - the overlay is tracked and governed as its own approved add-on
+- If any of those conditions are not clearly true, rebuild and rescan the full environment instead.
+
+Practical interpretation:
+
+- For Conda-first environments, treat the changed request as a new environment candidate.
+- For pip overlays on top of Conda, still prefer rebuilding the final full environment in the build plane.
+- Do not use enclave-side wheel installation as the normal answer to “please add package X.”
+
 ## 6) R Scan: Example (`tidyverse`)
 
 ### Step A: prepare the R input

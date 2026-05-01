@@ -80,6 +80,18 @@ Python packaging semantics:
 - In the GUI, the primary Python handoff download should be the direct `python-env-*.tar.gz` `conda-pack` archive plus its `.sha256`.
 - A secondary Python support bundle may also be offered for convenience, but the enclave delivery artifact is the direct relocatable environment archive, not the cache tarball.
 
+Python environment change policy:
+
+- Treat any requested package addition to an approved Python environment as a new environment request by default.
+- Update the source `environment.yml`, rebuild the environment in the build plane, rescan the realized full environment, and deliver a new `conda-pack` bundle.
+- Do not treat “add package X later in enclave” as the standard path. A single new package can change transitive dependencies, solver outcomes, and runtime compatibility.
+- Wheel-only or overlay-only delivery is allowed only as a narrow exception when all of these are true:
+  - the added package is pure Python
+  - it does not require upgrades or downgrades of already approved packages
+  - it does not introduce native-library or ABI coupling
+  - the overlay itself is being governed as a distinct approved add-on
+- For Conda-based environments, the default answer is always “rebuild and rescan the full environment,” not “install extra wheels in enclave later.”
+
 R artifacts (per platform/timestamp in evidence bucket):
 - Requirements: `evidence/requirements/r/<platform>/<ts>/renv.lock`, `installed-packages.csv`
   - When the scan starts from `requested-packages.json`, that same requirements prefix also includes `requested-packages.json`, and the `renv.lock` there is the generated lockfile from the realized build.
