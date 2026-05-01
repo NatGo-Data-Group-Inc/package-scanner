@@ -14,6 +14,8 @@ EXISTING_EPHEMERAL_BUCKET_NAME=""
 LINUX_AMD64_INSTANCE_TYPE="m7i.xlarge"
 LINUX_ARM64_INSTANCE_TYPE="m7g.xlarge"
 LINUX_ROOT_VOLUME_SIZE="250"
+WINDOWS_AMD64_INSTANCE_TYPE="m7i.xlarge"
+WINDOWS_ROOT_VOLUME_SIZE="300"
 TEMPLATE_S3_BUCKET=""
 
 usage() {
@@ -34,6 +36,8 @@ Options:
   --linux-amd64-instance-type <type>
   --linux-arm64-instance-type <type>
   --linux-root-volume-size <gb>
+  --windows-amd64-instance-type <type>
+  --windows-root-volume-size <gb>
   --s3-bucket <bucket>
 EOF
 }
@@ -53,6 +57,8 @@ while [[ $# -gt 0 ]]; do
     --linux-amd64-instance-type) LINUX_AMD64_INSTANCE_TYPE="$2"; shift 2 ;;
     --linux-arm64-instance-type) LINUX_ARM64_INSTANCE_TYPE="$2"; shift 2 ;;
     --linux-root-volume-size) LINUX_ROOT_VOLUME_SIZE="$2"; shift 2 ;;
+    --windows-amd64-instance-type) WINDOWS_AMD64_INSTANCE_TYPE="$2"; shift 2 ;;
+    --windows-root-volume-size) WINDOWS_ROOT_VOLUME_SIZE="$2"; shift 2 ;;
     --s3-bucket) TEMPLATE_S3_BUCKET="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
@@ -122,9 +128,12 @@ PARAM_OVERRIDES=(
   "EnvironmentName=${ENVIRONMENT_NAME}"
   "VpcId=${DEFAULT_VPC_ID}"
   "LinuxSubnetIds=${DEFAULT_SUBNETS_CSV}"
+  "WindowsSubnetIds=${DEFAULT_SUBNETS_CSV}"
   "LinuxAmd64InstanceType=${LINUX_AMD64_INSTANCE_TYPE}"
   "LinuxArm64InstanceType=${LINUX_ARM64_INSTANCE_TYPE}"
   "LinuxRootVolumeSize=${LINUX_ROOT_VOLUME_SIZE}"
+  "WindowsAmd64InstanceType=${WINDOWS_AMD64_INSTANCE_TYPE}"
+  "WindowsRootVolumeSize=${WINDOWS_ROOT_VOLUME_SIZE}"
 )
 
 if [[ -n "${EXISTING_INPUT_BUCKET_NAME}" ]]; then
