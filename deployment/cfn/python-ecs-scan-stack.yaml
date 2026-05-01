@@ -438,6 +438,7 @@ Resources:
               prefix = event.get("evidence_prefix", "evidence").rstrip("/")
               timestamp = event["scan_timestamp"]
               execution_id = event["scan_execution_id"]
+              run_segment = f"{timestamp}/{execution_id}"
               started_at = datetime.datetime.strptime(timestamp, "%Y%m%dT%H%M%SZ").replace(tzinfo=datetime.timezone.utc)
               completed_at = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
               platforms = []
@@ -454,13 +455,13 @@ Resources:
                   }
                   if status == "SUCCEEDED":
                       required = [
-                          f"{prefix}/requirements/python/{platform}/{timestamp}/environment.yml",
-                          f"{prefix}/requirements/python/{platform}/{timestamp}/requirements.lock.txt",
-                          f"{prefix}/traceability/python/{platform}/{timestamp}/materialization-summary.json",
-                          f"{prefix}/traceability/python/{platform}/{timestamp}/run-metadata.json",
+                          f"{prefix}/requirements/python/{platform}/{run_segment}/environment.yml",
+                          f"{prefix}/requirements/python/{platform}/{run_segment}/requirements.lock.txt",
+                          f"{prefix}/traceability/python/{platform}/{run_segment}/materialization-summary.json",
+                          f"{prefix}/traceability/python/{platform}/{run_segment}/run-metadata.json",
                       ]
                       missing = [key for key in required if not head_exists(bucket, key)]
-                      bundle_prefix = f"{prefix}/packages/offline/python/{platform}/{timestamp}/"
+                      bundle_prefix = f"{prefix}/packages/offline/python/{platform}/{run_segment}/"
                       bundle_keys = list_keys(bucket, bundle_prefix)
                       tarballs = [key for key in bundle_keys if key.endswith(".tar.gz")]
                       checksums = [key for key in bundle_keys if key.endswith(".tar.gz.sha256")]
@@ -487,6 +488,9 @@ Resources:
                   "completed_at": completed_at.isoformat().replace("+00:00", "Z"),
                   "duration_seconds": max(0, int((completed_at - started_at).total_seconds())),
                   "overall_status": overall,
+                  "input_bucket": event.get("input_bucket"),
+                  "input_object_key": event.get("input_object_key"),
+                  "input_uri": f"s3://{event['input_bucket']}/{event['input_object_key']}" if event.get("input_bucket") and event.get("input_object_key") else None,
                   "platforms": platforms,
               }
               summary_key = f"{prefix}/orchestration/python/{execution_id}/orchestration-summary.json"
@@ -518,7 +522,7 @@ Resources:
               }
               for platform_summary in platforms:
                   platform = platform_summary["platform"]
-                  traceability_prefix = f"{prefix}/traceability/python/{platform}/{timestamp}/"
+                  traceability_prefix = f"{prefix}/traceability/python/{platform}/{run_segment}/"
                   record["platforms"].append(
                       {
                           "platform": platform,
@@ -531,21 +535,21 @@ Resources:
                           "error": platform_summary.get("error"),
                           "cause": platform_summary.get("cause"),
                           "paths": {
-                              "requirements_prefix": f"{prefix}/requirements/python/{platform}/{timestamp}/",
-                              "env_artifacts_prefix": f"{prefix}/env-artifacts/python/{platform}/{timestamp}/",
-                              "model_results_prefix": f"{prefix}/model-results/python/{platform}/{timestamp}/",
-                              "governance_prefix": f"{prefix}/governance/python/{platform}/{timestamp}/",
+                              "requirements_prefix": f"{prefix}/requirements/python/{platform}/{run_segment}/",
+                              "env_artifacts_prefix": f"{prefix}/env-artifacts/python/{platform}/{run_segment}/",
+                              "model_results_prefix": f"{prefix}/model-results/python/{platform}/{run_segment}/",
+                              "governance_prefix": f"{prefix}/governance/python/{platform}/{run_segment}/",
                               "traceability_prefix": traceability_prefix,
-                              "offline_bundle_prefix": f"{prefix}/packages/offline/python/{platform}/{timestamp}/",
+                              "offline_bundle_prefix": f"{prefix}/packages/offline/python/{platform}/{run_segment}/",
                               "materialization_summary_key": f"{traceability_prefix}materialization-summary.json",
                               "governance_summary_key": f"{traceability_prefix}governance-summary.json",
                               "run_metadata_key": f"{traceability_prefix}run-metadata.json",
-                              "vulnerability_findings_key": f"{prefix}/governance/python/{platform}/{timestamp}/vulnerability-findings.csv",
-                              "remediation_required_key": f"{prefix}/governance/python/{platform}/{timestamp}/remediation-required.csv",
-                              "remediation_exceptions_key": f"{prefix}/governance/python/{platform}/{timestamp}/remediation-exceptions.csv",
-                              "remediation_spreadsheet_key": f"{prefix}/governance/python/{platform}/{timestamp}/remediation-spreadsheet.csv",
-                              "trivy_report_key": f"{prefix}/model-results/python/{platform}/{timestamp}/trivy-sbom-report.json",
-                              "safety_report_key": f"{prefix}/model-results/python/{platform}/{timestamp}/safety-report.json",
+                              "vulnerability_findings_key": f"{prefix}/governance/python/{platform}/{run_segment}/vulnerability-findings.csv",
+                              "remediation_required_key": f"{prefix}/governance/python/{platform}/{run_segment}/remediation-required.csv",
+                              "remediation_exceptions_key": f"{prefix}/governance/python/{platform}/{run_segment}/remediation-exceptions.csv",
+                              "remediation_spreadsheet_key": f"{prefix}/governance/python/{platform}/{run_segment}/remediation-spreadsheet.csv",
+                              "trivy_report_key": f"{prefix}/model-results/python/{platform}/{run_segment}/trivy-sbom-report.json",
+                              "safety_report_key": f"{prefix}/model-results/python/{platform}/{run_segment}/safety-report.json",
                               "osv_report_key": None,
                           },
                       }

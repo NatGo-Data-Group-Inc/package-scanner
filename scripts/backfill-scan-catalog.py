@@ -34,8 +34,8 @@ def main() -> int:
             ecosystem=args.ecosystem,
             bucket=args.bucket,
             prefix=args.prefix,
-            input_bucket=None,
-            input_object_key=None,
+            input_bucket=summary.get("input_bucket"),
+            input_object_key=summary.get("input_object_key"),
             summary_key=key,
             summary=summary,
         )

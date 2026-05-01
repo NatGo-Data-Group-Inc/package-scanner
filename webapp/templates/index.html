@@ -9,8 +9,8 @@
 <p class="muted">Catalog-backed browser for successful and promoted scan artifacts.</p>
 <h2>Latest Successful</h2>
 <ul>
-  <li>R: {% if latest_r %}<a href="/runs/r/{{ latest_r.execution_id }}">{{ latest_r.execution_id }}</a>{% else %}<span class="muted">none</span>{% endif %}</li>
-  <li>Python: {% if latest_python %}<a href="/runs/python/{{ latest_python.execution_id }}">{{ latest_python.execution_id }}</a>{% else %}<span class="muted">none</span>{% endif %}</li>
+  <li>R: {% if latest_r %}<a href="/runs/r/{{ latest_r.execution_id }}">{{ latest_r.execution_id }}</a> <span class="muted">from {{ latest_r.input_label }}</span>{% else %}<span class="muted">none</span>{% endif %}</li>
+  <li>Python: {% if latest_python %}<a href="/runs/python/{{ latest_python.execution_id }}">{{ latest_python.execution_id }}</a> <span class="muted">from {{ latest_python.input_label }}</span>{% else %}<span class="muted">none</span>{% endif %}</li>
 </ul>
 <h2>Latest Failed</h2>
 <ul>
@@ -18,6 +18,7 @@
     R:
     {% if failed_r %}
       <a href="/runs/r/{{ failed_r.execution_id }}">{{ failed_r.execution_id }}</a>
+      <div class="muted"><strong>Input:</strong> {{ failed_r.input_label }}</div>
       {% if failed_r.root_cause %}<div class="muted"><strong>Root cause:</strong> {{ failed_r.root_cause }}</div>{% endif %}
     {% else %}
       <span class="muted">none</span>
@@ -27,6 +28,7 @@
     Python:
     {% if failed_python %}
       <a href="/runs/python/{{ failed_python.execution_id }}">{{ failed_python.execution_id }}</a>
+      <div class="muted"><strong>Input:</strong> {{ failed_python.input_label }}</div>
       {% if failed_python.root_cause %}<div class="muted"><strong>Root cause:</strong> {{ failed_python.root_cause }}</div>{% endif %}
     {% else %}
       <span class="muted">none</span>
@@ -35,14 +37,14 @@
 </ul>
 <h2>Current Approved</h2>
 <ul>
-  <li>R: {% if approved_r %}<a href="/runs/r/{{ approved_r.execution_id }}">{{ approved_r.execution_id }}</a>{% else %}<span class="muted">No approved run selected</span>{% endif %}</li>
-  <li>Python: {% if approved_python %}<a href="/runs/python/{{ approved_python.execution_id }}">{{ approved_python.execution_id }}</a>{% else %}<span class="muted">No approved run selected</span>{% endif %}</li>
+  <li>R: {% if approved_r %}<a href="/runs/r/{{ approved_r.execution_id }}">{{ approved_r.execution_id }}</a> <span class="muted">from {{ approved_r.input_label }}</span>{% else %}<span class="muted">No approved run selected</span>{% endif %}</li>
+  <li>Python: {% if approved_python %}<a href="/runs/python/{{ approved_python.execution_id }}">{{ approved_python.execution_id }}</a> <span class="muted">from {{ approved_python.input_label }}</span>{% else %}<span class="muted">No approved run selected</span>{% endif %}</li>
 </ul>
 <h2>Active Runs</h2>
 {% if active_runs %}
 <table>
   <thead>
-    <tr><th>Ecosystem</th><th>Platform</th><th>Execution</th><th>Status</th><th>Current Stage</th><th>Progress</th><th>Started</th><th>Elapsed</th></tr>
+    <tr><th>Ecosystem</th><th>Platform</th><th>Execution</th><th>Input</th><th>Status</th><th>Current Stage</th><th>Progress</th><th>Started</th><th>Elapsed</th></tr>
   </thead>
   <tbody>
     {% for run in active_runs %}
@@ -50,6 +52,12 @@
       <td><span class="chip badge-{{ run.ecosystem }}">{{ run.ecosystem|upper }}</span></td>
       <td><span class="chip badge-{{ run.platform_label }}">{{ run.platform_label }}</span></td>
       <td><code>{{ run.name }}</code></td>
+      <td>
+        <div><strong>{{ run.input_label or 'unknown input' }}</strong></div>
+        {% if run.input_key_display %}
+        <div class="muted"><code>{{ run.input_key_display }}</code></div>
+        {% endif %}
+      </td>
       <td class="{{ run.status_class }}">{{ run.status }}</td>
       <td>
         <div>{{ run.current_stage_display }}</div>

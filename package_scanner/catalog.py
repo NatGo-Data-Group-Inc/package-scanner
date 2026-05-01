@@ -21,15 +21,22 @@ def catalog_pointer_key(prefix: str, ecosystem: str, name: str) -> str:
     return f"{prefix.rstrip('/')}/catalog/{ecosystem}/pointers/{name}.json"
 
 
-def ecosystem_paths(prefix: str, ecosystem: str, platform: str, timestamp: str) -> dict[str, str]:
+def ecosystem_paths(
+    prefix: str,
+    ecosystem: str,
+    platform: str,
+    timestamp: str,
+    execution_id: str | None = None,
+) -> dict[str, str]:
     root = prefix.rstrip("/")
+    run_segment = f"{timestamp}/{execution_id}" if execution_id else timestamp
     return {
-        "requirements_prefix": f"{root}/requirements/{ecosystem}/{platform}/{timestamp}/",
-        "env_artifacts_prefix": f"{root}/env-artifacts/{ecosystem}/{platform}/{timestamp}/",
-        "model_results_prefix": f"{root}/model-results/{ecosystem}/{platform}/{timestamp}/",
-        "governance_prefix": f"{root}/governance/{ecosystem}/{platform}/{timestamp}/",
-        "traceability_prefix": f"{root}/traceability/{ecosystem}/{platform}/{timestamp}/",
-        "offline_bundle_prefix": f"{root}/packages/offline/{ecosystem}/{platform}/{timestamp}/",
+        "requirements_prefix": f"{root}/requirements/{ecosystem}/{platform}/{run_segment}/",
+        "env_artifacts_prefix": f"{root}/env-artifacts/{ecosystem}/{platform}/{run_segment}/",
+        "model_results_prefix": f"{root}/model-results/{ecosystem}/{platform}/{run_segment}/",
+        "governance_prefix": f"{root}/governance/{ecosystem}/{platform}/{run_segment}/",
+        "traceability_prefix": f"{root}/traceability/{ecosystem}/{platform}/{run_segment}/",
+        "offline_bundle_prefix": f"{root}/packages/offline/{ecosystem}/{platform}/{run_segment}/",
     }
 
 
@@ -51,7 +58,13 @@ def build_catalog_record(
     platforms: list[dict[str, Any]] = []
     for item in summary.get("platforms", []):
         platform = item["platform"]
-        paths = ecosystem_paths(prefix, ecosystem, platform, timestamp)
+        paths = ecosystem_paths(
+            prefix,
+            ecosystem,
+            platform,
+            timestamp,
+            execution_id if ecosystem == "python" else None,
+        )
         platforms.append(
             {
                 "platform": platform,

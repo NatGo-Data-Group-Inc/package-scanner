@@ -46,7 +46,7 @@
 </div>
 <table>
   <thead>
-    <tr><th>Execution</th><th>Started</th><th>Duration</th><th>Status</th><th>Phase</th><th>Ecosystem</th><th>Platform</th><th>Validated</th><th>Source</th><th>Package Count</th><th>Triage</th></tr>
+    <tr><th>Execution</th><th>Input</th><th>Started</th><th>Duration</th><th>Status</th><th>Phase</th><th>Ecosystem</th><th>Platform</th><th>Validated</th><th>Record</th><th>Package Count</th><th>Triage</th></tr>
   </thead>
   <tbody>
     {% for run in runs %}
@@ -56,6 +56,12 @@
         <code>{{ run.execution_id }}</code>
         {% else %}
         <a href="/runs/{{ ecosystem }}/{{ run.execution_id }}">{{ run.execution_id }}</a>
+        {% endif %}
+      </td>
+      <td>
+        <div><strong>{{ run.input_label or 'unknown input' }}</strong></div>
+        {% if run.input_key_display %}
+        <div class="muted"><code>{{ run.input_key_display }}</code></div>
         {% endif %}
       </td>
       <td>{{ run.scan_timestamp_display }}</td>

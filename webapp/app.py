@@ -92,6 +92,37 @@ def posit_handoff_bundle_entries(platform: dict, scan_timestamp: str) -> list[tu
     return [(filename, key) for filename, key in entries if key]
 
 
+def python_handoff_bundle_entries(platform: dict, scan_timestamp: str) -> list[tuple[str, str]]:
+    paths = platform.get("paths", {})
+    platform_name = platform.get("platform")
+    entries = [
+        ("environment.yml", f"{paths.get('requirements_prefix', '')}environment.yml" if paths.get("requirements_prefix") else None),
+        (
+            "requirements.lock.txt",
+            f"{paths.get('requirements_prefix', '')}requirements.lock.txt" if paths.get("requirements_prefix") else None,
+        ),
+        (
+            "conda-list.json",
+            f"{paths.get('env_artifacts_prefix', '')}conda-list.json" if paths.get("env_artifacts_prefix") else None,
+        ),
+        ("materialization-summary.json", paths.get("materialization_summary_key")),
+        ("run-metadata.json", paths.get("run_metadata_key")),
+        (
+            f"python-env-{platform_name}-{scan_timestamp}.tar.gz",
+            f"{paths.get('env_artifacts_prefix', '')}python-env-{platform_name}-{scan_timestamp}.tar.gz"
+            if paths.get("env_artifacts_prefix") and platform_name and scan_timestamp
+            else None,
+        ),
+        (
+            f"python-env-{platform_name}-{scan_timestamp}.tar.gz.sha256",
+            f"{paths.get('env_artifacts_prefix', '')}python-env-{platform_name}-{scan_timestamp}.tar.gz.sha256"
+            if paths.get("env_artifacts_prefix") and platform_name and scan_timestamp
+            else None,
+        ),
+    ]
+    return [(filename, key) for filename, key in entries if key]
+
+
 def local_bundle_script_entries(ecosystem: str) -> list[tuple[str, Path]]:
     if ecosystem != "r":
         return []
@@ -368,6 +399,7 @@ def create_app() -> Flask:
     head_cache: dict[str, dict] = {}
     execution_history_cache: dict[str, dict] = {}
     ecs_task_cache: dict[str, dict] = {}
+    execution_input_cache: dict[str, dict] = {}
     log_path = os.environ.get("WEBAPP_LOG_PATH", "/tmp/package-scanner-webapp.log")
     if not app.logger.handlers:
         stream_handler = logging.StreamHandler()
@@ -522,9 +554,16 @@ def create_app() -> Flask:
         return rows
 
     def parse_execution_input(execution_arn: str) -> dict:
+        cache_key = str(execution_arn or "").strip()
+        if not cache_key:
+            return {}
+        now = time.time()
+        cached = execution_input_cache.get(cache_key)
+        if cached and cached["expires_at"] > now:
+            return cached["input"]
         try:
             detail = stepfunctions_describe_execution(
-                execution_arn,
+                cache_key,
                 region=app.config["AWS_REGION"],
                 profile=app.config["AWS_PROFILE"],
             )
@@ -534,10 +573,49 @@ def create_app() -> Flask:
         if isinstance(raw_input, str) and raw_input.strip():
             try:
                 parsed = json.loads(raw_input)
-                return parsed if isinstance(parsed, dict) else {}
+                result = parsed if isinstance(parsed, dict) else {}
+                execution_input_cache[cache_key] = {
+                    "expires_at": now + RECORD_CACHE_TTL_SECONDS,
+                    "input": result,
+                }
+                return result
             except json.JSONDecodeError:
                 return {}
-        return raw_input if isinstance(raw_input, dict) else {}
+        result = raw_input if isinstance(raw_input, dict) else {}
+        execution_input_cache[cache_key] = {
+            "expires_at": now + RECORD_CACHE_TTL_SECONDS,
+            "input": result,
+        }
+        return result
+
+    def execution_arn_candidates(ecosystem: str, execution_id: str) -> list[str]:
+        arns = app.config["PYTHON_STATE_MACHINE_ARNS"] if ecosystem == "python" else app.config["R_STATE_MACHINE_ARNS"]
+        candidates: list[str] = []
+        for state_machine_arn in arns:
+            parts = str(state_machine_arn).split(":")
+            if len(parts) < 7:
+                continue
+            partition = parts[1]
+            service = parts[2]
+            region = parts[3]
+            account = parts[4]
+            resource = ":".join(parts[5:])
+            if not resource.startswith("stateMachine:"):
+                continue
+            state_machine_name = resource.split(":", 1)[1]
+            candidates.append(f"arn:{partition}:{service}:{region}:{account}:execution:{state_machine_name}:{execution_id}")
+        return candidates
+
+    def execution_input_for_run(ecosystem: str, execution_id: str, execution_arn: str | None = None) -> dict:
+        if execution_arn:
+            parsed = parse_execution_input(execution_arn)
+            if parsed:
+                return parsed
+        for candidate_arn in execution_arn_candidates(ecosystem, execution_id):
+            parsed = parse_execution_input(candidate_arn)
+            if parsed:
+                return parsed
+        return {}
 
     def execution_platforms(ecosystem: str, execution_input: dict) -> list[str]:
         selected_platforms = execution_input.get("platforms")
@@ -749,7 +827,7 @@ def create_app() -> Flask:
         execution_input = parse_execution_input(execution_arn) if execution_arn else {}
         state = derive_live_execution_state(ecosystem, execution, execution_input)
         status = state["lifecycle_status"]
-        return {
+        row = {
             "execution_id": str(execution.get("name") or ""),
             "execution_arn": execution_arn,
             "status": status,
@@ -777,6 +855,7 @@ def create_app() -> Flask:
                 for platform in execution_platforms(ecosystem, execution_input)
             ],
         }
+        return attach_input_context(ecosystem, row)
 
     def live_running_execution_map(ecosystem: str) -> dict[str, dict]:
         live_map: dict[str, dict] = {}
@@ -981,7 +1060,7 @@ def create_app() -> Flask:
             else stage_display_name(row.get("current_phase"))
         )
         row["phase_detail"] = row.get("phase_detail")
-        return row
+        return attach_input_context(ecosystem, row)
 
     def normalize_cursor_state(ecosystem: str, cursor_id: str | None, filters: tuple[str, str, str, int]) -> tuple[int, str | None]:
         now = time.time()
@@ -1037,6 +1116,7 @@ def create_app() -> Flask:
                 yield index, row
 
     def enrich_record(record: dict, ecosystem: str) -> dict:
+        record = attach_input_context(ecosystem, record)
         for platform in record.get("platforms", []):
             paths = platform.setdefault("paths", {})
             governance_prefix = paths.get("governance_prefix")
@@ -1583,6 +1663,32 @@ def create_app() -> Flask:
             "artifact_type": artifact_type,
         }
 
+    def attach_input_context(ecosystem: str, row: dict | None) -> dict | None:
+        if row is None:
+            return None
+        updated = dict(row)
+        input_bucket = updated.get("input_bucket")
+        input_object_key = updated.get("input_object_key")
+        if not input_bucket or not input_object_key:
+            execution_id = str(updated.get("execution_id") or "").strip()
+            execution_arn = str(updated.get("execution_arn") or "").strip()
+            execution_input = execution_input_for_run(ecosystem, execution_id, execution_arn)
+            if execution_input:
+                input_bucket = input_bucket or execution_input.get("input_bucket")
+                input_object_key = input_object_key or execution_input.get("input_object_key")
+                updated["input_bucket"] = input_bucket
+                updated["input_object_key"] = input_object_key
+                if input_bucket and input_object_key and not updated.get("input_uri"):
+                    updated["input_uri"] = f"s3://{input_bucket}/{input_object_key}"
+        group = input_artifact_group(ecosystem, input_bucket, input_object_key)
+        updated["input_group"] = group
+        updated["input_label"] = str(group.get("label") or "unknown input")
+        updated["input_candidate_name"] = str(group.get("candidate_name") or "")
+        updated["input_uri"] = str(updated.get("input_uri") or group.get("uri") or "")
+        updated["input_artifact_type"] = str(group.get("artifact_type") or f"{ecosystem.upper()} input")
+        updated["input_key_display"] = str(group.get("key") or "")
+        return updated
+
     def platform_names_from_record(row: dict) -> list[str]:
         platforms = []
         for platform in row.get("platforms", []) or []:
@@ -1837,6 +1943,8 @@ def create_app() -> Flask:
                             "phase_detail": row.get("phase_detail"),
                             "progress_count_display": row.get("progress_count_display"),
                             "stage_steps": row.get("stage_steps") or [],
+                            "input_label": row.get("input_label"),
+                            "input_key_display": row.get("input_key_display"),
                         }
                     )
         active.sort(key=lambda row: str(row.get("startDate", "")), reverse=True)
@@ -1985,10 +2093,10 @@ def create_app() -> Flask:
     def index():
         auth_error = None
         try:
-            latest_r = load_pointer("r", "latest-successful")
-            latest_python = load_pointer("python", "latest-successful")
-            approved_r = load_pointer("r", "current-approved")
-            approved_python = load_pointer("python", "current-approved")
+            latest_r = attach_input_context("r", load_pointer("r", "latest-successful"))
+            latest_python = attach_input_context("python", load_pointer("python", "latest-successful"))
+            approved_r = attach_input_context("r", load_pointer("r", "current-approved"))
+            approved_python = attach_input_context("python", load_pointer("python", "current-approved"))
             active = active_runs()
             def latest_failed(ecosystem: str, *, max_checks: int = 10) -> dict | None:
                 """
@@ -2009,10 +2117,10 @@ def create_app() -> Flask:
             failed_r = latest_failed("r")
             failed_python = latest_failed("python")
             if failed_r:
-                failed_r = dict(failed_r)
+                failed_r = attach_input_context("r", dict(failed_r))
                 failed_r["root_cause"] = latest_root_cause("r", failed_r)
             if failed_python:
-                failed_python = dict(failed_python)
+                failed_python = attach_input_context("python", dict(failed_python))
                 failed_python["root_cause"] = latest_root_cause("python", failed_python)
         except AwsAuthExpiredError as exc:
             auth_error = str(exc)
@@ -2574,6 +2682,42 @@ def create_app() -> Flask:
         download_name = f"{execution_id}-{platform_name}-posit-handoff-bundle.zip"
         return send_file(archive, as_attachment=True, download_name=download_name, mimetype="application/zip")
 
+    @app.route("/download-python-handoff-bundle/<execution_id>/<platform_name>")
+    def download_python_handoff_bundle(execution_id: str, platform_name: str):
+        try:
+            record = enrich_record(load_record("python", execution_id), "python")
+        except AwsAuthExpiredError as exc:
+            return render_template("download_error.html", auth_error=str(exc), key=execution_id), 401
+        except Exception:
+            abort(404)
+
+        platform = next((item for item in record.get("platforms", []) if item.get("platform") == platform_name), None)
+        if not platform or platform.get("status") != "SUCCEEDED":
+            abort(404)
+
+        archive = io.BytesIO()
+        try:
+            with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+                for filename, key in python_handoff_bundle_entries(platform, str(record.get("scan_timestamp") or "")):
+                    try:
+                        payload = s3_get_bytes(
+                            record["evidence_bucket"],
+                            key,
+                            region=app.config["AWS_REGION"],
+                            profile=app.config["AWS_PROFILE"],
+                        )
+                    except AwsAuthExpiredError:
+                        raise
+                    except Exception:
+                        continue
+                    bundle.writestr(filename, payload)
+        except AwsAuthExpiredError as exc:
+            return render_template("download_error.html", auth_error=str(exc), key=execution_id), 401
+
+        archive.seek(0)
+        download_name = f"{execution_id}-{platform_name}-python-handoff-bundle.zip"
+        return send_file(archive, as_attachment=True, download_name=download_name, mimetype="application/zip")
+
     @app.route("/runs/<ecosystem>/<execution_id>/<platform_name>/unknown-findings")
     def unknown_findings(ecosystem: str, execution_id: str, platform_name: str):
         if ecosystem not in {"r", "python"}:
@@ -2868,8 +3012,28 @@ def create_app() -> Flask:
     def download():
         bucket = request.args.get("bucket") or app.config["CATALOG_BUCKET"]
         key = request.args.get("key")
+        download_name = str(request.args.get("name") or "").strip()
         if not key:
             abort(400)
+        if download_name:
+            try:
+                payload = s3_get_bytes(
+                    bucket,
+                    key,
+                    region=app.config["AWS_REGION"],
+                    profile=app.config["AWS_PROFILE"],
+                    timeout=600,
+                )
+            except AwsAuthExpiredError as exc:
+                return render_template("download_error.html", auth_error=str(exc), key=key), 401
+            except Exception:
+                abort(500)
+            return send_file(
+                io.BytesIO(payload),
+                as_attachment=True,
+                download_name=download_name,
+                mimetype="application/octet-stream",
+            )
         try:
             url = s3_presign(
                 bucket,

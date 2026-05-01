@@ -68,10 +68,17 @@ def s3_get_json(bucket: str, key: str, *, region: str, profile: str | None) -> d
     return json.loads(out.stdout)
 
 
-def s3_get_bytes(bucket: str, key: str, *, region: str, profile: str | None) -> bytes:
+def s3_get_bytes(
+    bucket: str,
+    key: str,
+    *,
+    region: str,
+    profile: str | None,
+    timeout: int = AWS_CLI_TIMEOUT_SECONDS,
+) -> bytes:
     cmd = _base_cmd(region, profile) + ["s3", "cp", f"s3://{bucket}/{key}", "-"]
     try:
-        out = _run_aws_cmd(cmd, text=False)
+        out = _run_aws_cmd(cmd, text=False, timeout=timeout)
     except subprocess.CalledProcessError as exc:
         stderr = (exc.stderr or b"").decode("utf-8", errors="ignore")
         logger.error("AWS CLI failed: %s :: %s", " ".join(cmd), stderr.strip())

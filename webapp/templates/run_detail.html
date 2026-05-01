@@ -7,6 +7,10 @@
 <h1>{{ ecosystem|upper }} Run {{ record.execution_id }}</h1>
 <p>Status: <span class="{{ 'ok' if record.status == 'SUCCEEDED' else 'bad' }}">{{ record.status }}</span></p>
 <p>Timestamp: <code>{{ record.scan_timestamp }}</code></p>
+<p>Input Artifact: <strong>{{ record.input_label or 'unknown input' }}</strong></p>
+{% if record.input_key_display %}
+<p>Input Key: <code>{{ record.input_key_display }}</code></p>
+{% endif %}
 <p>Summary:
   <a href="/download?bucket={{ record.evidence_bucket }}&key={{ record.summary_key|urlencode }}">download</a>
   <span class="muted"><code>{{ record.summary_key }}</code></span>
@@ -37,6 +41,12 @@
   <pre><code>{{ verify_status.log_tail }}</code></pre>
   {% endif %}
   {% endif %}
+  {% endif %}
+  {% if ecosystem == 'python' and platform.status == 'SUCCEEDED' %}
+  <p><a href="/download?bucket={{ record.evidence_bucket }}&key={{ (platform.paths.env_artifacts_prefix ~ 'python-env-' ~ platform.platform ~ '-' ~ record.scan_timestamp ~ '.tar.gz')|urlencode }}&name={{ ('python-env-' ~ platform.platform ~ '-' ~ record.scan_timestamp ~ '.tar.gz')|urlencode }}">download Python relocatable environment</a></p>
+  <p><a href="/download?bucket={{ record.evidence_bucket }}&key={{ (platform.paths.env_artifacts_prefix ~ 'python-env-' ~ platform.platform ~ '-' ~ record.scan_timestamp ~ '.tar.gz.sha256')|urlencode }}&name={{ ('python-env-' ~ platform.platform ~ '-' ~ record.scan_timestamp ~ '.tar.gz.sha256')|urlencode }}">download Python relocatable environment checksum</a></p>
+  <p><a href="/download-python-handoff-bundle/{{ record.execution_id }}/{{ platform.platform }}">download Python support bundle</a></p>
+  <p class="muted">Primary payload: <code>python-env-{{ platform.platform }}-{{ record.scan_timestamp }}.tar.gz</code>. Extract it at the destination prefix, then run <code>conda-unpack</code> from inside that extracted environment.</p>
   {% endif %}
   {% if platform.unknown_findings_count %}
   <p><a href="/runs/{{ ecosystem }}/{{ record.execution_id }}/{{ platform.platform }}/unknown-findings">review UNKNOWN findings ({{ platform.unknown_findings_count }})</a> | <a href="/download-unknown-bundle/{{ ecosystem }}/{{ record.execution_id }}/{{ platform.platform }}">download UNKNOWN analyst bundle</a></p>

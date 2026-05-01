@@ -132,6 +132,7 @@ Python offline environment note:
 - `python-env-<platform>-<timestamp>.tar.gz` is a `conda-pack` archive of the realized target environment.
 - Extract it at the destination prefix and run `conda-unpack` from inside that extracted environment.
 - `python-pkgs-<platform>-<timestamp>.tar.gz` is the Micromamba/Conda package cache archive and can be used alongside the packed environment, but it is not itself the relocatable environment.
+- GUI/operator expectation: the primary surfaced Python handoff download should be the direct `python-env-<platform>-<timestamp>.tar.gz` file plus its checksum, not the package-cache tarball.
 
 ## 6) R Scan: Example (`tidyverse`)
 

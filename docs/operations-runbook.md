@@ -77,6 +77,8 @@ Python packaging semantics:
 - Restore/reuse of that environment must run `conda-unpack` after extraction at the target prefix.
 - This makes the Python environment bundle relocatable in a way the previous plain tar/extract approach was not.
 - `python-pkgs-*.tar.gz` remains a package-cache archive, not a relocatable environment by itself.
+- In the GUI, the primary Python handoff download should be the direct `python-env-*.tar.gz` `conda-pack` archive plus its `.sha256`.
+- A secondary Python support bundle may also be offered for convenience, but the enclave delivery artifact is the direct relocatable environment archive, not the cache tarball.
 
 R artifacts (per platform/timestamp in evidence bucket):
 - Requirements: `evidence/requirements/r/<platform>/<ts>/renv.lock`, `installed-packages.csv`
