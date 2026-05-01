@@ -134,6 +134,7 @@ try {
 
   if ($pythonCpuOnly -eq 'true') {
     Copy-Item "$runDir\environment.yml" "$runDir\environment.original.yml" -Force
+    $cpuNormalizationScriptPath = Join-Path $runDir 'cpu-normalize-environment.py'
     $cpuNormalizationScript = @'
 from __future__ import annotations
 
@@ -258,7 +259,8 @@ if removed or rewritten:
             for item in rewritten:
                 handle.write(f"- {item}\n")
 '@
-    & $pythonBin -c $cpuNormalizationScript "$runDir\environment.yml"
+    $cpuNormalizationScript | Out-File $cpuNormalizationScriptPath -Encoding ascii
+    & $pythonBin $cpuNormalizationScriptPath "$runDir\environment.yml"
     if ($LASTEXITCODE -ne 0) { throw "cpu normalization failed" }
   }
 
@@ -328,11 +330,17 @@ if removed or rewritten:
   & $pythonBin "$scriptRoot\generate-python-materialization-summary.py" --run-dir $runDir --platform $Platform --python-version $pythonVersion --root-prefix $rootPrefix --env-prefix $envPrefix
 
   Write-State -Phase 'analysis'
-  & $pythonBin -m cyclonedx_py requirements "$runDir\requirements.lock.txt" -o "$runDir\python-packages.cdx.json" 2>$null
-  & C:\trivy\trivy.exe sbom --format json --output "$runDir\trivy-sbom-report.json" "$runDir\python-packages.cdx.json" 2>$null
+  try {
+    & $pythonBin -m cyclonedx_py requirements "$runDir\requirements.lock.txt" -o "$runDir\python-packages.cdx.json" 2>$null
+  } catch {}
+  try {
+    & C:\trivy\trivy.exe sbom --format json --output "$runDir\trivy-sbom-report.json" "$runDir\python-packages.cdx.json" 2>$null
+  } catch {}
   '[]' | Out-File "$runDir\safety-report.json" -Encoding ascii
   if ($env:SAFETY_API_KEY) {
-    & safety --key $env:SAFETY_API_KEY scan --file "$runDir\requirements.lock.txt" --output json | Out-File "$runDir\safety-report.json" -Encoding ascii
+    try {
+      & safety --key $env:SAFETY_API_KEY scan --file "$runDir\requirements.lock.txt" --output json | Out-File "$runDir\safety-report.json" -Encoding ascii
+    } catch {}
   }
   $govExit = 0
   Write-State -Phase 'governance'
