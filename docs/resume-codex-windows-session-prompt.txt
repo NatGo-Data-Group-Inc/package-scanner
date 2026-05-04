@@ -1,0 +1,68 @@
+Resume the previous Windows validation/fix session for `natgo/package-scanner`.
+
+Environment:
+- Repo: `C:\Users\tomja\github\natgo\package-scanner`
+- Branch: `main`
+- Start by running:
+  - `git status --short --branch`
+  - `git pull --ff-only`
+
+What was already done on May 1, 2026:
+- Validated Windows PowerShell parsing for:
+  - `scripts/start-python-scan.ps1`
+  - `scripts/run-python-ecs-task.ps1`
+  - `scripts/build-python-ecs-windows-image.ps1`
+  - `scripts/run-r-ecs-task.ps1`
+- Built and validated the Windows Python image.
+- Built and smoke-checked the Windows R image.
+- End-to-end tested `scripts/run-python-ecs-task.ps1` in a Windows container with a local mock S3/AWS shim.
+- Confirmed Windows Python now follows the ECS worker path and preserves:
+  - staged install flow: conda core, conda native, conda python, pip last
+  - execution-scoped evidence paths: `.../<timestamp>/<execution-id>/...`
+  - checkpointing
+  - conda-pack / conda-unpack relocatable env handling
+  - CPU-only normalization behavior aligned with Linux
+- Confirmed Python ECS orchestration wiring still carries `input_bucket` and `input_object_key` into summary/catalog behavior.
+- Confirmed `scripts/start-python-scan.ps1` still forwards:
+  - `--source-environment-file`
+  - `--platform-set windows-only`
+  - profile / lock token / bucket args
+
+Files changed in that session:
+- `docker/python-windows.Dockerfile`
+- `scripts/run-python-ecs-task.ps1`
+- `scripts/install-micromamba-windows.ps1` (new)
+
+Why those files changed:
+- `docker/python-windows.Dockerfile`
+  - install VC++ runtime so `micromamba.exe` loads on Windows Server Core
+  - move micromamba install into a helper script
+- `scripts/install-micromamba-windows.ps1`
+  - download/extract micromamba correctly on Windows
+- `scripts/run-python-ecs-task.ps1`
+  - fix CPU normalization by writing the inline Python script to a file instead of `python -c`
+  - make post-materialization scanners best-effort on Windows, matching Linux behavior
+
+Important findings from that session:
+- Windows Python image contained:
+  - `aws`
+  - Python `3.11`
+  - `micromamba`
+  - `conda-pack`
+  - `trivy`
+  - `safety`
+  - `pyyaml`
+- Windows R image built cleanly and basic runtime checks passed.
+- A host-local issue existed with unreadable `pytest-cache-files-*` directories causing `docker build .` context failures on that machine; validation used a minimal temporary Docker context instead. Do not treat that as a repo workflow redesign target unless it reproduces again and is clearly repo-owned.
+
+What to do now:
+1. Re-check current git state.
+2. Inspect whether those three file changes are still present or need to be re-applied.
+3. Re-run the Windows Python image build/test path if needed.
+4. Re-run Windows R validation if needed.
+5. Patch only Windows correctness issues; do not redesign the workflow.
+6. Report:
+   - current build/test results
+   - whether Windows Python still passes
+   - whether Windows R still passes
+   - exact files changed in this resumed session
