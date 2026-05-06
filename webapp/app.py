@@ -443,6 +443,7 @@ def create_app() -> Flask:
             "arn:aws:states:us-east-1:807497180525:stateMachine:package-scanner-dev-r-ecs-windows-scan-orchestrator",
         ],
     )
+    stack_output_cache: dict[str, dict] = {}
 
     @app.before_request
     def log_request_start() -> None:
@@ -590,7 +591,7 @@ def create_app() -> Flask:
         return result
 
     def execution_arn_candidates(ecosystem: str, execution_id: str) -> list[str]:
-        arns = app.config["PYTHON_STATE_MACHINE_ARNS"] if ecosystem == "python" else app.config["R_STATE_MACHINE_ARNS"]
+        arns = configured_state_machine_arns(ecosystem)
         candidates: list[str] = []
         for state_machine_arn in arns:
             parts = str(state_machine_arn).split(":")
@@ -617,6 +618,76 @@ def create_app() -> Flask:
             if parsed:
                 return parsed
         return {}
+
+    def execution_detail_for_run(ecosystem: str, execution_id: str, execution_arn: str | None = None) -> dict | None:
+        candidate_arns: list[str] = []
+        if execution_arn:
+            candidate_arns.append(execution_arn)
+        candidate_arns.extend(
+            arn for arn in execution_arn_candidates(ecosystem, execution_id) if arn not in candidate_arns
+        )
+        for candidate_arn in candidate_arns:
+            try:
+                detail = stepfunctions_describe_execution(
+                    candidate_arn,
+                    region=app.config["AWS_REGION"],
+                    profile=app.config["AWS_PROFILE"],
+                )
+            except Exception:
+                continue
+            if isinstance(detail, dict) and detail.get("executionArn"):
+                return detail
+        return None
+
+    def stack_output_value_cached(stack_name: str, output_key: str) -> str:
+        cache_key = f"{stack_name}|{output_key}"
+        now = time.time()
+        cached = stack_output_cache.get(cache_key)
+        if cached and cached["expires_at"] > now:
+            return str(cached["value"] or "")
+        try:
+            stack = describe_stack(stack_name)
+        except Exception:
+            return ""
+        value = stack_output_value(stack, output_key)
+        stack_output_cache[cache_key] = {
+            "expires_at": now + 60,
+            "value": value,
+        }
+        return str(value or "")
+
+    def configured_state_machine_arns(ecosystem: str) -> list[str]:
+        base = (
+            list(app.config["PYTHON_STATE_MACHINE_ARNS"])
+            if ecosystem == "python"
+            else list(app.config["R_STATE_MACHINE_ARNS"])
+        )
+        discovered: list[str] = []
+        if ecosystem == "python":
+            stack_name = app.config["PYTHON_STACK_NAME"]
+            for output_key in ("PythonScanOrchestrationStateMachineArn", "PythonLinuxScanOrchestrationStateMachineArn"):
+                value = stack_output_value_cached(stack_name, output_key)
+                if value and value != "None":
+                    discovered.append(value)
+        else:
+            stack_name = app.config["R_STACK_NAME"]
+            for output_key in (
+                "RScanOrchestrationStateMachineArn",
+                "RLinuxScanOrchestrationStateMachineArn",
+                "RWindowsScanOrchestrationStateMachineArn",
+            ):
+                value = stack_output_value_cached(stack_name, output_key)
+                if value and value != "None":
+                    discovered.append(value)
+        merged: list[str] = []
+        seen: set[str] = set()
+        for arn in [*discovered, *base]:
+            arn = str(arn or "").strip()
+            if not arn or arn in seen:
+                continue
+            seen.add(arn)
+            merged.append(arn)
+        return merged
 
     def execution_platforms(ecosystem: str, execution_input: dict) -> list[str]:
         selected_platforms = execution_input.get("platforms")
@@ -860,7 +931,7 @@ def create_app() -> Flask:
 
     def live_running_execution_map(ecosystem: str) -> dict[str, dict]:
         live_map: dict[str, dict] = {}
-        arns = app.config["PYTHON_STATE_MACHINE_ARNS"] if ecosystem == "python" else app.config["R_STATE_MACHINE_ARNS"]
+        arns = configured_state_machine_arns(ecosystem)
         for arn in arns:
             try:
                 executions = stepfunctions_list_executions(
@@ -1106,9 +1177,14 @@ def create_app() -> Flask:
         live_map = live_running_execution_map(ecosystem)
         for index, key in enumerate(keys[offset:], start=offset):
             execution_id = key.rsplit("/", 1)[-1].replace(".json", "")
+            live_execution = live_map.get(execution_id)
+            if live_execution is None and execution_id:
+                detail = execution_detail_for_run(ecosystem, execution_id)
+                if isinstance(detail, dict) and str(detail.get("status") or "").upper() == "RUNNING":
+                    live_execution = detail
             row = select_run_row(
                 ecosystem,
-                overlay_live_status(load_record_by_key(key), live_map.get(execution_id)),
+                overlay_live_status(load_record_by_key(key), live_execution),
                 selected_status=selected_status,
                 selected_platform=selected_platform,
                 selected_validated=selected_validated,
@@ -1748,7 +1824,7 @@ def create_app() -> Flask:
         return ["linux-amd64"] if ecosystem == "r" else ["unknown"]
 
     def recent_execution_history(ecosystem: str) -> list[dict]:
-        arns = app.config["PYTHON_STATE_MACHINE_ARNS"] if ecosystem == "python" else app.config["R_STATE_MACHINE_ARNS"]
+        arns = configured_state_machine_arns(ecosystem)
         rows: list[dict] = []
         seen: set[str] = set()
         for arn in arns:
@@ -1906,8 +1982,8 @@ def create_app() -> Flask:
 
     def active_runs() -> list[dict]:
         configs = [
-            ("python", app.config["PYTHON_STATE_MACHINE_ARNS"]),
-            ("r", app.config["R_STATE_MACHINE_ARNS"]),
+            ("python", configured_state_machine_arns("python")),
+            ("r", configured_state_machine_arns("r")),
         ]
         active: list[dict] = []
         for ecosystem, arns in configs:
