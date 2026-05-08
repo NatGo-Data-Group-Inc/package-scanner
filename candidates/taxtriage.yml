@@ -314,6 +314,7 @@ dependencies:
 - nccl
 - ncurses
 - networkx
+- nextflow
 - nomkl
 - notebook
 - notebook-shim
