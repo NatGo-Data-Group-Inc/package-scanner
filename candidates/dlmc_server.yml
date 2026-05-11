@@ -1,0 +1,70 @@
+name: dlmc_server
+channels:
+- conda-forge
+- pytorch
+- nvidia
+- pkgs/main
+dependencies:
+- python
+- pip
+- aiodns
+- boto3
+- bottleneck
+- brotlicffi
+- conda-pack
+- datasets
+- duckdb
+- dvc
+- dynaconf
+- fastapi
+- fqdn
+- future
+- gmpy2
+- gssapi
+- h2
+- importlib_resources
+- isoduration
+- isort
+- jsonpointer
+- jupyter
+- krb5
+- locust
+- mccabe
+- nltk
+- numexpr
+- openpyxl
+- opentelemetry-api
+- pathlib2
+- protobuf
+- pyodbc
+- pysocks
+- requests-kerberos
+- sentence-transformers
+- spdlog
+- sqlalchemy
+- tinycss2
+- torchaudio
+- torchvision
+- uri-template
+- uvicorn
+- uvloop
+- webcolors
+- wheel
+- zstandard
+- pip:
+  - asksageclient
+  - fhir.resources
+  - nvidia-cuda-cupti-cu12
+  - nvidia-cuda-nvrtc-cu12
+  - nvidia-cuda-runtime-cu12
+  - nvidia-cudnn-cu12
+  - nvidia-cufft-cu12
+  - nvidia-curand-cu12
+  - nvidia-cusolver-cu12
+  - nvidia-nccl-cu12
+  - nvidia-nvtx-cu12
+  - pip_system_certs
+  - psycopg2-binary
+  - pybind11-global
+  - strawberry-graphql
+  - strawberry-sqlalchemy-mapper
