@@ -31,7 +31,7 @@ RUN $trivyArchive = \"trivy_${env:TRIVY_VERSION}_windows-64bit.zip\" ; `
     Remove-Item C:\trivy.zip -Force
 
 RUN python -m pip install --upgrade pip boto3 ; `
-    & 'C:\R\R-4.4.0\bin\Rscript.exe' -e \"options(repos=c(RSPM='https://packagemanager.posit.co/all/latest',CRAN='https://cloud.r-project.org')); install.packages(c('renv','ggplot2','isoband','rlang','vctrs'), dependencies=NA, Ncpus=1)\"
+    & 'C:\R\R-4.4.0\bin\Rscript.exe' -e \"options(repos=c(RSPM='https://packagemanager.posit.co/all/latest',CRAN='https://cloud.r-project.org')); install.packages(c('renv','BiocManager','ggplot2','isoband','rlang','vctrs'), dependencies=NA, Ncpus=1)\"
 
 ENV SCRIPT_ROOT=C:\package-scanner\scripts
 ENV R_SYSTEM_LIBRARY=C:\R\R-4.4.0\library

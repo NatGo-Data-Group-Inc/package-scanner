@@ -19,6 +19,7 @@ $pythonBin = if ($env:PYTHON_BIN) { $env:PYTHON_BIN } else { 'python' }
 $mambaBin = if ($env:MAMBA_BIN) { $env:MAMBA_BIN } else { 'C:\micromamba\Library\bin\micromamba.exe' }
 $condaPackBin = if ($env:CONDA_PACK_BIN) { $env:CONDA_PACK_BIN } else { 'conda-pack' }
 $pythonCpuOnly = if ($env:PYTHON_CPU_ONLY) { $env:PYTHON_CPU_ONLY } else { 'true' }
+$pythonRestoreEnvCheckpoint = if ($env:PYTHON_RESTORE_ENV_CHECKPOINT) { $env:PYTHON_RESTORE_ENV_CHECKPOINT } else { 'false' }
 $checkpointJob = $null
 
 function Write-State {
@@ -286,12 +287,14 @@ if removed or rewritten:
     }
   } catch {}
 
-  try {
-    aws s3 cp "$checkpointPrefix/latest/python-env.tar.gz" "$runDir\checkpoint-python-env.tar.gz" | Out-Null
-    if (Test-Path "$runDir\checkpoint-python-env.tar.gz") {
-      Restore-PackedPythonEnv "$runDir\checkpoint-python-env.tar.gz"
-    }
-  } catch {}
+  if ($pythonRestoreEnvCheckpoint -eq 'true') {
+    try {
+      aws s3 cp "$checkpointPrefix/latest/python-env.tar.gz" "$runDir\checkpoint-python-env.tar.gz" | Out-Null
+      if (Test-Path "$runDir\checkpoint-python-env.tar.gz") {
+        Restore-PackedPythonEnv "$runDir\checkpoint-python-env.tar.gz"
+      }
+    } catch {}
+  }
 
   Write-State -Phase 'materialize'
   Start-CheckpointLoop
@@ -328,6 +331,33 @@ if removed or rewritten:
   & $mambaBin list -r $rootPrefix -n target --json | Out-File "$runDir\conda-list.json" -Encoding ascii
   $envPrefix | Out-File "$runDir\env-prefix.txt" -Encoding ascii
   & $pythonBin "$scriptRoot\generate-python-materialization-summary.py" --run-dir $runDir --platform $Platform --python-version $pythonVersion --root-prefix $rootPrefix --env-prefix $envPrefix
+  $materializationValidationExit = 0
+  & $pythonBin -c @'
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+summary_path = Path(sys.argv[1])
+summary = json.loads(summary_path.read_text(encoding="utf-8"))
+missing_conda = summary.get("missing_requested_conda_packages") or []
+missing_pip = summary.get("missing_requested_pip_packages") or []
+if missing_conda or missing_pip:
+    lines = []
+    if missing_conda:
+        lines.append("Missing requested conda packages:")
+        lines.extend(f"- {item}" for item in missing_conda)
+    if missing_pip:
+        lines.append("Missing requested pip packages:")
+        lines.extend(f"- {item}" for item in missing_pip)
+    summary_path.with_name("materialization-validation-error.txt").write_text(
+        "\n".join(lines) + "\n",
+        encoding="utf-8",
+    )
+    raise SystemExit(4)
+'@ "$runDir\materialization-summary.json"
+  if ($LASTEXITCODE -ne 0) { $materializationValidationExit = $LASTEXITCODE }
 
   Write-State -Phase 'analysis'
   try {
@@ -363,6 +393,7 @@ if removed or rewritten:
   Upload-IfExists "$runDir\environment-artifacts.tar.gz" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/env-artifacts/python/$Platform/$evidenceRunSegment/environment-artifacts.tar.gz"
   Upload-IfExists "$runDir\restore.log" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/env-artifacts/python/$Platform/$evidenceRunSegment/restore.log"
   Upload-IfExists "$runDir\materialization-summary.json" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/traceability/python/$Platform/$evidenceRunSegment/materialization-summary.json"
+  Upload-IfExists "$runDir\materialization-validation-error.txt" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/traceability/python/$Platform/$evidenceRunSegment/materialization-validation-error.txt"
   Upload-IfExists "$runDir\trivy-sbom-report.json" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/model-results/python/$Platform/$evidenceRunSegment/trivy-sbom-report.json"
   Upload-IfExists "$runDir\safety-report.json" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/model-results/python/$Platform/$evidenceRunSegment/safety-report.json"
   Upload-IfExists "$runDir\vulnerability-findings.csv" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/governance/python/$Platform/$evidenceRunSegment/vulnerability-findings.csv"
@@ -380,6 +411,7 @@ if removed or rewritten:
   Write-State -Phase 'completed'
   aws s3 cp "$runDir\stage-state.json" "$checkpointPrefix/latest/stage-state.json" | Out-Null
   if ($govExit -ne 0) { throw "Governance gate failed with exit $govExit" }
+  if ($materializationValidationExit -ne 0) { throw "Materialization validation failed with exit $materializationValidationExit" }
 } catch {
   Stop-CheckpointLoop
   try { Write-State -Phase 'failed' } catch {}

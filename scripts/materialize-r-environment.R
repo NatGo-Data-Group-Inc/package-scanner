@@ -443,6 +443,13 @@ ensure_lockfile_packages_restored <- function(packages, lockfile_path) {
   )
 }
 
+force_realized_library_packages <- function(packages) {
+  ensure_bootstrap_packages(
+    packages,
+    include_in_generated_lock = identical(input_mode, "requested")
+  )
+}
+
 snapshot_requested_environment <- function() {
   renv::snapshot(
     project = project_dir,
@@ -663,6 +670,8 @@ if (!is.null(restore_error)) {
   )
   stop(restore_error)
 }
+
+force_realized_library_packages(c("BiocManager"))
 
 project_library <- normalizePath(library_dir, winslash = "/", mustWork = FALSE)
 installed <- as.data.frame(

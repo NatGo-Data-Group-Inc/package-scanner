@@ -7,6 +7,11 @@
 </script>
 <h1>Package Scanner Catalog</h1>
 <p class="muted">Catalog-backed browser for successful and promoted scan artifacts.</p>
+{% if stop_status == "ok" and stop_execution %}
+<p><strong>Stop requested:</strong> <code>{{ stop_execution }}</code></p>
+{% elif stop_status == "error" and stop_execution %}
+<p><strong>Stop failed:</strong> <code>{{ stop_execution }}</code></p>
+{% endif %}
 <h2>Latest Successful</h2>
 <ul>
   <li>R: {% if latest_r %}<a href="/runs/r/{{ latest_r.execution_id }}">{{ latest_r.execution_id }}</a> <span class="muted">from {{ latest_r.input_label }}</span>{% else %}<span class="muted">none</span>{% endif %}</li>
@@ -44,7 +49,7 @@
 {% if active_runs %}
 <table>
   <thead>
-    <tr><th>Ecosystem</th><th>Platform</th><th>Execution</th><th>Input</th><th>Status</th><th>Current Stage</th><th>Progress</th><th>Started</th><th>Elapsed</th></tr>
+    <tr><th>Ecosystem</th><th>Platform</th><th>Execution</th><th>Input</th><th>Status</th><th>Current Stage</th><th>Progress</th><th>Started</th><th>Elapsed</th><th>Action</th></tr>
   </thead>
   <tbody>
     {% for run in active_runs %}
@@ -77,6 +82,17 @@
       </td>
       <td>{{ run.started_display }}</td>
       <td>{{ run.duration_display or 'n/a' }}</td>
+      <td>
+        {% if run.stoppable %}
+        <form method="post" action="/runs/stop" onsubmit="return window.confirm('Stop ' + {{ run.name|tojson }} + '?');">
+          <input type="hidden" name="execution_arn" value="{{ run.executionArn }}">
+          <input type="hidden" name="execution_name" value="{{ run.name }}">
+          <button type="submit">Stop</button>
+        </form>
+        {% else %}
+        <span class="muted">n/a</span>
+        {% endif %}
+      </td>
     </tr>
     {% endfor %}
   </tbody>

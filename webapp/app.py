@@ -2022,10 +2022,59 @@ def create_app() -> Flask:
                             "stage_steps": row.get("stage_steps") or [],
                             "input_label": row.get("input_label"),
                             "input_key_display": row.get("input_key_display"),
+                            "stoppable": str(row.get("status") or "").upper() == "RUNNING" and bool(execution.get("executionArn")),
                         }
                     )
         active.sort(key=lambda row: str(row.get("startDate", "")), reverse=True)
         return active
+
+    @app.post("/runs/stop")
+    def stop_run():
+        execution_arn = str(request.form.get("execution_arn") or "").strip()
+        execution_name = str(request.form.get("execution_name") or "").strip()
+        if not execution_arn or ":execution:" not in execution_arn:
+            abort(400, "Valid execution ARN is required.")
+        task_context = stepfunctions_execution_task_context(execution_arn)
+        try:
+            aws_json(
+                [
+                    "stepfunctions",
+                    "stop-execution",
+                    "--execution-arn",
+                    execution_arn,
+                    "--cause",
+                    "Stopped from web dashboard",
+                ],
+                region=app.config["AWS_REGION"],
+                profile=app.config["AWS_PROFILE"],
+            )
+            cluster = str(task_context.get("cluster") or "").strip()
+            task_arn = str(task_context.get("task_arn") or "").strip()
+            task_last_status = str(task_context.get("task_last_status") or "").upper()
+            container_last_status = str(task_context.get("container_last_status") or "").upper()
+            if cluster and task_arn and (
+                task_last_status in {"RUNNING", "PENDING"} or container_last_status in {"RUNNING", "PENDING"}
+            ):
+                aws_json(
+                    [
+                        "ecs",
+                        "stop-task",
+                        "--cluster",
+                        cluster,
+                        "--task",
+                        task_arn,
+                        "--reason",
+                        "Execution stopped from web dashboard",
+                    ],
+                    region=app.config["AWS_REGION"],
+                    profile=app.config["AWS_PROFILE"],
+                )
+        except AwsAuthExpiredError:
+            raise
+        except Exception as exc:
+            app.logger.warning("dashboard stop failed execution_arn=%s error=%s", execution_arn, exc)
+            return redirect(f"/?stop_status=error&stop_execution={quote_plus(execution_name or execution_arn)}", code=302)
+        return redirect(f"/?stop_status=ok&stop_execution={quote_plus(execution_name or execution_arn)}", code=302)
 
     def load_record(ecosystem: str, execution_id: str) -> dict:
         return s3_get_json(
@@ -2169,6 +2218,8 @@ def create_app() -> Flask:
     @app.route("/")
     def index():
         auth_error = None
+        stop_status = str(request.args.get("stop_status") or "").strip().lower()
+        stop_execution = str(request.args.get("stop_execution") or "").strip()
         try:
             latest_r = attach_input_context("r", load_pointer("r", "latest-successful"))
             latest_python = attach_input_context("python", load_pointer("python", "latest-successful"))
@@ -2218,6 +2269,8 @@ def create_app() -> Flask:
             failed_python=failed_python,
             active_runs=active,
             auth_error=auth_error,
+            stop_status=stop_status,
+            stop_execution=stop_execution,
         )
 
     @app.route("/healthz")

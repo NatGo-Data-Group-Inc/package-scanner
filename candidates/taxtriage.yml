@@ -703,6 +703,7 @@ dependencies:
 - zeromq
 - zlib
 - zlib-ng
+- jsonschema-with-format-nongpl
 - zstandard
 - zstd
 - pip:
@@ -769,7 +770,6 @@ dependencies:
   - jsonpointer
   - jsonschema
   - jsonschema-specifications
-  - jsonschema-with-format-nongpl
   - jupyter
   - jupyter-console
   - lark
