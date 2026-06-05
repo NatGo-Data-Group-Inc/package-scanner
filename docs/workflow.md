@@ -92,6 +92,31 @@ dependencies:
   - pip
 ```
 
+If you are starting from an already-materialized Conda environment and want a
+candidate YAML for this repo rather than a raw export, capture it with:
+
+```bash
+python3 scripts/build-candidate-from-env-artifacts.py \
+  --name <candidate-name> \
+  --env-prefix <conda-env-prefix> \
+  --conda-bin conda \
+  --prefer-conda-available \
+  --output candidates/<candidate-name>.yml \
+  --artifacts-dir artifacts/<candidate-name> \
+  --artifacts-zip artifacts/<candidate-name>.zip
+```
+
+That capture path records:
+- `environment.yml`
+- `conda list --json`
+- `pip freeze`
+- a normalized candidate YAML used by the Python ECS workflow
+
+If you must change one package version in a candidate manually, prefer changing
+the package version and leaving the build string off unless you have verified
+that exact build exists in the configured channels. For example, prefer
+`idna=3.15` over guessing a build string.
+
 ### Step B: upload input
 
 ```bash
@@ -133,6 +158,10 @@ Python offline environment note:
 - Extract it at the destination prefix and run `conda-unpack` from inside that extracted environment.
 - `python-pkgs-<platform>-<timestamp>.tar.gz` is the Micromamba/Conda package cache archive and can be used alongside the packed environment, but it is not itself the relocatable environment.
 - GUI/operator expectation: the primary surfaced Python handoff download should be the direct `python-env-<platform>-<timestamp>.tar.gz` file plus its checksum, not the package-cache tarball.
+- Completion expectation: treat a Python run as truly complete only when the
+  Step Functions execution is `SUCCEEDED` and the catalog/orchestration records
+  are published. A worker checkpoint can reach `completed` before the overall
+  run is globally complete.
 
 Python environment change policy:
 

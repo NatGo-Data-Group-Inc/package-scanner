@@ -26,6 +26,24 @@ Use [handoff-runbook.md](./handoff-runbook.md) as the primary day-to-day operato
 
 - Use `scripts/start-python-scan.sh`.
 - Ensure `environment.yml` is uploaded first.
+- If the source environment was updated on another machine and you need a new
+  Python candidate for this pipeline, capture it from the realized Conda env
+  rather than hand-editing a plain `conda env export`:
+
+```bash
+python3 scripts/build-candidate-from-env-artifacts.py \
+  --name <candidate-name> \
+  --env-prefix <conda-env-prefix> \
+  --conda-bin conda \
+  --prefer-conda-available \
+  --output candidates/<candidate-name>.yml \
+  --artifacts-dir artifacts/<candidate-name> \
+  --artifacts-zip artifacts/<candidate-name>.zip
+```
+
+- `--prefer-conda-available` is the default operator choice for Python
+  candidates. It keeps packages on the Conda side when the configured channels
+  can satisfy them and only falls back to pip when Conda cannot.
 - For local YAML files under `candidates/`, the webapp also provides a
   `Candidates` page. Use that page to upload the selected YAML and start a
   Python ECS scan without manually pre-populating checkpoint or ephemeral
@@ -43,6 +61,41 @@ Use [handoff-runbook.md](./handoff-runbook.md) as the primary day-to-day operato
   candidate specs before solving and retains both the original YAML and the
   normalization log in the evidence bundle.
 
+Current Python Linux runtime expectations:
+- The active Linux scanner image is built on `ubuntu:24.04`, not Amazon Linux.
+- The runtime exports `CONDA_OVERRIDE_GLIBC` from the live host glibc version.
+- On `linux-amd64`, the runtime also exports
+  `CONDA_OVERRIDE_ARCHSPEC=x86_64_v3` so Conda virtual-package resolution
+  matches the worker class used in ECS.
+- If an exported Conda environment requires a newer glibc or an
+  `x86_64_v3` microarchitecture, verify the live ECS task is running on the
+  refreshed Python image before debugging package metadata.
+
+Refreshing the Python ECS runtime:
+
+```bash
+IMAGE_TAG=$(date -u +%Y%m%dT%H%M%SZ)-<suffix>
+./scripts/build-python-ecs-images.sh \
+  --stack-name cyber-scanner-dev-python-ecs \
+  --profile AdministratorAccess-807497180525 \
+  --platforms linux/amd64 \
+  --tag "${IMAGE_TAG}" \
+  --no-latest
+
+./scripts/register-python-task-def.sh \
+  --image 807497180525.dkr.ecr.us-east-1.amazonaws.com/package-scanner-dev/python-scan-linux:${IMAGE_TAG} \
+  --region us-east-1 \
+  --profile AdministratorAccess-807497180525 \
+  --memory 16384
+```
+
+- The Python ECS orchestrator resolves the latest active revision of the
+  `package-scanner-dev-python-linux-amd64` task-definition family.
+- Do not assume a rebuilt image is active until the actual ECS task shows the
+  new task-definition revision and image digest.
+- When the Linux worker pool is only needed for ad hoc scans, set the Python
+  Linux ASG back to `0` after the run completes to avoid idle EC2 cost.
+
 ### S3 Layout and Artifact Map
 
 Buckets (dev):
@@ -59,6 +112,9 @@ Buckets (dev):
   outputs and ephemeral checkpoints for that execution.
 - The cleanup intentionally does not remove shared source input objects under
   the input bucket, because those files can be reused across reruns.
+- The cleanup script now tolerates missing orchestration summaries for failed
+  runs and can derive delete targets from the failed run catalog record before
+  falling back to traceability discovery.
 - CLI equivalent:
   `python scripts/cleanup-failed-s3-artifacts.py --ecosystem <r|python> --execution-id <execution-id> --evidence-bucket <bucket> --ephemeral-bucket <bucket> --evidence-prefix evidence --region us-east-1 --profile <profile> --write`
 
@@ -274,6 +330,19 @@ python3 scripts/cleanup-failed-s3-artifacts.py \
   --evidence-bucket package-scanner-dev-scan-evidence-807497180525-us-east-1 \
   --ephemeral-bucket package-scanner-dev-scan-ephemeral-807497180525-us-east-1 \
   --profile AdministratorAccess-807497180525 \
+  --write
+```
+
+Bulk cleanup by failed Step Functions status is also supported:
+
+```bash
+python3 scripts/cleanup-failed-s3-artifacts.py \
+  --ecosystem python \
+  --state-machine-arn arn:aws:states:us-east-1:807497180525:stateMachine:package-scanner-dev-python-ecs-linux-scan-orchestrator \
+  --evidence-bucket package-scanner-dev-scan-evidence-807497180525-us-east-1 \
+  --ephemeral-bucket package-scanner-dev-scan-ephemeral-807497180525-us-east-1 \
+  --profile AdministratorAccess-807497180525 \
+  --status FAILED \
   --write
 ```
 

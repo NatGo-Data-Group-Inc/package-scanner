@@ -208,6 +208,58 @@ Operator impact:
 - This affects ECS-based R and Python scan orchestrators.
 - If a scan behaves as if a recent image fix is missing, confirm the task-definition ARN on the actual ECS task before debugging package behavior.
 
+### Python ECS Conda solve says `__glibc` or `__archspec` is missing
+
+Cause:
+
+- The candidate or exported Conda environment requires a newer glibc virtual
+  package or an `x86_64_v3` microarchitecture capability than the old Python
+  scanner runtime was advertising.
+
+Common symptoms:
+
+- `__glibc >= 2.39` missing
+- `_x86_64-microarch-level=3` requires `__archspec=x86_64_v3`
+
+Fix:
+
+1. Confirm the live Python ECS task is running on the refreshed Linux image.
+2. Confirm the task-definition revision is the latest active revision of the
+   `package-scanner-dev-python-linux-amd64` family.
+3. If needed, rebuild/push/register the Python Linux image again:
+   - `./scripts/build-python-ecs-images.sh ...`
+   - `./scripts/register-python-task-def.sh ...`
+4. Re-run the scan only after the ECS task shows the expected image digest.
+
+Operator note:
+
+- The current Linux runtime is `ubuntu:24.04`.
+- The worker exports `CONDA_OVERRIDE_GLIBC` dynamically from the host.
+- On `linux-amd64`, it also exports `CONDA_OVERRIDE_ARCHSPEC=x86_64_v3`.
+
+### Python candidate pin exists by version but not by exact build
+
+Cause:
+
+- A candidate manually pinned an exact Conda build string that does not exist in
+  the configured channels.
+
+Fix:
+
+1. Verify the package with `micromamba search` or `conda search` against the
+   exact channel set.
+2. If the build string is uncertain, loosen the pin to version-only form.
+   - prefer `idna=3.15`
+   - avoid guessing `idna=3.15=<build>`
+3. Re-upload the corrected candidate YAML and rerun the scan.
+
+Preferred candidate-generation path:
+
+- build the candidate from the realized environment with
+  `scripts/build-candidate-from-env-artifacts.py`
+- use `--prefer-conda-available` so Conda-resolvable packages stay on the
+  Conda side by default
+
 ### R restore root cause says package is unavailable before restore
 
 Cause:

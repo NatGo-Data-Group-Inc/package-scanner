@@ -79,6 +79,7 @@ Routes:
 - `/runs/r/<execution-id>`
 - `/runs/python/<execution-id>`
 - `/runs/<ecosystem>/<execution-id>/<platform>/unknown-findings`
+- `/cleanup/failed`
 
 ## Field Definitions
 
@@ -95,6 +96,18 @@ review, approval, or enclave transfer.
 
 On the runs page, `Status` is shown for the selected platform row, not as a
 count across all platforms in the run.
+
+Python dashboard note:
+- A Python worker can write a late `completed` checkpoint before orchestration
+  and catalog publication finish.
+- The UI now treats that state as `Finalizing` while the Step Functions
+  execution is still `RUNNING`.
+- A globally green/completed Python run requires both:
+  - Step Functions `SUCCEEDED`
+  - the published catalog/orchestration record
+
+This avoids the earlier failure mode where a retried run could appear fully
+complete in the GUI even though the worker had died before final publication.
 
 ### Platform
 
@@ -204,3 +217,15 @@ The runs page defaults are:
 
 These defaults are intended to surface the most immediately usable Linux scan
 artifacts first.
+
+## Failed Artifact Cleanup UI
+
+The browser also exposes a `Cleanup Failed` page for operator-driven S3 cleanup.
+
+Behavior:
+- shows failed, timed out, or aborted cataloged runs
+- supports preview before delete
+- requires the exact execution id to be typed before deletion
+- removes failed catalog records, orchestration prefixes, and checkpoint
+  prefixes for the selected execution
+- does not delete shared input objects from the scan input bucket
