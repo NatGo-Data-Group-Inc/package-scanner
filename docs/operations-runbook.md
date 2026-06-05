@@ -36,6 +36,7 @@ python3 scripts/build-candidate-from-env-artifacts.py \
   --env-prefix <conda-env-prefix> \
   --conda-bin conda \
   --prefer-conda-available \
+  --target-subdir linux-64 \
   --output candidates/<candidate-name>.yml \
   --artifacts-dir artifacts/<candidate-name> \
   --artifacts-zip artifacts/<candidate-name>.zip
@@ -44,6 +45,13 @@ python3 scripts/build-candidate-from-env-artifacts.py \
 - `--prefer-conda-available` is the default operator choice for Python
   candidates. It keeps packages on the Conda side when the configured channels
   can satisfy them and only falls back to pip when Conda cannot.
+- When you capture from a Windows environment for the Linux ECS pipeline, set
+  `--target-subdir linux-64` so the Conda availability probe checks the Linux
+  index rather than the local Windows subdir.
+- The generated candidate YAML is a normalized package request for this
+  pipeline, not an exact lockfile. If you need to reproduce the realized build
+  exactly, scan the exported `environment.yml` directly instead of relying on
+  the normalized candidate to preserve every build pin.
 - For local YAML files under `candidates/`, the webapp also provides a
   `Candidates` page. Use that page to upload the selected YAML and start a
   Python ECS scan without manually pre-populating checkpoint or ephemeral

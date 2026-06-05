@@ -259,6 +259,9 @@ Preferred candidate-generation path:
   `scripts/build-candidate-from-env-artifacts.py`
 - use `--prefer-conda-available` so Conda-resolvable packages stay on the
   Conda side by default
+- when capturing on Windows for a Linux ECS scan, add `--target-subdir
+  linux-64` so Conda availability probes are evaluated against the target
+  platform rather than the local workstation platform
 
 ### R restore root cause says package is unavailable before restore
 

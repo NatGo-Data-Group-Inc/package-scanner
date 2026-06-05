@@ -101,6 +101,7 @@ python3 scripts/build-candidate-from-env-artifacts.py \
   --env-prefix <conda-env-prefix> \
   --conda-bin conda \
   --prefer-conda-available \
+  --target-subdir linux-64 \
   --output candidates/<candidate-name>.yml \
   --artifacts-dir artifacts/<candidate-name> \
   --artifacts-zip artifacts/<candidate-name>.zip
@@ -111,6 +112,14 @@ That capture path records:
 - `conda list --json`
 - `pip freeze`
 - a normalized candidate YAML used by the Python ECS workflow
+
+If you capture from Windows for the Linux ECS pipeline, include
+`--target-subdir linux-64` so Conda availability checks are evaluated against
+the Linux index instead of the local Windows index.
+
+This candidate output is normalized on purpose. It does not preserve every
+version/build pin from the realized environment. If exact reproduction matters,
+scan the exported `environment.yml` directly.
 
 If you must change one package version in a candidate manually, prefer changing
 the package version and leaving the build string off unless you have verified
