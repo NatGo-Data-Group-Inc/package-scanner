@@ -2,146 +2,14 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
+import sys
 
 import yaml
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-NAME_RE = re.compile(r"[=<>!~\s]")
-
-CORE_NAMES = {
-    "python",
-    "python_abi",
-    "pip",
-    "setuptools",
-    "wheel",
-    "ca-certificates",
-    "openssl",
-    "libffi",
-    "libsqlite",
-    "sqlite",
-    "readline",
-    "tk",
-    "tzdata",
-    "ncurses",
-    "libzlib",
-    "zlib",
-    "zstd",
-    "bzip2",
-    "liblzma",
-    "libgcc",
-    "libgcc-ng",
-    "libstdcxx",
-    "libstdcxx-ng",
-    "libgomp",
-}
-
-NATIVE_PREFIXES = (
-    "lib",
-    "perl",
-    "r-",
-    "bioconductor-",
-    "xorg-",
-    "font-",
-    "fonts-",
-    "cuda",
-    "cudnn",
-)
-
-NATIVE_NAMES = {
-    "_openmp_mutex",
-    "aragorn",
-    "archspec",
-    "backports.zstd",
-    "bakta",
-    "bbmap",
-    "biopython",
-    "blast",
-    "brotli",
-    "brotli-bin",
-    "brotli-python",
-    "c-ares",
-    "cffi",
-    "cgecore",
-    "contourpy",
-    "curl",
-    "diamond",
-    "entrez-direct",
-    "fastqc",
-    "fontconfig",
-    "fonttools",
-    "freetype",
-    "git",
-    "gperftools",
-    "hmmer",
-    "infernal",
-    "isa-l",
-    "kaleido-core",
-    "keyutils",
-    "kiwisolver",
-    "kma",
-    "kraken2",
-    "krb5",
-    "lcms2",
-    "ld_impl_linux-64",
-    "lerc",
-    "lz4-c",
-    "mathjax",
-    "matplotlib-base",
-    "multiqc",
-    "ncbi-amrfinderplus",
-    "ncbi-vdb",
-    "networkx",
-    "nspr",
-    "nss",
-    "numpy",
-    "openjdk",
-    "openjpeg",
-    "pandas",
-    "pbzip2",
-    "pcre2",
-    "pillow",
-    "plotly",
-    "popt",
-    "psutil",
-    "pthread-stubs",
-    "pycparser",
-    "pydantic-core",
-    "pygments",
-    "pyhmmer",
-    "pyparsing",
-    "pyrodigal",
-    "pysocks",
-    "python-isal",
-    "python-kaleido",
-    "python-zlib-ng",
-    "qhull",
-    "regex",
-    "rpds-py",
-    "rsync",
-    "spectra",
-    "sra-human-scrubber",
-    "tabulate",
-    "tar",
-    "tiktoken",
-    "tqdm",
-    "trnascan-se",
-    "unicodedata2",
-    "urllib3",
-    "virulencefinder",
-    "wget",
-    "xopen",
-    "xxhash",
-    "yaml",
-    "zipp",
-    "zlib-ng",
-    "zstandard",
-}
-
-
-def package_name(spec: str) -> str:
-    return NAME_RE.split(spec.strip(), maxsplit=1)[0].lower()
+from package_scanner.python_dependency_classification import classify_dependency, package_name
 
 
 def write_env(path: Path, name: str, channels: list[str], specs: list[str]) -> None:
@@ -178,10 +46,10 @@ def main() -> int:
     python_specs: list[str] = []
 
     for spec in conda_specs:
-        pkg = package_name(spec)
-        if pkg in CORE_NAMES:
+        classification = classify_dependency(spec)
+        if classification == "core":
             core_specs.append(spec)
-        elif pkg.startswith(NATIVE_PREFIXES) or pkg in NATIVE_NAMES:
+        elif classification == "native":
             native_specs.append(spec)
         else:
             python_specs.append(spec)

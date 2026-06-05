@@ -46,6 +46,7 @@
   <li>Python: {% if approved_python %}<a href="/runs/python/{{ approved_python.execution_id }}">{{ approved_python.execution_id }}</a> <span class="muted">from {{ approved_python.input_label }}</span>{% else %}<span class="muted">No approved run selected</span>{% endif %}</li>
 </ul>
 <h2>Active Runs</h2>
+<p class="muted">A run is only complete after Step Functions reaches <code>SUCCEEDED</code> and the catalog/evidence record is published. <code>RUNNING</code> means the orchestration is still active, even if a worker checkpoint reached a late stage.</p>
 {% if active_runs %}
 <table>
   <thead>

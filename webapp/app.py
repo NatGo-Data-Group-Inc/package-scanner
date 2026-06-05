@@ -327,6 +327,7 @@ def stage_display_name(stage: str | None) -> str:
         "queued": "Queued",
         "starting": "Starting",
         "retrying": "Retrying",
+        "finalizing": "Finalizing",
         "failed": "Failed",
     }
     if normalized.lower() in special:
@@ -356,10 +357,15 @@ def stage_steps_for_run(ecosystem: str, current_stage: str | None, status: str) 
     normalized_status = str(status or "").strip().upper()
     failed = normalized_status in {"FAILED", "TIMED_OUT", "ABORTED"}
     steps: list[dict[str, str]] = []
+    if normalized_status == "RUNNING" and normalized_stage in {"completed", "finalizing"}:
+        for index, stage in enumerate(order):
+            step_status = "done" if index < len(order) - 1 else "current"
+            steps.append({"name": stage_display_name(stage), "status": step_status})
+        return steps
     for stage in order:
         if failed and stage == normalized_stage:
             step_status = "failed"
-        elif normalized_stage == "completed":
+        elif normalized_status == "SUCCEEDED" and normalized_stage == "completed":
             step_status = "done"
         elif normalized_stage == stage:
             step_status = "current"
@@ -375,8 +381,10 @@ def stage_steps_for_run(ecosystem: str, current_stage: str | None, status: str) 
 
 def status_class(status: str) -> str:
     normalized = str(status or "").upper()
-    if normalized in {"SUCCEEDED", "RUNNING"}:
+    if normalized == "SUCCEEDED":
         return "ok"
+    if normalized == "RUNNING":
+        return "warn"
     if normalized in {"FAILED", "TIMED_OUT", "ABORTED"}:
         return "bad"
     return "muted"
@@ -862,8 +870,12 @@ def create_app() -> Flask:
             worker_attempt_failed = bool(task_context.get("worker_attempt_failed"))
             if checkpoint_phase == "failed":
                 checkpoint_phase = None
+            elif checkpoint_phase == "completed":
+                checkpoint_phase = "finalizing"
             if task_last_status == "RUNNING" or container_last_status == "RUNNING":
                 phase = checkpoint_phase or "starting"
+                if checkpoint_phase == "finalizing":
+                    phase_detail = "Worker reported a completed checkpoint; waiting for Step Functions and catalog publication to finish."
             elif task_last_status == "PENDING" or container_last_status == "PENDING":
                 phase = "starting"
                 phase_detail = "Task placed; container is starting."

@@ -1,11 +1,13 @@
-FROM public.ecr.aws/amazonlinux/amazonlinux:2023
+FROM ubuntu:24.04
 
 ARG TRIVY_VERSION=0.69.3
 ARG TARGETARCH
 
-RUN dnf install -y \
-    awscli \
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y \
     bzip2 \
+    ca-certificates \
+    curl \
     file \
     findutils \
     git \
@@ -14,10 +16,11 @@ RUN dnf install -y \
     python3 \
     python3-pip \
     tar \
+    unzip \
     which \
-    xz \
+    xz-utils \
     zip && \
-    dnf clean all
+    rm -rf /var/lib/apt/lists/*
 
 RUN case "${TARGETARCH}" in \
       amd64) MAMBA_ARCH="linux-64" ;; \
@@ -28,7 +31,7 @@ RUN case "${TARGETARCH}" in \
       | tar -xvj -C /usr/local/bin --strip-components=1 bin/micromamba && \
     chmod +x /usr/local/bin/micromamba
 
-RUN python3 -m pip install --no-cache-dir --ignore-installed boto3 conda-pack cyclonedx-bom pyyaml safety && \
+RUN python3 -m pip install --break-system-packages --no-cache-dir --ignore-installed awscli boto3 conda-pack cyclonedx-bom pyyaml safety && \
     case "${TARGETARCH}" in \
       amd64) TRIVY_ARCH="64bit" ;; \
       arm64) TRIVY_ARCH="ARM64" ;; \
@@ -47,6 +50,9 @@ COPY scripts/generate-governance-artifacts.py /opt/package-scanner/scripts/gener
 COPY scripts/generate-python-materialization-summary.py /opt/package-scanner/scripts/generate-python-materialization-summary.py
 COPY scripts/plan-python-environment-install.py /opt/package-scanner/scripts/plan-python-environment-install.py
 COPY scripts/run-python-ecs-task.sh /opt/package-scanner/scripts/run-python-ecs-task.sh
+COPY package_scanner /opt/package-scanner/package_scanner
+
+ENV PYTHONPATH=/opt/package-scanner
 
 RUN chmod +x /opt/package-scanner/scripts/run-python-ecs-task.sh
 

@@ -1,0 +1,336 @@
+from __future__ import annotations
+
+import re
+
+
+NAME_RE = re.compile(r"[=<>!~\s]")
+
+
+def _norm(name: str) -> str:
+    return name.strip().lower().replace("_", "-").replace(".", "-")
+
+CORE_NAMES = {_norm(name) for name in {
+    "_libgcc_mutex",
+    "python",
+    "python_abi",
+    "pip",
+    "setuptools",
+    "wheel",
+    "ca-certificates",
+    "openssl",
+    "libffi",
+    "libsqlite",
+    "sqlite",
+    "readline",
+    "tk",
+    "tzdata",
+    "ncurses",
+    "libzlib",
+    "zlib",
+    "zstd",
+    "bzip2",
+    "liblzma",
+    "libgcc",
+    "libgcc-ng",
+    "libstdcxx",
+    "libstdcxx-ng",
+    "libgomp",
+    "python-tzdata",
+}}
+
+NATIVE_PREFIXES = (
+    "lib",
+    "perl",
+    "r-",
+    "bioconductor-",
+    "xorg-",
+    "font-",
+    "fonts-",
+    "cuda",
+    "cudnn",
+    "aws-c-",
+    "aws-sdk-",
+    "aws-crt-",
+    "azure-",
+    "boost-",
+)
+
+NATIVE_SUFFIXES = (
+    "-cpp",
+    "-devel",
+)
+
+NATIVE_NAMES = {_norm(name) for name in {
+    "_openmp_mutex",
+    "aom",
+    "aragorn",
+    "archspec",
+    "atk-1.0",
+    "backports.zoneinfo",
+    "backports.zstd",
+    "bakta",
+    "bbmap",
+    "biopython",
+    "blas",
+    "blas-devel",
+    "blast",
+    "boost-cpp",
+    "brotli",
+    "brotli-bin",
+    "brotli-python",
+    "c-ares",
+    "cairo",
+    "cffi",
+    "cgecore",
+    "contourpy",
+    "curl",
+    "cyrus-sasl",
+    "dav1d",
+    "diamond",
+    "entrez-direct",
+    "expat",
+    "fastqc",
+    "filelock",
+    "fmt",
+    "fontconfig",
+    "fonttools",
+    "freetype",
+    "fribidi",
+    "gdk-pixbuf",
+    "giflib",
+    "git",
+    "glib",
+    "glib-tools",
+    "glog",
+    "gmp",
+    "gmpy2",
+    "gobject-introspection",
+    "gperftools",
+    "graphite2",
+    "graphviz",
+    "gts",
+    "gtk2",
+    "harfbuzz",
+    "hmmer",
+    "icu",
+    "infernal",
+    "intel-openmp",
+    "isa-l",
+    "kaleido-core",
+    "keyutils",
+    "kiwisolver",
+    "kma",
+    "kraken2",
+    "krb5",
+    "lcms2",
+    "ld_impl_linux-64",
+    "lerc",
+    "lmdb",
+    "lz4-c",
+    "mathjax",
+    "matplotlib-base",
+    "mkl",
+    "mpc",
+    "mpfr",
+    "multiqc",
+    "ncbi-amrfinderplus",
+    "ncbi-vdb",
+    "networkx",
+    "ninja",
+    "ninja-base",
+    "nomkl",
+    "nspr",
+    "nss",
+    "numpy",
+    "numpy-base",
+    "openblas",
+    "openblas-devel",
+    "openjdk",
+    "openjpeg",
+    "openldap",
+    "orc",
+    "pandas",
+    "pango",
+    "pbzip2",
+    "pcre2",
+    "pillow",
+    "pixman",
+    "plotly",
+    "poppler",
+    "poppler-data",
+    "popt",
+    "prometheus-cpp",
+    "protobuf",
+    "psutil",
+    "pthread-stubs",
+    "pyarrow",
+    "pyarrow-core",
+    "pybind11",
+    "pybind11-global",
+    "pycares",
+    "pycparser",
+    "pydantic-core",
+    "pygments",
+    "pyhmmer",
+    "pykrb5",
+    "pyodbc",
+    "pyparsing",
+    "pyrodigal",
+    "psycopg2",
+    "pysocks",
+    "pyspnego",
+    "python-duckdb",
+    "python-gssapi",
+    "python-isal",
+    "python-kaleido",
+    "python-xxhash",
+    "python-zlib-ng",
+    "pytorch",
+    "qhull",
+    "regex",
+    "rpds-py",
+    "rsync",
+    "scikit-learn",
+    "scipy",
+    "sentence-transformers",
+    "spectra",
+    "sra-human-scrubber",
+    "tabulate",
+    "tar",
+    "tbb",
+    "threadpoolctl",
+    "tiktoken",
+    "tokenizers",
+    "torch",
+    "torchaudio",
+    "torchvision",
+    "tqdm",
+    "trnascan-se",
+    "typing-inspection",
+    "unicodedata2",
+    "unixodbc",
+    "urllib3",
+    "virulencefinder",
+    "wget",
+    "xopen",
+    "xxhash",
+    "yaml",
+    "zipp",
+    "zlib-ng",
+    "zstandard",
+}}
+
+PIP_PREFERRED_NAMES = {_norm(name) for name in {
+    "bottleneck",
+    "cffi",
+    "cryptography",
+    "datasets",
+    "duckdb",
+    "fastapi",
+    "filelock",
+    "flask",
+    "fsspec",
+    "gevent",
+    "greenlet",
+    "huggingface-hub",
+    "jupyter",
+    "jupyterlab",
+    "locust",
+    "networkx",
+    "numpy",
+    "openpyxl",
+    "orjson",
+    "pandas",
+    "pillow",
+    "psutil",
+    "pyarrow",
+    "pycares",
+    "pydantic-core",
+    "pygments",
+    "pyodbc",
+    "pyparsing",
+    "pysocks",
+    "python-duckdb",
+    "pytorch",
+    "regex",
+    "rpds-py",
+    "scikit-learn",
+    "scipy",
+    "sentence-transformers",
+    "sqlalchemy",
+    "tabulate",
+    "threadpoolctl",
+    "tokenizers",
+    "torch",
+    "torchaudio",
+    "torchvision",
+    "tqdm",
+    "typing-inspection",
+    "urllib3",
+    "uvicorn",
+    "uvloop",
+    "zipp",
+}}
+
+PIP_EXCLUDE_NAMES = {_norm(name) for name in {
+    "aws-checksums",
+    "backports.zoneinfo",
+    "gflags",
+    "jpeg",
+    "llvm-openmp",
+    "nlohmann_json",
+    "re2",
+    "s2n",
+    "psycopg2-binary",
+    "sleef",
+    "snappy",
+    "spdlog",
+    "xz",
+}}
+
+PIP_NAME_ALIASES = {
+    "antlr-python-runtime": "antlr4-python3-runtime",
+    "backports-zoneinfo": "backports.zoneinfo",
+    "brotli-python": "brotli",
+    "pyarrow-core": "pyarrow",
+    "python-duckdb": "duckdb",
+    "python-gssapi": "gssapi",
+    "python-tzdata": "tzdata",
+    "python-xxhash": "xxhash",
+    "pytorch": "torch",
+}
+
+
+def normalize_name(name: str) -> str:
+    return _norm(name)
+
+
+def package_name(spec: str) -> str:
+    return normalize_name(NAME_RE.split(spec.strip(), maxsplit=1)[0])
+
+
+def classify_dependency(spec: str) -> str:
+    pkg = package_name(spec)
+    if pkg in CORE_NAMES:
+        return "core"
+    if pkg in PIP_PREFERRED_NAMES:
+        return "python"
+    if pkg.startswith(NATIVE_PREFIXES) or pkg.endswith(NATIVE_SUFFIXES) or pkg in NATIVE_NAMES:
+        return "native"
+    return "python"
+
+
+def pip_requirement_name(name: str) -> str:
+    normalized = normalize_name(name)
+    return PIP_NAME_ALIASES.get(normalized, name)
+
+
+def should_include_pip_requirement(name: str) -> bool:
+    normalized = normalize_name(name)
+    if not normalized:
+        return False
+    if normalized.startswith("nvidia-"):
+        return False
+    if normalized in CORE_NAMES or normalized in PIP_EXCLUDE_NAMES:
+        return False
+    return classify_dependency(normalized) != "native"

@@ -20,6 +20,8 @@ $mambaBin = if ($env:MAMBA_BIN) { $env:MAMBA_BIN } else { 'C:\micromamba\Library
 $condaPackBin = if ($env:CONDA_PACK_BIN) { $env:CONDA_PACK_BIN } else { 'conda-pack' }
 $pythonCpuOnly = if ($env:PYTHON_CPU_ONLY) { $env:PYTHON_CPU_ONLY } else { 'true' }
 $pythonRestoreEnvCheckpoint = if ($env:PYTHON_RESTORE_ENV_CHECKPOINT) { $env:PYTHON_RESTORE_ENV_CHECKPOINT } else { 'false' }
+$pythonCheckpointIncludePkgs = if ($env:PYTHON_CHECKPOINT_INCLUDE_PKGS) { $env:PYTHON_CHECKPOINT_INCLUDE_PKGS } else { 'false' }
+$pythonCheckpointIncludeEnv = if ($env:PYTHON_CHECKPOINT_INCLUDE_ENV) { $env:PYTHON_CHECKPOINT_INCLUDE_ENV } else { 'false' }
 $checkpointJob = $null
 
 function Write-State {
@@ -46,7 +48,7 @@ function Pack-PythonEnv {
   if (-not (Test-Path $envPrefix)) {
     return
   }
-  & $condaPackBin --prefix $envPrefix --output $OutputFile --format tar.gz --force | Out-Null
+  & $condaPackBin --prefix $envPrefix --output $OutputFile --format tar.gz --ignore-missing-files --force | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "conda-pack failed" }
   Write-Checksum -Path $OutputFile -ChecksumFile $ChecksumFile
 }
@@ -72,15 +74,17 @@ function Publish-Checkpoint {
   param([string]$Phase = 'restore')
   Write-State -Phase $Phase
   $pkgsDir = Join-Path $rootPrefix 'pkgs'
-  if (Test-Path $pkgsDir) {
+  if ($pythonCheckpointIncludePkgs -eq 'true' -and (Test-Path $pkgsDir)) {
     & $pythonBin "$scriptRoot\bundle-directory.py" --source-dir $pkgsDir --output-file "$runDir\checkpoint-python-pkgs.tar.gz" --checksum-file "$runDir\checkpoint-python-pkgs.tar.gz.sha256"
     aws s3 cp "$runDir\checkpoint-python-pkgs.tar.gz" "$checkpointPrefix/latest/python-pkgs.tar.gz" | Out-Null
     aws s3 cp "$runDir\checkpoint-python-pkgs.tar.gz.sha256" "$checkpointPrefix/latest/python-pkgs.tar.gz.sha256" | Out-Null
+    Remove-Item "$runDir\checkpoint-python-pkgs.tar.gz", "$runDir\checkpoint-python-pkgs.tar.gz.sha256" -Force -ErrorAction SilentlyContinue
   }
-  if (Test-Path $envPrefix) {
+  if ($pythonCheckpointIncludeEnv -eq 'true' -and (Test-Path $envPrefix)) {
     Pack-PythonEnv "$runDir\checkpoint-python-env.tar.gz" "$runDir\checkpoint-python-env.tar.gz.sha256"
     aws s3 cp "$runDir\checkpoint-python-env.tar.gz" "$checkpointPrefix/latest/python-env.tar.gz" | Out-Null
     aws s3 cp "$runDir\checkpoint-python-env.tar.gz.sha256" "$checkpointPrefix/latest/python-env.tar.gz.sha256" | Out-Null
+    Remove-Item "$runDir\checkpoint-python-env.tar.gz", "$runDir\checkpoint-python-env.tar.gz.sha256" -Force -ErrorAction SilentlyContinue
   }
   aws s3 cp "$runDir\stage-state.json" "$checkpointPrefix/latest/stage-state.json" | Out-Null
 }
@@ -95,7 +99,7 @@ function Stop-CheckpointLoop {
 
 function Start-CheckpointLoop {
   $script:checkpointJob = Start-Job -ScriptBlock {
-    param($CheckpointIntervalSeconds, $runDir, $rootPrefix, $envPrefix, $checkpointPrefix, $Platform, $runId, $ts, $scriptRoot, $pythonBin, $condaPackBin)
+    param($CheckpointIntervalSeconds, $runDir, $rootPrefix, $envPrefix, $checkpointPrefix, $Platform, $runId, $ts, $scriptRoot, $pythonBin, $condaPackBin, $pythonCheckpointIncludePkgs, $pythonCheckpointIncludeEnv)
     function Write-StateInner {
       param([string]$Phase)
       $payload = "{`"platform`":`"$Platform`",`"scan_execution_id`":`"$runId`",`"scan_timestamp`":`"$ts`",`"phase`":`"$Phase`",`"checkpoint_prefix`":`"$($checkpointPrefix.Replace('s3://', ''))`"}"
@@ -111,21 +115,23 @@ function Start-CheckpointLoop {
       try {
         Write-StateInner -Phase 'restore'
         $pkgsDir = Join-Path $rootPrefix 'pkgs'
-        if (Test-Path $pkgsDir) {
+        if ($pythonCheckpointIncludePkgs -eq 'true' -and (Test-Path $pkgsDir)) {
           & $pythonBin "$scriptRoot\bundle-directory.py" --source-dir $pkgsDir --output-file "$runDir\checkpoint-python-pkgs.tar.gz" --checksum-file "$runDir\checkpoint-python-pkgs.tar.gz.sha256"
           aws s3 cp "$runDir\checkpoint-python-pkgs.tar.gz" "$checkpointPrefix/latest/python-pkgs.tar.gz" | Out-Null
           aws s3 cp "$runDir\checkpoint-python-pkgs.tar.gz.sha256" "$checkpointPrefix/latest/python-pkgs.tar.gz.sha256" | Out-Null
+          Remove-Item "$runDir\checkpoint-python-pkgs.tar.gz", "$runDir\checkpoint-python-pkgs.tar.gz.sha256" -Force -ErrorAction SilentlyContinue
         }
-        if (Test-Path $envPrefix) {
-          & $condaPackBin --prefix $envPrefix --output "$runDir\checkpoint-python-env.tar.gz" --format tar.gz --force | Out-Null
+        if ($pythonCheckpointIncludeEnv -eq 'true' -and (Test-Path $envPrefix)) {
+          & $condaPackBin --prefix $envPrefix --output "$runDir\checkpoint-python-env.tar.gz" --format tar.gz --ignore-missing-files --force | Out-Null
           Write-ChecksumInner "$runDir\checkpoint-python-env.tar.gz" "$runDir\checkpoint-python-env.tar.gz.sha256"
           aws s3 cp "$runDir\checkpoint-python-env.tar.gz" "$checkpointPrefix/latest/python-env.tar.gz" | Out-Null
           aws s3 cp "$runDir\checkpoint-python-env.tar.gz.sha256" "$checkpointPrefix/latest/python-env.tar.gz.sha256" | Out-Null
+          Remove-Item "$runDir\checkpoint-python-env.tar.gz", "$runDir\checkpoint-python-env.tar.gz.sha256" -Force -ErrorAction SilentlyContinue
         }
         aws s3 cp "$runDir\stage-state.json" "$checkpointPrefix/latest/stage-state.json" | Out-Null
       } catch {}
     }
-  } -ArgumentList $checkpointIntervalSeconds, $runDir, $rootPrefix, $envPrefix, $checkpointPrefix, $Platform, $runId, $ts, $scriptRoot, $pythonBin, $condaPackBin
+  } -ArgumentList $checkpointIntervalSeconds, $runDir, $rootPrefix, $envPrefix, $checkpointPrefix, $Platform, $runId, $ts, $scriptRoot, $pythonBin, $condaPackBin, $pythonCheckpointIncludePkgs, $pythonCheckpointIncludeEnv
 }
 
 try {
@@ -160,6 +166,7 @@ gpu_package_prefixes = (
     "libnvjitlink",
     "libnvjpeg",
     "nccl",
+    "nvidia-",
     "pytorch-cuda",
 )
 tensorflow_packages = {
@@ -284,6 +291,7 @@ if removed or rewritten:
       $pkgsDir = Join-Path $rootPrefix 'pkgs'
       New-Item -ItemType Directory -Force -Path $pkgsDir | Out-Null
       & $pythonBin "$scriptRoot\extract-archive.py" --archive "$runDir\checkpoint-python-pkgs.tar.gz" --destination $pkgsDir
+      Remove-Item "$runDir\checkpoint-python-pkgs.tar.gz" -Force -ErrorAction SilentlyContinue
     }
   } catch {}
 
@@ -292,6 +300,7 @@ if removed or rewritten:
       aws s3 cp "$checkpointPrefix/latest/python-env.tar.gz" "$runDir\checkpoint-python-env.tar.gz" | Out-Null
       if (Test-Path "$runDir\checkpoint-python-env.tar.gz") {
         Restore-PackedPythonEnv "$runDir\checkpoint-python-env.tar.gz"
+        Remove-Item "$runDir\checkpoint-python-env.tar.gz" -Force -ErrorAction SilentlyContinue
       }
     } catch {}
   }
@@ -318,7 +327,7 @@ if removed or rewritten:
     }
 
     if ((Get-Item "$runDir\environment.pip.requirements.txt").Length -gt 0) {
-      & $mambaBin run -r $rootPrefix -n target python -m pip install --no-input -r "$runDir\environment.pip.requirements.txt"
+      & $mambaBin run -r $rootPrefix -n target python -m pip install --no-cache-dir --no-input -r "$runDir\environment.pip.requirements.txt"
       if ($LASTEXITCODE -ne 0) { throw "pip stage failed" }
     }
   } *>&1 | Tee-Object -FilePath "$runDir\restore.log"

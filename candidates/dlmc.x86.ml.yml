@@ -1,0 +1,299 @@
+name: dlmc.x86.ml
+channels:
+- defaults
+- conda-forge
+dependencies:
+- python
+- pip
+- _libgcc_mutex
+- bzip2
+- ca-certificates
+- cyrus-sasl
+- backports.zoneinfo
+- krb5
+- libffi
+- libgcc
+- libgcc-ng
+- libgomp
+- libkrb5
+- libsqlite
+- libstdcxx
+- libstdcxx-ng
+- libzlib
+- ncurses
+- openldap
+- openssl
+- pykrb5
+- psycopg2
+- pyspnego
+- python-gssapi
+- readline
+- sqlite
+- tk
+- tzdata
+- unixodbc
+- xxhash
+- zlib
+- zstd
+- setuptools
+- wheel
+- pip:
+  - cffi
+  - filelock
+  - networkx
+  - numpy
+  - pandas
+  - pillow
+  - pyarrow
+  - pycares
+  - pydantic-core
+  - pyodbc
+  - pyparsing
+  - pysocks
+  - duckdb
+  - torch
+  - regex
+  - scikit-learn
+  - scipy
+  - sentence-transformers
+  - tabulate
+  - threadpoolctl
+  - tokenizers
+  - tqdm
+  - typing-inspection
+  - pygments
+  - urllib3
+  - torchaudio
+  - torchvision
+  - zipp
+  - psutil
+  - rpds-py
+  - aiodns
+  - aiohappyeyeballs
+  - aiohttp
+  - aiohttp-retry
+  - aiosignal
+  - amqp
+  - annotated-types
+  - antlr4-python3-runtime
+  - appdirs
+  - asyncssh
+  - atpublic
+  - attrs
+  - billiard
+  - boto3
+  - botocore
+  - bottleneck
+  - brotlicffi
+  - celery
+  - click-didyoumean
+  - click-plugins
+  - click-repl
+  - colorama
+  - conda-pack
+  - configobj
+  - cryptography
+  - datasets
+  - decorator
+  - dictdiffer
+  - dill
+  - diskcache
+  - distro
+  - dpath
+  - dulwich
+  - dvc
+  - dvc-data
+  - dvc-http
+  - dvc-objects
+  - dvc-render
+  - dvc-studio-client
+  - dvc-task
+  - dynaconf
+  - entrypoints
+  - et_xmlfile
+  - fastapi
+  - flatten-dict
+  - flufl.lock
+  - frozenlist
+  - fsspec
+  - funcy
+  - future
+  - gitdb
+  - gitpython
+  - grandalf
+  - gto
+  - h11
+  - h2
+  - hf-xet
+  - hpack
+  - huggingface_hub
+  - hydra-core
+  - hyperframe
+  - importlib-metadata
+  - importlib_resources
+  - isort
+  - iterative-telemetry
+  - jinja2
+  - jmespath
+  - joblib
+  - kombu
+  - markdown-it-py
+  - mccabe
+  - mdurl
+  - mpmath
+  - multidict
+  - multiprocess
+  - numexpr
+  - omegaconf
+  - openpyxl
+  - opentelemetry-api
+  - orjson
+  - pathlib2
+  - pathspec
+  - platformdirs
+  - prompt-toolkit
+  - propcache
+  - pydantic
+  - pydot
+  - pygit2
+  - pygtrie
+  - python-dateutil
+  - pytz
+  - pyyaml
+  - requests-kerberos
+  - rich
+  - ruamel.yaml
+  - ruamel.yaml.clib
+  - s3transfer
+  - safetensors
+  - scmrepo
+  - semver
+  - shellingham
+  - shortuuid
+  - shtab
+  - six
+  - smmap
+  - sqlalchemy
+  - sqltrie
+  - starlette
+  - strawberry-graphql
+  - strawberry-sqlalchemy-mapper
+  - sympy
+  - tomlkit
+  - transformers
+  - typer
+  - typing-extensions
+  - anyio
+  - argon2-cffi
+  - argon2-cffi-bindings
+  - packaging
+  - requests
+  - jsonschema
+  - flask
+  - flask-cors
+  - flask-login
+  - gevent
+  - greenlet
+  - locust
+  - pytest
+  - pyzmq
+  - zope.event
+  - zope.interface
+  - uvicorn
+  - uvloop
+  - vine
+  - voluptuous
+  - wcwidth
+  - yarl
+  - zc.lockfile
+  - arrow
+  - asttokens
+  - async-lru
+  - babel
+  - beautifulsoup4
+  - bidict
+  - bleach
+  - blinker
+  - certifi
+  - charset-normalizer
+  - click
+  - comm
+  - configargparse
+  - debugpy
+  - defusedxml
+  - executing
+  - fastjsonschema
+  - fqdn
+  - geventhttpclient
+  - httpcore
+  - httpx
+  - idna
+  - iniconfig
+  - ipykernel
+  - ipython
+  - ipython-pygments-lexers
+  - ipywidgets
+  - isoduration
+  - itsdangerous
+  - jedi
+  - json5
+  - jsonpointer
+  - jsonschema-specifications
+  - jupyter
+  - jupyter-client
+  - jupyter-console
+  - jupyter-core
+  - jupyter-events
+  - jupyter-lsp
+  - jupyter-server
+  - jupyter-server-terminals
+  - jupyterlab
+  - jupyterlab-pygments
+  - jupyterlab-server
+  - jupyterlab-widgets
+  - markupsafe
+  - matplotlib-inline
+  - mistune
+  - msgpack
+  - nbclient
+  - nbconvert
+  - nbformat
+  - nest-asyncio
+  - nltk
+  - notebook
+  - notebook-shim
+  - overrides
+  - pandocfilters
+  - parso
+  - pexpect
+  - pluggy
+  - prometheus-client
+  - ptyprocess
+  - pure-eval
+  - python-engineio
+  - python-json-logger
+  - python-socketio
+  - referencing
+  - rfc3339-validator
+  - rfc3986-validator
+  - send2trash
+  - simple-websocket
+  - sniffio
+  - soupsieve
+  - stack-data
+  - terminado
+  - tinycss2
+  - tornado
+  - traitlets
+  - types-python-dateutil
+  - uri-template
+  - webcolors
+  - webencodings
+  - websocket-client
+  - werkzeug
+  - widgetsnbextension
+  - wsproto
+  - asksageclient
+  - fhir-core
+  - fhir-resources
+  - pip-system-certs

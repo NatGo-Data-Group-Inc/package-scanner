@@ -33,6 +33,15 @@ def load_conda_packages(conda_list_path: Path) -> int:
 
 NAME_RE = re.compile(r"[=<>!~\s]")
 
+PACKAGE_ALIASES = {
+    "pyyaml": {"yaml"},
+    "yaml": {"pyyaml"},
+    "pytorch": {"torch"},
+    "torch": {"pytorch"},
+    "scikit-learn": {"sklearn"},
+    "sklearn": {"scikit-learn"},
+}
+
 
 def normalize_name(name: str) -> str:
     return name.strip().lower().replace("_", "-").replace(".", "-")
@@ -40,6 +49,15 @@ def normalize_name(name: str) -> str:
 
 def package_name(spec: str) -> str:
     return normalize_name(NAME_RE.split(spec.strip(), maxsplit=1)[0])
+
+
+def equivalent_package_names(name: str) -> set[str]:
+    normalized = normalize_name(name)
+    return {normalized, *PACKAGE_ALIASES.get(normalized, set())}
+
+
+def is_package_satisfied(requested_name: str, realized_names: set[str]) -> bool:
+    return any(name in realized_names for name in equivalent_package_names(requested_name))
 
 
 def load_requested_packages(environment_path: Path) -> tuple[list[str], list[str]]:
@@ -122,11 +140,12 @@ def main() -> int:
     requested_conda_packages, requested_pip_packages = load_requested_packages(environment_path)
     realized_conda_packages = load_conda_package_names(conda_list_path)
     realized_pip_packages = load_pip_package_names(requirements_path)
+    realized_package_names = set(realized_conda_packages) | set(realized_pip_packages)
     missing_requested_conda_packages = sorted(
-        pkg for pkg in requested_conda_packages if pkg not in realized_conda_packages
+        pkg for pkg in requested_conda_packages if not is_package_satisfied(pkg, realized_package_names)
     )
     missing_requested_pip_packages = sorted(
-        pkg for pkg in requested_pip_packages if pkg not in realized_pip_packages
+        pkg for pkg in requested_pip_packages if not is_package_satisfied(pkg, realized_package_names)
     )
     summary = {
         "platform": args.platform,
