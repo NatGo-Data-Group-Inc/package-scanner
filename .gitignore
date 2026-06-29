@@ -21,4 +21,8 @@ Thumbs.db
 .idea/
 .vscode/
 
+# Local tooling environments
+.codex
+.venv/
+
 .tmp/
