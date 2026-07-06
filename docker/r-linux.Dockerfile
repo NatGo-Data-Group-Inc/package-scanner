@@ -155,7 +155,7 @@ RUN mkdir -p /tmp/r-build /opt/R && \
 RUN /usr/local/bin/python3.11 -m pip install --no-cache-dir boto3 && \
     curl --retry 5 --retry-delay 2 --retry-connrefused -fsSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" -o /tmp/trivy.tar.gz && \
     tar -xzf /tmp/trivy.tar.gz -C /usr/local/bin trivy && \
-    Rscript -e "options(repos=c(RSPM='https://packagemanager.posit.co/all/latest',CRAN='https://cloud.r-project.org')); install.packages(c('renv','ggplot2','isoband','rlang','vctrs'), dependencies=NA)"
+    Rscript -e "options(repos=c(RSPM='https://packagemanager.posit.co/all/latest',CRAN='https://cloud.r-project.org')); install.packages(c('renv','BiocManager','ggplot2','isoband','rlang','vctrs'), dependencies=NA)"
 
 ENV SCRIPT_ROOT=/opt/package-scanner/scripts
 ENV PYTHON_BIN=/usr/local/bin/python3.11

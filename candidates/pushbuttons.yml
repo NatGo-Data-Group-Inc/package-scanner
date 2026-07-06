@@ -96,6 +96,7 @@ dependencies:
 - ncbi-vdb
 - ncurses
 - networkx
+- nextflow
 - nspr
 - nss
 - numpy

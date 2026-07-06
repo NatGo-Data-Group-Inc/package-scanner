@@ -327,6 +327,7 @@ def stage_display_name(stage: str | None) -> str:
         "queued": "Queued",
         "starting": "Starting",
         "retrying": "Retrying",
+        "finalizing": "Finalizing",
         "failed": "Failed",
     }
     if normalized.lower() in special:
@@ -356,10 +357,15 @@ def stage_steps_for_run(ecosystem: str, current_stage: str | None, status: str) 
     normalized_status = str(status or "").strip().upper()
     failed = normalized_status in {"FAILED", "TIMED_OUT", "ABORTED"}
     steps: list[dict[str, str]] = []
+    if normalized_status == "RUNNING" and normalized_stage in {"completed", "finalizing"}:
+        for index, stage in enumerate(order):
+            step_status = "done" if index < len(order) - 1 else "current"
+            steps.append({"name": stage_display_name(stage), "status": step_status})
+        return steps
     for stage in order:
         if failed and stage == normalized_stage:
             step_status = "failed"
-        elif normalized_stage == "completed":
+        elif normalized_status == "SUCCEEDED" and normalized_stage == "completed":
             step_status = "done"
         elif normalized_stage == stage:
             step_status = "current"
@@ -375,8 +381,10 @@ def stage_steps_for_run(ecosystem: str, current_stage: str | None, status: str) 
 
 def status_class(status: str) -> str:
     normalized = str(status or "").upper()
-    if normalized in {"SUCCEEDED", "RUNNING"}:
+    if normalized == "SUCCEEDED":
         return "ok"
+    if normalized == "RUNNING":
+        return "warn"
     if normalized in {"FAILED", "TIMED_OUT", "ABORTED"}:
         return "bad"
     return "muted"
@@ -443,6 +451,7 @@ def create_app() -> Flask:
             "arn:aws:states:us-east-1:807497180525:stateMachine:package-scanner-dev-r-ecs-windows-scan-orchestrator",
         ],
     )
+    stack_output_cache: dict[str, dict] = {}
 
     @app.before_request
     def log_request_start() -> None:
@@ -590,7 +599,7 @@ def create_app() -> Flask:
         return result
 
     def execution_arn_candidates(ecosystem: str, execution_id: str) -> list[str]:
-        arns = app.config["PYTHON_STATE_MACHINE_ARNS"] if ecosystem == "python" else app.config["R_STATE_MACHINE_ARNS"]
+        arns = configured_state_machine_arns(ecosystem)
         candidates: list[str] = []
         for state_machine_arn in arns:
             parts = str(state_machine_arn).split(":")
@@ -617,6 +626,76 @@ def create_app() -> Flask:
             if parsed:
                 return parsed
         return {}
+
+    def execution_detail_for_run(ecosystem: str, execution_id: str, execution_arn: str | None = None) -> dict | None:
+        candidate_arns: list[str] = []
+        if execution_arn:
+            candidate_arns.append(execution_arn)
+        candidate_arns.extend(
+            arn for arn in execution_arn_candidates(ecosystem, execution_id) if arn not in candidate_arns
+        )
+        for candidate_arn in candidate_arns:
+            try:
+                detail = stepfunctions_describe_execution(
+                    candidate_arn,
+                    region=app.config["AWS_REGION"],
+                    profile=app.config["AWS_PROFILE"],
+                )
+            except Exception:
+                continue
+            if isinstance(detail, dict) and detail.get("executionArn"):
+                return detail
+        return None
+
+    def stack_output_value_cached(stack_name: str, output_key: str) -> str:
+        cache_key = f"{stack_name}|{output_key}"
+        now = time.time()
+        cached = stack_output_cache.get(cache_key)
+        if cached and cached["expires_at"] > now:
+            return str(cached["value"] or "")
+        try:
+            stack = describe_stack(stack_name)
+        except Exception:
+            return ""
+        value = stack_output_value(stack, output_key)
+        stack_output_cache[cache_key] = {
+            "expires_at": now + 60,
+            "value": value,
+        }
+        return str(value or "")
+
+    def configured_state_machine_arns(ecosystem: str) -> list[str]:
+        base = (
+            list(app.config["PYTHON_STATE_MACHINE_ARNS"])
+            if ecosystem == "python"
+            else list(app.config["R_STATE_MACHINE_ARNS"])
+        )
+        discovered: list[str] = []
+        if ecosystem == "python":
+            stack_name = app.config["PYTHON_STACK_NAME"]
+            for output_key in ("PythonScanOrchestrationStateMachineArn", "PythonLinuxScanOrchestrationStateMachineArn"):
+                value = stack_output_value_cached(stack_name, output_key)
+                if value and value != "None":
+                    discovered.append(value)
+        else:
+            stack_name = app.config["R_STACK_NAME"]
+            for output_key in (
+                "RScanOrchestrationStateMachineArn",
+                "RLinuxScanOrchestrationStateMachineArn",
+                "RWindowsScanOrchestrationStateMachineArn",
+            ):
+                value = stack_output_value_cached(stack_name, output_key)
+                if value and value != "None":
+                    discovered.append(value)
+        merged: list[str] = []
+        seen: set[str] = set()
+        for arn in [*discovered, *base]:
+            arn = str(arn or "").strip()
+            if not arn or arn in seen:
+                continue
+            seen.add(arn)
+            merged.append(arn)
+        return merged
 
     def execution_platforms(ecosystem: str, execution_input: dict) -> list[str]:
         selected_platforms = execution_input.get("platforms")
@@ -791,8 +870,12 @@ def create_app() -> Flask:
             worker_attempt_failed = bool(task_context.get("worker_attempt_failed"))
             if checkpoint_phase == "failed":
                 checkpoint_phase = None
+            elif checkpoint_phase == "completed":
+                checkpoint_phase = "finalizing"
             if task_last_status == "RUNNING" or container_last_status == "RUNNING":
                 phase = checkpoint_phase or "starting"
+                if checkpoint_phase == "finalizing":
+                    phase_detail = "Worker reported a completed checkpoint; waiting for Step Functions and catalog publication to finish."
             elif task_last_status == "PENDING" or container_last_status == "PENDING":
                 phase = "starting"
                 phase_detail = "Task placed; container is starting."
@@ -860,7 +943,7 @@ def create_app() -> Flask:
 
     def live_running_execution_map(ecosystem: str) -> dict[str, dict]:
         live_map: dict[str, dict] = {}
-        arns = app.config["PYTHON_STATE_MACHINE_ARNS"] if ecosystem == "python" else app.config["R_STATE_MACHINE_ARNS"]
+        arns = configured_state_machine_arns(ecosystem)
         for arn in arns:
             try:
                 executions = stepfunctions_list_executions(
@@ -1106,9 +1189,14 @@ def create_app() -> Flask:
         live_map = live_running_execution_map(ecosystem)
         for index, key in enumerate(keys[offset:], start=offset):
             execution_id = key.rsplit("/", 1)[-1].replace(".json", "")
+            live_execution = live_map.get(execution_id)
+            if live_execution is None and execution_id:
+                detail = execution_detail_for_run(ecosystem, execution_id)
+                if isinstance(detail, dict) and str(detail.get("status") or "").upper() == "RUNNING":
+                    live_execution = detail
             row = select_run_row(
                 ecosystem,
-                overlay_live_status(load_record_by_key(key), live_map.get(execution_id)),
+                overlay_live_status(load_record_by_key(key), live_execution),
                 selected_status=selected_status,
                 selected_platform=selected_platform,
                 selected_validated=selected_validated,
@@ -1748,7 +1836,7 @@ def create_app() -> Flask:
         return ["linux-amd64"] if ecosystem == "r" else ["unknown"]
 
     def recent_execution_history(ecosystem: str) -> list[dict]:
-        arns = app.config["PYTHON_STATE_MACHINE_ARNS"] if ecosystem == "python" else app.config["R_STATE_MACHINE_ARNS"]
+        arns = configured_state_machine_arns(ecosystem)
         rows: list[dict] = []
         seen: set[str] = set()
         for arn in arns:
@@ -1906,8 +1994,8 @@ def create_app() -> Flask:
 
     def active_runs() -> list[dict]:
         configs = [
-            ("python", app.config["PYTHON_STATE_MACHINE_ARNS"]),
-            ("r", app.config["R_STATE_MACHINE_ARNS"]),
+            ("python", configured_state_machine_arns("python")),
+            ("r", configured_state_machine_arns("r")),
         ]
         active: list[dict] = []
         for ecosystem, arns in configs:
@@ -1946,10 +2034,59 @@ def create_app() -> Flask:
                             "stage_steps": row.get("stage_steps") or [],
                             "input_label": row.get("input_label"),
                             "input_key_display": row.get("input_key_display"),
+                            "stoppable": str(row.get("status") or "").upper() == "RUNNING" and bool(execution.get("executionArn")),
                         }
                     )
         active.sort(key=lambda row: str(row.get("startDate", "")), reverse=True)
         return active
+
+    @app.post("/runs/stop")
+    def stop_run():
+        execution_arn = str(request.form.get("execution_arn") or "").strip()
+        execution_name = str(request.form.get("execution_name") or "").strip()
+        if not execution_arn or ":execution:" not in execution_arn:
+            abort(400, "Valid execution ARN is required.")
+        task_context = stepfunctions_execution_task_context(execution_arn)
+        try:
+            aws_json(
+                [
+                    "stepfunctions",
+                    "stop-execution",
+                    "--execution-arn",
+                    execution_arn,
+                    "--cause",
+                    "Stopped from web dashboard",
+                ],
+                region=app.config["AWS_REGION"],
+                profile=app.config["AWS_PROFILE"],
+            )
+            cluster = str(task_context.get("cluster") or "").strip()
+            task_arn = str(task_context.get("task_arn") or "").strip()
+            task_last_status = str(task_context.get("task_last_status") or "").upper()
+            container_last_status = str(task_context.get("container_last_status") or "").upper()
+            if cluster and task_arn and (
+                task_last_status in {"RUNNING", "PENDING"} or container_last_status in {"RUNNING", "PENDING"}
+            ):
+                aws_json(
+                    [
+                        "ecs",
+                        "stop-task",
+                        "--cluster",
+                        cluster,
+                        "--task",
+                        task_arn,
+                        "--reason",
+                        "Execution stopped from web dashboard",
+                    ],
+                    region=app.config["AWS_REGION"],
+                    profile=app.config["AWS_PROFILE"],
+                )
+        except AwsAuthExpiredError:
+            raise
+        except Exception as exc:
+            app.logger.warning("dashboard stop failed execution_arn=%s error=%s", execution_arn, exc)
+            return redirect(f"/?stop_status=error&stop_execution={quote_plus(execution_name or execution_arn)}", code=302)
+        return redirect(f"/?stop_status=ok&stop_execution={quote_plus(execution_name or execution_arn)}", code=302)
 
     def load_record(ecosystem: str, execution_id: str) -> dict:
         return s3_get_json(
@@ -2093,6 +2230,8 @@ def create_app() -> Flask:
     @app.route("/")
     def index():
         auth_error = None
+        stop_status = str(request.args.get("stop_status") or "").strip().lower()
+        stop_execution = str(request.args.get("stop_execution") or "").strip()
         try:
             latest_r = attach_input_context("r", load_pointer("r", "latest-successful"))
             latest_python = attach_input_context("python", load_pointer("python", "latest-successful"))
@@ -2142,6 +2281,8 @@ def create_app() -> Flask:
             failed_python=failed_python,
             active_runs=active,
             auth_error=auth_error,
+            stop_status=stop_status,
+            stop_execution=stop_execution,
         )
 
     @app.route("/healthz")

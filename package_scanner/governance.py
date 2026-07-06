@@ -79,6 +79,48 @@ def parse_requirements_lock(path: Path) -> List[dict]:
     return rows
 
 
+def parse_conda_list(path: Path) -> List[dict]:
+    if not path.exists():
+        return []
+    data = load_json(path)
+    if not isinstance(data, list):
+        return []
+    rows = []
+    for item in data:
+        if not isinstance(item, dict):
+            raise GovernanceError(f"Unexpected conda-list entry in {path}")
+        name = str(item.get("name") or "").strip()
+        version = str(item.get("version") or "").strip()
+        if not name or not version:
+            continue
+        rows.append(
+            {
+                "package_name": name,
+                "package_version": version,
+                "platform": "",
+                "dependency_type": "unknown",
+                "source": "conda-list.json",
+                "approval_status": "candidate",
+            }
+        )
+    return rows
+
+
+def dedupe_approval(rows: Iterable[dict]) -> List[dict]:
+    out: List[dict] = []
+    seen = set()
+    for row in rows:
+        key = (
+            str(row.get("package_name") or "").strip().lower(),
+            str(row.get("package_version") or "").strip(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(row)
+    return out
+
+
 def severity_norm(value) -> str:
     if not value:
         return "UNKNOWN"
@@ -183,13 +225,13 @@ def parse_safety(path: Path) -> List[dict]:
         elif "issues" in data:
             items = data.get("issues", [])
         else:
-            return []
+            raise GovernanceError(f"Unexpected Safety report schema in {path}")
         if not isinstance(items, list):
-            return []
+            raise GovernanceError(f"Unexpected Safety issues payload in {path}")
     elif isinstance(data, list):
         items = data
     else:
-        return []
+        raise GovernanceError(f"Unexpected Safety report payload in {path}")
 
     for item in items:
         if not isinstance(item, dict):
@@ -263,7 +305,10 @@ def generate_governance_artifacts(
     remediate_medium_flag = bool(remediate_medium)
     fail_on_medium_flag = bool(fail_on_medium)
 
-    approval = parse_requirements_lock(run_path / "requirements.lock.txt")
+    approval = dedupe_approval(
+        parse_requirements_lock(run_path / "requirements.lock.txt")
+        + parse_conda_list(run_path / "conda-list.json")
+    )
     for row in approval:
         row["platform"] = platform
 

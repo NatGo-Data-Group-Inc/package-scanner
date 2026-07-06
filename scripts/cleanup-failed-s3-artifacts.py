@@ -22,6 +22,18 @@ from package_scanner.catalog_awscli import (
 DEFAULT_FAILURE_STATUSES = ("ABORTED", "FAILED", "TIMED_OUT")
 
 
+def _is_missing_s3_object(exc: Exception) -> bool:
+    message = str(exc)
+    stderr = getattr(exc, "stderr", "") or ""
+    if stderr:
+        message = f"{message}\n{stderr}"
+    if "HeadObject operation: Not Found" in message:
+        return True
+    if "404" in message and "s3://" in message:
+        return True
+    return False
+
+
 def aws_cmd(*, region: str, profile: str | None) -> list[str]:
     cmd = ["aws", "--region", region]
     if profile:
@@ -55,9 +67,33 @@ def load_summary(
 ) -> dict | None:
     key = f"{evidence_prefix.rstrip('/')}/orchestration/{ecosystem}/{execution_id}/orchestration-summary.json"
     try:
-      return s3_get_json(evidence_bucket, key, region=region, profile=profile)
-    except subprocess.CalledProcessError:
-      return None
+        return s3_get_json(evidence_bucket, key, region=region, profile=profile)
+    except AwsAuthExpiredError:
+        raise
+    except (subprocess.CalledProcessError, RuntimeError) as exc:
+        if _is_missing_s3_object(exc):
+            return None
+        raise
+
+
+def load_catalog_record(
+    *,
+    evidence_bucket: str,
+    evidence_prefix: str,
+    ecosystem: str,
+    execution_id: str,
+    region: str,
+    profile: str | None,
+) -> dict | None:
+    key = f"{evidence_prefix.rstrip('/')}/catalog/{ecosystem}/runs/{execution_id}.json"
+    try:
+        return s3_get_json(evidence_bucket, key, region=region, profile=profile)
+    except AwsAuthExpiredError:
+        raise
+    except (subprocess.CalledProcessError, RuntimeError) as exc:
+        if _is_missing_s3_object(exc):
+            return None
+        raise
 
 
 def discover_run_metadata_matches(
@@ -87,7 +123,11 @@ def discover_run_metadata_matches(
                 continue
             try:
                 payload = s3_get_json(evidence_bucket, key, region=region, profile=profile)
-            except subprocess.CalledProcessError:
+            except AwsAuthExpiredError:
+                raise
+            except (subprocess.CalledProcessError, RuntimeError) as exc:
+                if _is_missing_s3_object(exc):
+                    continue
                 continue
             if payload.get("scan_execution_id") != execution_id:
                 continue
@@ -215,6 +255,7 @@ def main() -> int:
             region=args.region,
             profile=args.profile,
         )
+        catalog_record = None
         if summary and summary.get("overall_status") == "SUCCEEDED":
             print(f"SKIP {execution_id}: orchestration summary says SUCCEEDED")
             continue
@@ -247,7 +288,22 @@ def main() -> int:
                 platform = platform_entry.get("platform")
                 if platform and timestamp:
                     platform_timestamps.append((platform, timestamp))
-        elif not args.skip_run_metadata_discovery:
+        else:
+            catalog_record = load_catalog_record(
+                evidence_bucket=args.evidence_bucket,
+                evidence_prefix=args.evidence_prefix,
+                ecosystem=args.ecosystem,
+                execution_id=execution_id,
+                region=args.region,
+                profile=args.profile,
+            )
+            if catalog_record:
+                timestamp = catalog_record.get("scan_timestamp")
+                for platform_entry in catalog_record.get("platforms", []):
+                    platform = platform_entry.get("platform")
+                    if platform and timestamp:
+                        platform_timestamps.append((platform, timestamp))
+        if not platform_timestamps and not args.skip_run_metadata_discovery:
             platform_timestamps.extend(
                 discover_run_metadata_matches(
                     evidence_bucket=args.evidence_bucket,
@@ -258,7 +314,7 @@ def main() -> int:
                     profile=args.profile,
                 )
             )
-        else:
+        elif not platform_timestamps:
             print(f"SKIP metadata discovery for {execution_id}: orchestration summary is missing")
 
         for platform, timestamp in platform_timestamps:

@@ -16,6 +16,20 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 MAMBA_BIN="${MAMBA_BIN:-/usr/local/bin/micromamba}"
 PYTHON_CPU_ONLY="${PYTHON_CPU_ONLY:-true}"
 CONDA_PACK_BIN="${CONDA_PACK_BIN:-conda-pack}"
+PYTHON_RESTORE_ENV_CHECKPOINT="${PYTHON_RESTORE_ENV_CHECKPOINT:-false}"
+PYTHON_CHECKPOINT_INCLUDE_PKGS="${PYTHON_CHECKPOINT_INCLUDE_PKGS:-false}"
+PYTHON_CHECKPOINT_INCLUDE_ENV="${PYTHON_CHECKPOINT_INCLUDE_ENV:-false}"
+
+if [[ -z "${CONDA_OVERRIDE_GLIBC:-}" ]] && command -v getconf >/dev/null 2>&1; then
+  glibc_version="$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}')"
+  if [[ -n "${glibc_version}" ]]; then
+    export CONDA_OVERRIDE_GLIBC="${glibc_version}"
+  fi
+fi
+
+if [[ "${TARGET_PLATFORM}" == "linux-amd64" && -z "${CONDA_OVERRIDE_ARCHSPEC:-}" ]]; then
+  export CONDA_OVERRIDE_ARCHSPEC="x86_64_v3"
+fi
 
 checkpoint_pid=""
 
@@ -45,6 +59,7 @@ pack_python_env() {
     --prefix "${ENV_PREFIX}" \
     --output "${output_file}" \
     --format tar.gz \
+    --ignore-missing-files \
     --force >/dev/null
   "${PYTHON_BIN}" - "${output_file}" "${checksum_file}" <<'PY'
 from __future__ import annotations
@@ -81,18 +96,20 @@ restore_packed_python_env() {
 publish_checkpoint() {
   local phase="${1:-materialize}"
   write_state "${phase}"
-  if [[ -d "${ROOT_PREFIX}/pkgs" ]]; then
+  if [[ "${PYTHON_CHECKPOINT_INCLUDE_PKGS}" == "true" && -d "${ROOT_PREFIX}/pkgs" ]]; then
     "${PYTHON_BIN}" "${SCRIPT_ROOT}/bundle-directory.py" \
       --source-dir "${ROOT_PREFIX}/pkgs" \
       --output-file "${RUN_DIR}/checkpoint-python-pkgs.tar.gz" \
       --checksum-file "${RUN_DIR}/checkpoint-python-pkgs.tar.gz.sha256"
     aws s3 cp "${RUN_DIR}/checkpoint-python-pkgs.tar.gz" "${CHECKPOINT_PREFIX}/latest/python-pkgs.tar.gz" >/dev/null
     aws s3 cp "${RUN_DIR}/checkpoint-python-pkgs.tar.gz.sha256" "${CHECKPOINT_PREFIX}/latest/python-pkgs.tar.gz.sha256" >/dev/null
+    rm -f "${RUN_DIR}/checkpoint-python-pkgs.tar.gz" "${RUN_DIR}/checkpoint-python-pkgs.tar.gz.sha256"
   fi
-  if [[ -d "${ENV_PREFIX}" ]]; then
+  if [[ "${PYTHON_CHECKPOINT_INCLUDE_ENV}" == "true" && -d "${ENV_PREFIX}" ]]; then
     pack_python_env "${RUN_DIR}/checkpoint-python-env.tar.gz" "${RUN_DIR}/checkpoint-python-env.tar.gz.sha256"
     aws s3 cp "${RUN_DIR}/checkpoint-python-env.tar.gz" "${CHECKPOINT_PREFIX}/latest/python-env.tar.gz" >/dev/null
     aws s3 cp "${RUN_DIR}/checkpoint-python-env.tar.gz.sha256" "${CHECKPOINT_PREFIX}/latest/python-env.tar.gz.sha256" >/dev/null
+    rm -f "${RUN_DIR}/checkpoint-python-env.tar.gz" "${RUN_DIR}/checkpoint-python-env.tar.gz.sha256"
   fi
   aws s3 cp "${RUN_DIR}/stage-state.json" "${CHECKPOINT_PREFIX}/latest/stage-state.json" >/dev/null
 }
@@ -155,6 +172,7 @@ gpu_package_prefixes = (
     "libnvjitlink",
     "libnvjpeg",
     "nccl",
+    "nvidia-",
     "pytorch-cuda",
 )
 tensorflow_packages = {
@@ -282,34 +300,34 @@ if aws s3 ls "${CHECKPOINT_PREFIX}/latest/python-pkgs.tar.gz" >/dev/null 2>&1; t
   aws s3 cp "${CHECKPOINT_PREFIX}/latest/python-pkgs.tar.gz" "${RUN_DIR}/checkpoint-python-pkgs.tar.gz" >/dev/null
   mkdir -p "${ROOT_PREFIX}/pkgs"
   "${PYTHON_BIN}" "${SCRIPT_ROOT}/extract-archive.py" --archive "${RUN_DIR}/checkpoint-python-pkgs.tar.gz" --destination "${ROOT_PREFIX}/pkgs"
+  rm -f "${RUN_DIR}/checkpoint-python-pkgs.tar.gz"
 fi
-if aws s3 ls "${CHECKPOINT_PREFIX}/latest/python-env.tar.gz" >/dev/null 2>&1; then
+if [[ "${PYTHON_RESTORE_ENV_CHECKPOINT}" == "true" ]] && aws s3 ls "${CHECKPOINT_PREFIX}/latest/python-env.tar.gz" >/dev/null 2>&1; then
   aws s3 cp "${CHECKPOINT_PREFIX}/latest/python-env.tar.gz" "${RUN_DIR}/checkpoint-python-env.tar.gz" >/dev/null
   restore_packed_python_env "${RUN_DIR}/checkpoint-python-env.tar.gz"
+  rm -f "${RUN_DIR}/checkpoint-python-env.tar.gz"
 fi
 
 write_state "materialize"
 start_checkpoint_loop
 
-{
-  if [[ -d "${ENV_PREFIX}" ]]; then
-    "${MAMBA_BIN}" env update -r "${ROOT_PREFIX}" -n target -f "${RUN_DIR}/environment.conda-core.yml"
-  else
-    "${MAMBA_BIN}" create -r "${ROOT_PREFIX}" -y -n target -f "${RUN_DIR}/environment.conda-core.yml"
-  fi
+if [[ -d "${ENV_PREFIX}" ]]; then
+  "${MAMBA_BIN}" env update -r "${ROOT_PREFIX}" -n target -f "${RUN_DIR}/environment.conda-core.yml" > "${RUN_DIR}/restore.log" 2>&1
+else
+  "${MAMBA_BIN}" create -r "${ROOT_PREFIX}" -y -n target -f "${RUN_DIR}/environment.conda-core.yml" > "${RUN_DIR}/restore.log" 2>&1
+fi
 
-  if [[ -s "${RUN_DIR}/environment.conda-native.yml" ]]; then
-    "${MAMBA_BIN}" env update -r "${ROOT_PREFIX}" -n target -f "${RUN_DIR}/environment.conda-native.yml"
-  fi
+if [[ -s "${RUN_DIR}/environment.conda-native.yml" ]]; then
+  "${MAMBA_BIN}" env update -r "${ROOT_PREFIX}" -n target -f "${RUN_DIR}/environment.conda-native.yml" >> "${RUN_DIR}/restore.log" 2>&1
+fi
 
-  if [[ -s "${RUN_DIR}/environment.conda-python.yml" ]]; then
-    "${MAMBA_BIN}" env update -r "${ROOT_PREFIX}" -n target -f "${RUN_DIR}/environment.conda-python.yml"
-  fi
+if [[ -s "${RUN_DIR}/environment.conda-python.yml" ]]; then
+  "${MAMBA_BIN}" env update -r "${ROOT_PREFIX}" -n target -f "${RUN_DIR}/environment.conda-python.yml" >> "${RUN_DIR}/restore.log" 2>&1
+fi
 
-  if [[ -s "${RUN_DIR}/environment.pip.requirements.txt" ]]; then
-    "${MAMBA_BIN}" run -r "${ROOT_PREFIX}" -n target python -m pip install --no-input -r "${RUN_DIR}/environment.pip.requirements.txt"
-  fi
-} > "${RUN_DIR}/restore.log" 2>&1
+if [[ -s "${RUN_DIR}/environment.pip.requirements.txt" ]]; then
+  "${MAMBA_BIN}" run -r "${ROOT_PREFIX}" -n target python -m pip install --no-cache-dir --no-input -r "${RUN_DIR}/environment.pip.requirements.txt" >> "${RUN_DIR}/restore.log" 2>&1
+fi
 
 stop_checkpoint_loop
 publish_checkpoint "restored"
@@ -329,6 +347,31 @@ printf '%s\n' "${ENV_PREFIX}" > "${RUN_DIR}/env-prefix.txt"
   --python-version "${PYTHON_VERSION}" \
   --root-prefix "${ROOT_PREFIX}" \
   --env-prefix "${ENV_PREFIX}"
+MATERIALIZATION_VALIDATION_EXIT=0
+"${PYTHON_BIN}" - "${RUN_DIR}/materialization-summary.json" <<'PY' || MATERIALIZATION_VALIDATION_EXIT=$?
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+summary = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+missing_conda = summary.get("missing_requested_conda_packages") or []
+missing_pip = summary.get("missing_requested_pip_packages") or []
+if missing_conda or missing_pip:
+    lines = []
+    if missing_conda:
+        lines.append("Missing requested conda packages:")
+        lines.extend(f"- {item}" for item in missing_conda)
+    if missing_pip:
+        lines.append("Missing requested pip packages:")
+        lines.extend(f"- {item}" for item in missing_pip)
+    Path(sys.argv[1]).with_name("materialization-validation-error.txt").write_text(
+        "\n".join(lines) + "\n",
+        encoding="utf-8",
+    )
+    raise SystemExit(4)
+PY
 
 write_state "analysis"
 "${PYTHON_BIN}" -m cyclonedx_py requirements "${RUN_DIR}/requirements.lock.txt" -o "${RUN_DIR}/python-packages.cdx.json" || true
@@ -351,7 +394,19 @@ write_state "publish"
   --output-file "${RUN_DIR}/python-pkgs-${TARGET_PLATFORM}-${TS}.tar.gz" \
   --checksum-file "${RUN_DIR}/python-pkgs-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
 pack_python_env "${RUN_DIR}/python-env-${TARGET_PLATFORM}-${TS}.tar.gz" "${RUN_DIR}/python-env-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
-tar -czf "${RUN_DIR}/environment-artifacts.tar.gz" -C "${RUN_DIR}" environment.yml requirements.lock.txt conda-list.json python-packages.cdx.json materialization-summary.json environment.original.yml environment.cpu-normalization.log || true
+environment_artifacts=(
+  environment.yml
+  requirements.lock.txt
+  conda-list.json
+  python-packages.cdx.json
+  materialization-summary.json
+)
+for optional_artifact in environment.original.yml environment.cpu-normalization.log; do
+  if [[ -f "${RUN_DIR}/${optional_artifact}" ]]; then
+    environment_artifacts+=("${optional_artifact}")
+  fi
+done
+tar -czf "${RUN_DIR}/environment-artifacts.tar.gz" -C "${RUN_DIR}" "${environment_artifacts[@]}"
 
 aws s3 cp "${RUN_DIR}/" "s3://${EPHEMERAL_BUCKET}/${EPHEMERAL_PREFIX}/${TARGET_PLATFORM}/${TS}/" --recursive >/dev/null
 aws s3 cp "${RUN_DIR}/environment.yml" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/environment.yml" >/dev/null
@@ -364,6 +419,7 @@ upload_if_exists "${RUN_DIR}/conda-list.json" "s3://${EVIDENCE_BUCKET}/${EVIDENC
 upload_if_exists "${RUN_DIR}/environment-artifacts.tar.gz" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/environment-artifacts.tar.gz"
 upload_if_exists "${RUN_DIR}/restore.log" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/restore.log"
 upload_if_exists "${RUN_DIR}/materialization-summary.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/materialization-summary.json"
+upload_if_exists "${RUN_DIR}/materialization-validation-error.txt" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/materialization-validation-error.txt"
 upload_if_exists "${RUN_DIR}/trivy-sbom-report.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/model-results/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/trivy-sbom-report.json"
 upload_if_exists "${RUN_DIR}/safety-report.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/model-results/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/safety-report.json"
 upload_if_exists "${RUN_DIR}/vulnerability-findings.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/governance/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/vulnerability-findings.csv"
@@ -383,6 +439,10 @@ aws s3 cp "${RUN_DIR}/stage-state.json" "${CHECKPOINT_PREFIX}/latest/stage-state
 if [[ "${GOVERNANCE_EXIT}" -ne 0 ]]; then
   echo "Governance gate failed with exit ${GOVERNANCE_EXIT}" >&2
   exit "${GOVERNANCE_EXIT}"
+fi
+if [[ "${MATERIALIZATION_VALIDATION_EXIT}" -ne 0 ]]; then
+  echo "Materialization validation failed with exit ${MATERIALIZATION_VALIDATION_EXIT}" >&2
+  exit "${MATERIALIZATION_VALIDATION_EXIT}"
 fi
 
 exit 0
