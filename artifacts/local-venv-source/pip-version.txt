@@ -1,0 +1,1 @@
+pip 23.1.2 from /home/tjansto/github/natgo/package-scanner/.venv/lib/python3.11/site-packages/pip (python 3.11)
