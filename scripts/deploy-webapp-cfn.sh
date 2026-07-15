@@ -160,6 +160,14 @@ stack_output() {
     "${AWS_ARGS[@]}"
 }
 
+stack_exists() {
+  aws cloudformation describe-stacks \
+    --stack-name "$1" \
+    --query "Stacks[0].StackId" \
+    --output text \
+    "${AWS_ARGS[@]}" >/dev/null 2>&1
+}
+
 if [[ -z "${CATALOG_BUCKET_NAME}" ]]; then
   CATALOG_BUCKET_NAME="$(stack_output "${PYTHON_STACK_NAME}" "EvidenceBucketName")"
 fi
@@ -228,10 +236,17 @@ if [[ "${RUNTIME_ENABLED}" != "true" ]]; then
   FINAL_DESIRED_COUNT="0"
 fi
 
-echo "Deploying webapp infrastructure stack ${STACK_NAME} with desired count 0 ..."
-deploy_stack "false" 0 "public.ecr.aws/docker/library/python:3.12-slim"
+REPOSITORY_URI=""
+if stack_exists "${STACK_NAME}"; then
+  REPOSITORY_URI="$(stack_output "${STACK_NAME}" "WebappRepositoryUri")"
+fi
 
-REPOSITORY_URI="$(stack_output "${STACK_NAME}" "WebappRepositoryUri")"
+if [[ -z "${REPOSITORY_URI}" || "${REPOSITORY_URI}" == "None" ]]; then
+  echo "Bootstrapping webapp infrastructure stack ${STACK_NAME} with desired count 0 ..."
+  deploy_stack "false" 0 "public.ecr.aws/docker/library/python:3.12-slim"
+  REPOSITORY_URI="$(stack_output "${STACK_NAME}" "WebappRepositoryUri")"
+fi
+
 if [[ -z "${REPOSITORY_URI}" || "${REPOSITORY_URI}" == "None" ]]; then
   echo "Could not resolve WebappRepositoryUri after infrastructure deployment." >&2
   exit 1
@@ -252,8 +267,13 @@ if [[ "${SKIP_IMAGE_BUILD}" != "true" ]]; then
   bash "${SCRIPT_DIR}/build-webapp-image.sh" "${build_args[@]}" >/dev/null
 fi
 
-echo "Deploying webapp final stack ${STACK_NAME} runtime_enabled=${RUNTIME_ENABLED} desired_count=${FINAL_DESIRED_COUNT} ..."
-deploy_stack "${RUNTIME_ENABLED}" "${FINAL_DESIRED_COUNT}" "${REPOSITORY_URI}:${IMAGE_TAG}"
+echo "Deploying webapp baseline stack ${STACK_NAME} with runtime disabled ..."
+deploy_stack "false" 0 "${REPOSITORY_URI}:${IMAGE_TAG}"
+
+if [[ "${RUNTIME_ENABLED}" == "true" || "${FINAL_DESIRED_COUNT}" != "0" ]]; then
+  echo "Deploying webapp final stack ${STACK_NAME} runtime_enabled=${RUNTIME_ENABLED} desired_count=${FINAL_DESIRED_COUNT} ..."
+  deploy_stack "${RUNTIME_ENABLED}" "${FINAL_DESIRED_COUNT}" "${REPOSITORY_URI}:${IMAGE_TAG}"
+fi
 
 aws cloudformation describe-stacks \
   --stack-name "${STACK_NAME}" \

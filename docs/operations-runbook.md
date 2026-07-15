@@ -118,8 +118,7 @@ IMAGE_TAG=$(date -u +%Y%m%dT%H%M%SZ)-<suffix>
   is supplied.
 - Use `scripts/set-webapp-runtime.sh --action enable` for manual bring-up and
   `--action disable` for manual teardown.
-- After enabling the runtime, resolve the current ALB URL from the
-  `WebappUrl` stack output before handing the link to an operator.
+- A successful `enable` prints `WebappUrl=<current-url>` for the operator.
 - While runtime is enabled, the ALB serves `HTTP` on port `80` by default.
 - If browser policy or enterprise security tooling upgrades requests to
   `HTTPS`, supply `--tls-certificate-arn <acm-certificate-arn>` during deploy

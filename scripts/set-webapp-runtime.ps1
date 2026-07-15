@@ -7,6 +7,9 @@ param(
   [int]$LeaseMinutes = 60,
 
   [Parameter(Mandatory = $false)]
+  [int]$WaitTimeoutSeconds = 600,
+
+  [Parameter(Mandatory = $false)]
   [string]$StackName = "package-scanner-webapp-dev",
 
   [Parameter(Mandatory = $false)]
@@ -38,6 +41,7 @@ if (-not (Test-Path $bashScript)) {
 $bashArgs = @(
   "--action", $Action,
   "--lease-minutes", $LeaseMinutes.ToString(),
+  "--wait-timeout-seconds", $WaitTimeoutSeconds.ToString(),
   "--stack-name", $StackName,
   "--region", $Region
 )

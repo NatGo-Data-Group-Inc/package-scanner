@@ -140,7 +140,8 @@ Behavior:
 - the runtime controller keeps the GUI up while scan executions are running and
   shuts it down 60 minutes after the last execution completes
 - because the ALB is deleted when idle, the runtime URL changes between start
-  cycles and must be re-read from the stack output after each bring-up
+  cycles; the `enable` command prints the current `WebappUrl` after each
+  successful bring-up
 - custom DNS remains available as a later environment-specific enhancement, but
   it is not the default dev workflow
 - the certificate must already exist in ACM in the same region as the ALB

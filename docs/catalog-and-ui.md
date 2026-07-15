@@ -75,15 +75,8 @@ Bring the hosted runtime up or down without redeploying the scanner stacks:
   --profile <aws-profile>
 ```
 
-Fetch the current runtime URL after startup:
-
-```bash
-aws cloudformation describe-stacks \
-  --stack-name package-scanner-webapp-dev \
-  --query "Stacks[0].Outputs[?OutputKey=='WebappUrl'].OutputValue | [0]" \
-  --output text \
-  --profile <aws-profile>
-```
+The enable command waits for startup completion and prints
+`WebappUrl=<current-url>` on success.
 
 Deployment notes:
 

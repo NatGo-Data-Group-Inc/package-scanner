@@ -134,8 +134,8 @@ Webapp deployment notes:
   `80 -> 443`.
 - Use `scripts/set-webapp-runtime.sh --action enable` to bring the runtime up
   on demand and `--action disable` to turn it back off.
-- After enabling the runtime, read the current URL from the
-  `WebappUrl` CloudFormation stack output.
+- On successful enable, `scripts/set-webapp-runtime.sh` prints
+  `WebappUrl=<current-url>`.
 - When scanner Step Functions executions are running, the runtime controller
   keeps the GUI up automatically and shuts it down 60 minutes after the last
   execution completes.
