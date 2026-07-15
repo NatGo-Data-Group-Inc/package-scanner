@@ -16,7 +16,11 @@ CATALOG_PREFIX="evidence"
 EPHEMERAL_PREFIX="deploy/tmp/r"
 ALLOWED_INGRESS_CIDR="0.0.0.0/0"
 TLS_CERTIFICATE_ARN=""
-DESIRED_COUNT="1"
+CUSTOM_DOMAIN_NAME=""
+CUSTOM_DOMAIN_HOSTED_ZONE_ID=""
+RUNTIME_ENABLED="false"
+IDLE_TIMEOUT_MINUTES="60"
+DESIRED_COUNT="0"
 TASK_CPU="1024"
 TASK_MEMORY="2048"
 IMAGE_TAG=""
@@ -43,7 +47,11 @@ Options:
   --ephemeral-prefix <prefix>
   --allowed-ingress-cidr <cidr>
   --tls-certificate-arn <arn>
-  --desired-count <count>         (default: 1)
+  --custom-domain-name <name>
+  --custom-domain-hosted-zone-id <zone-id>
+  --runtime-enabled <true|false>
+  --idle-timeout-minutes <minutes> (default: 60)
+  --desired-count <count>          (default: 0)
   --task-cpu <cpu>
   --task-memory <memory>
   --image-tag <tag>               (default: current UTC timestamp)
@@ -69,6 +77,10 @@ while [[ $# -gt 0 ]]; do
     --ephemeral-prefix) EPHEMERAL_PREFIX="$2"; shift 2 ;;
     --allowed-ingress-cidr) ALLOWED_INGRESS_CIDR="$2"; shift 2 ;;
     --tls-certificate-arn) TLS_CERTIFICATE_ARN="$2"; shift 2 ;;
+    --custom-domain-name) CUSTOM_DOMAIN_NAME="$2"; shift 2 ;;
+    --custom-domain-hosted-zone-id) CUSTOM_DOMAIN_HOSTED_ZONE_ID="$2"; shift 2 ;;
+    --runtime-enabled) RUNTIME_ENABLED="$2"; shift 2 ;;
+    --idle-timeout-minutes) IDLE_TIMEOUT_MINUTES="$2"; shift 2 ;;
     --desired-count) DESIRED_COUNT="$2"; shift 2 ;;
     --task-cpu) TASK_CPU="$2"; shift 2 ;;
     --task-memory) TASK_MEMORY="$2"; shift 2 ;;
@@ -90,6 +102,18 @@ if [[ ! -f "${TEMPLATE_PATH}" ]]; then
 fi
 if [[ "${ALLOW_DEFAULT_PROFILE}" != "true" && -z "${PROFILE}" ]]; then
   echo "Guardrail: --profile is required unless --allow-default-profile is explicitly set." >&2
+  exit 1
+fi
+if [[ "${RUNTIME_ENABLED}" != "true" && "${RUNTIME_ENABLED}" != "false" ]]; then
+  echo "Guardrail: --runtime-enabled must be true or false." >&2
+  exit 1
+fi
+if [[ -n "${CUSTOM_DOMAIN_NAME}" && -z "${CUSTOM_DOMAIN_HOSTED_ZONE_ID}" ]]; then
+  echo "Guardrail: --custom-domain-hosted-zone-id is required when --custom-domain-name is set." >&2
+  exit 1
+fi
+if [[ -z "${CUSTOM_DOMAIN_NAME}" && -n "${CUSTOM_DOMAIN_HOSTED_ZONE_ID}" ]]; then
+  echo "Guardrail: --custom-domain-name is required when --custom-domain-hosted-zone-id is set." >&2
   exit 1
 fi
 
@@ -159,8 +183,9 @@ if [[ -z "${EPHEMERAL_BUCKET_NAME}" || "${EPHEMERAL_BUCKET_NAME}" == "None" ]]; 
 fi
 
 deploy_stack() {
-  local desired_count="$1"
-  local image_uri="$2"
+  local runtime_enabled="$1"
+  local desired_count="$2"
+  local image_uri="$3"
   local extra_args=()
   if [[ -n "${TEMPLATE_S3_BUCKET}" ]]; then
     extra_args+=(--s3-bucket "${TEMPLATE_S3_BUCKET}")
@@ -175,6 +200,10 @@ deploy_stack() {
       "SubnetIds=${DEFAULT_SUBNETS_CSV}" \
       "AllowedIngressCidr=${ALLOWED_INGRESS_CIDR}" \
       "TlsCertificateArn=${TLS_CERTIFICATE_ARN}" \
+      "CustomDomainName=${CUSTOM_DOMAIN_NAME}" \
+      "CustomDomainHostedZoneId=${CUSTOM_DOMAIN_HOSTED_ZONE_ID}" \
+      "RuntimeEnabled=${runtime_enabled}" \
+      "IdleTimeoutMinutes=${IDLE_TIMEOUT_MINUTES}" \
       "InputBucketName=${INPUT_BUCKET_NAME}" \
       "CatalogBucketName=${CATALOG_BUCKET_NAME}" \
       "EphemeralBucketName=${EPHEMERAL_BUCKET_NAME}" \
@@ -194,8 +223,13 @@ if [[ -z "${IMAGE_TAG}" ]]; then
   IMAGE_TAG="$(date -u +%Y%m%dT%H%M%SZ)"
 fi
 
+FINAL_DESIRED_COUNT="${DESIRED_COUNT}"
+if [[ "${RUNTIME_ENABLED}" != "true" ]]; then
+  FINAL_DESIRED_COUNT="0"
+fi
+
 echo "Deploying webapp infrastructure stack ${STACK_NAME} with desired count 0 ..."
-deploy_stack 0 "public.ecr.aws/docker/library/python:3.12-slim"
+deploy_stack "false" 0 "public.ecr.aws/docker/library/python:3.12-slim"
 
 REPOSITORY_URI="$(stack_output "${STACK_NAME}" "WebappRepositoryUri")"
 if [[ -z "${REPOSITORY_URI}" || "${REPOSITORY_URI}" == "None" ]]; then
@@ -218,10 +252,8 @@ if [[ "${SKIP_IMAGE_BUILD}" != "true" ]]; then
   bash "${SCRIPT_DIR}/build-webapp-image.sh" "${build_args[@]}" >/dev/null
 fi
 
-if [[ "${DESIRED_COUNT}" != "0" ]]; then
-  echo "Deploying webapp service stack ${STACK_NAME} with desired count ${DESIRED_COUNT} ..."
-  deploy_stack "${DESIRED_COUNT}" "${REPOSITORY_URI}:${IMAGE_TAG}"
-fi
+echo "Deploying webapp final stack ${STACK_NAME} runtime_enabled=${RUNTIME_ENABLED} desired_count=${FINAL_DESIRED_COUNT} ..."
+deploy_stack "${RUNTIME_ENABLED}" "${FINAL_DESIRED_COUNT}" "${REPOSITORY_URI}:${IMAGE_TAG}"
 
 aws cloudformation describe-stacks \
   --stack-name "${STACK_NAME}" \
