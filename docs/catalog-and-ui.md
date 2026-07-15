@@ -67,6 +67,17 @@ AWS-hosted deployment is now scaffolded separately from the scanner workers:
   --profile <aws-profile>
 ```
 
+Deployment notes:
+
+- The hosted webapp runs behind an ALB and serves plain `HTTP` by default.
+- Pass `--tls-certificate-arn <acm-certificate-arn>` to add an ALB `HTTPS`
+  listener on `443`.
+- When a certificate ARN is supplied, the ALB also redirects `HTTP:80` requests
+  to `HTTPS:443`.
+- The certificate must already exist in ACM in the same region as the ALB.
+- The raw `*.elb.amazonaws.com` hostname cannot use an ACM-issued public
+  certificate directly; use a DNS name you control and point it at the ALB.
+
 For R ECS, the browser can watch more than one Step Functions orchestrator at
 once. By default it includes the combined, Linux-only, and Windows-only R ECS
 state machines. Override that set with `R_STATE_MACHINE_ARNS` as a comma-separated

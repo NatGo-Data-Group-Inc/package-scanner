@@ -26,6 +26,10 @@ Use [handoff-runbook.md](./handoff-runbook.md) as the primary day-to-day operato
 
 - Use `scripts/start-python-scan.sh`.
 - Ensure `environment.yml` is uploaded first.
+- For ECS-backed scans, the launcher now performs a prescan capacity guard on
+  the target worker ASG. If `MinSize` or `DesiredCapacity` is below `1`, the
+  script raises it to `1` before starting the scan and waits for at least one
+  active ECS container instance.
 - If the source environment was updated on another machine and you need a new
   Python candidate for this pipeline, capture it from the realized Conda env
   rather than hand-editing a plain `conda env export`:
@@ -101,8 +105,23 @@ IMAGE_TAG=$(date -u +%Y%m%dT%H%M%SZ)-<suffix>
   `package-scanner-dev-python-linux-amd64` task-definition family.
 - Do not assume a rebuilt image is active until the actual ECS task shows the
   new task-definition revision and image digest.
-- When the Linux worker pool is only needed for ad hoc scans, set the Python
-  Linux ASG back to `0` after the run completes to avoid idle EC2 cost.
+- When the Linux worker pool is only needed for ad hoc scans, you can set the
+  Python Linux ASG back to `0` after the run completes to avoid idle EC2 cost.
+  The next prescan launch will raise it back to at least `1` automatically.
+
+### Deploy/Run Webapp
+
+- Use `scripts/deploy-webapp-cfn.sh` to deploy the dedicated ECS Fargate
+  operator webapp stack.
+- By default the ALB is `HTTP` only on port `80`.
+- If browser policy or enterprise security tooling upgrades requests to
+  `HTTPS`, supply `--tls-certificate-arn <acm-certificate-arn>` during deploy
+  so the ALB exposes `443` and redirects `80 -> 443`.
+- The webapp stack can be updated independently of the scanner stacks.
+- The hosted webapp uses `gunicorn` and boto3-backed AWS calls; browser issues
+  should be debugged separately from ALB reachability by checking both:
+  - `http://<alb-hostname>/healthz`
+  - `Invoke-WebRequest` or `curl` from the client host
 
 ### S3 Layout and Artifact Map
 
@@ -175,6 +194,10 @@ Enclave delivery (Python): pull the Python evidence set above, plus the original
 
 - Use `scripts/start-r-scan.sh`.
 - Ensure `renv.lock` is uploaded first, or pass `--source-lock-file`.
+- For ECS-backed scans, the launcher now performs the same prescan capacity
+  guard on the target worker ASG. If `MinSize` or `DesiredCapacity` is below
+  `1`, the script raises it to `1` before starting the Step Functions run and
+  waits for an active ECS container instance.
 - You can now also pass `--source-requested-file` with a `requested-packages.json` manifest. In that mode the scan resolves current package versions, materializes them, and emits the generated `renv.lock` as the governed requirement artifact.
 - For named approval candidates, upload and run the specific candidate lockfile path instead of relying only on `inputs/r/renv.lock`.
   - Example: `inputs/r/candidates/PI-26.3/linux-amd64/<timestamp>/renv.lock`
@@ -207,6 +230,9 @@ Operator impact:
 
 - This is a required step whenever the scanner code changes and the runtime behavior must match the repo for governance reasons.
 - Do not assume a rebuilt image is active until you confirm the ECS task is running on the new task-definition revision and image digest.
+- If the R worker ASG was reduced to `0` after prior runs, the prescan guard in
+  `start-r-scan.sh` now raises it back to at least `1` automatically before the
+  next launch.
 
 ### Current R ECS behavior changes
 

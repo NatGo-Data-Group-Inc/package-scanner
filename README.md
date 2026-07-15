@@ -115,10 +115,20 @@ Project policies:
   - Step Functions state machines for:
     - all-platform R ECS scans
     - Linux-only R ECS scans
- - Webapp stack:
+- Webapp stack:
   - dedicated ECS Fargate service for the operator GUI
   - Application Load Balancer
   - ECR repository for the webapp image
+  - optional `HTTPS` listener when deployed with an ACM certificate ARN
+
+Webapp deployment notes:
+
+- The hosted operator GUI uses `gunicorn` behind an ALB.
+- Default deployment exposes `HTTP` on port `80`.
+- Pass `--tls-certificate-arn <acm-certificate-arn>` to
+  `scripts/deploy-webapp-cfn.sh` to add `HTTPS` on `443` and redirect
+  `80 -> 443`.
+- The ACM certificate must already exist in the same AWS region as the ALB.
 
 ## Quick Start
 
@@ -217,6 +227,11 @@ Build and push the Windows Python image from a Windows Docker host:
 
 Use `--platform-set windows-only` for the Windows ECS worker path.
 
+Before starting an ECS-backed Python scan, the launcher now checks the target
+worker ASG and raises `MinSize` and `DesiredCapacity` to at least `1` if the
+pool is scaled down. The script then waits for an active ECS container instance
+before submitting the run.
+
 7. Review Python evidence outputs:
 
 - `s3://<evidence-bucket>/evidence/requirements/python/<platform>/<timestamp>/<execution-id>/...`
@@ -286,6 +301,11 @@ Use `--platform-set linux-only` to validate Linux without waiting on the Windows
   --deployment-lock-token <env-lock-token> \
   --platform-set linux-only
 ```
+
+Before starting an ECS-backed R scan, the launcher now checks the target worker
+ASG and raises `MinSize` and `DesiredCapacity` to at least `1` if the pool is
+scaled down. The script then waits for an active ECS container instance before
+submitting the run.
 
 8. Review R evidence outputs:
 - `s3://<evidence-bucket>/evidence/requirements/r/<platform>/<timestamp>/...`

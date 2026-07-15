@@ -74,6 +74,13 @@ There are two scan styles:
   - one Step Functions execution per scan
   - that execution runs long-lived ECS tasks per platform
 
+There is also a separate operator webapp deployment:
+
+- webapp
+  - dedicated ECS Fargate service
+  - ALB front end for the catalog and run browser
+  - optional `HTTPS` when deployed with an ACM certificate ARN
+
 ## 5. Standard Deployment Procedure
 
 Use the canonical deploy script:
@@ -105,6 +112,36 @@ aws cloudformation describe-stacks \
   --query "Stacks[0].Outputs"
 ```
 
+## 5a. Webapp Deployment Procedure
+
+Deploy the dedicated operator webapp separately from the scanner stacks:
+
+```bash
+./scripts/deploy-webapp-cfn.sh \
+  --region us-east-1 \
+  --profile <aws-profile> \
+  --stack-name package-scanner-webapp-dev \
+  --environment-name package-scanner-dev \
+  --python-stack-name cyber-scanner-dev-python-ecs \
+  --r-stack-name cyber-scanner-dev-r-ecs
+```
+
+Behavior:
+
+- default deployment is `HTTP` only on ALB port `80`
+- pass `--tls-certificate-arn <acm-certificate-arn>` to enable `HTTPS` on `443`
+- when a certificate ARN is supplied, the ALB redirects `HTTP` to `HTTPS`
+- the certificate must already exist in ACM in the same region as the ALB
+
+Verification:
+
+```bash
+curl -sS http://<webapp-alb-hostname>/healthz
+```
+
+If browser access fails but command-line access works, suspect browser-side
+HTTPS upgrade behavior before assuming the service is down.
+
 ## 6. Python Scan Procedure
 
 ### Prepare input
@@ -133,6 +170,11 @@ aws s3 cp ./environment.yml \
   --fail-on-medium false \
   --safety-api-key <safety-token-if-used>
 ```
+
+For ECS-backed launches, the start script now checks the target worker ASG
+before submit. If the ASG is at `0`, it raises `MinSize` and
+`DesiredCapacity` to at least `1` and waits for an active ECS container
+instance.
 
 ### Monitor scan
 
@@ -208,6 +250,11 @@ Or let the start script upload it:
   --fail-on-unknown false \
   --r-stage-package-count 10
 ```
+
+For ECS-backed launches, the start script also performs a prescan ASG guard. If
+the target worker ASG is scaled down to `0`, the launcher raises capacity to at
+least `1` and waits for an active ECS container instance before starting the
+execution.
 
 Guidance on `--r-stage-package-count`:
 
