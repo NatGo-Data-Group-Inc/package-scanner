@@ -45,7 +45,20 @@ param(
   [string]$TlsCertificateArn = "",
 
   [Parameter(Mandatory = $false)]
-  [int]$DesiredCount = 1,
+  [string]$CustomDomainName = "",
+
+  [Parameter(Mandatory = $false)]
+  [string]$CustomDomainHostedZoneId = "",
+
+  [Parameter(Mandatory = $false)]
+  [ValidateSet("true", "false")]
+  [string]$RuntimeEnabled = "false",
+
+  [Parameter(Mandatory = $false)]
+  [int]$IdleTimeoutMinutes = 60,
+
+  [Parameter(Mandatory = $false)]
+  [int]$DesiredCount = 0,
 
   [Parameter(Mandatory = $false)]
   [string]$TaskCpu = "1024",
@@ -82,6 +95,10 @@ $bashArgs = @(
   "--ephemeral-prefix", $EphemeralPrefix,
   "--allowed-ingress-cidr", $AllowedIngressCidr,
   "--tls-certificate-arn", $TlsCertificateArn,
+  "--custom-domain-name", $CustomDomainName,
+  "--custom-domain-hosted-zone-id", $CustomDomainHostedZoneId,
+  "--runtime-enabled", $RuntimeEnabled,
+  "--idle-timeout-minutes", $IdleTimeoutMinutes.ToString(),
   "--desired-count", $DesiredCount.ToString(),
   "--task-cpu", $TaskCpu,
   "--task-memory", $TaskMemory

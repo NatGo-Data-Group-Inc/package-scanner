@@ -1,6 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  Dedicated ECS Fargate service for the package scanner operator webapp.
+  Dedicated ECS Fargate service for the package scanner operator webapp, with
+  on-demand runtime resources and optional custom DNS.
 
 Parameters:
   EnvironmentName:
@@ -16,6 +17,20 @@ Parameters:
   TlsCertificateArn:
     Type: String
     Default: ''
+  CustomDomainName:
+    Type: String
+    Default: ''
+  CustomDomainHostedZoneId:
+    Type: String
+    Default: ''
+  RuntimeEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+  IdleTimeoutMinutes:
+    Type: Number
+    Default: 60
+    MinValue: 1
   CatalogBucketName:
     Type: String
   InputBucketName:
@@ -53,6 +68,18 @@ Parameters:
 
 Conditions:
   HasTlsCertificate: !Not [!Equals [!Ref TlsCertificateArn, '']]
+  HasCustomDomainName: !Not [!Equals [!Ref CustomDomainName, '']]
+  HasCustomHostedZoneId: !Not [!Equals [!Ref CustomDomainHostedZoneId, '']]
+  HasCustomDomain: !And
+    - !Condition HasCustomDomainName
+    - !Condition HasCustomHostedZoneId
+  RuntimeEnabledCondition: !Equals [!Ref RuntimeEnabled, 'true']
+  RuntimeWithTls: !And
+    - !Condition RuntimeEnabledCondition
+    - !Condition HasTlsCertificate
+  RuntimeWithCustomDomain: !And
+    - !Condition RuntimeEnabledCondition
+    - !Condition HasCustomDomain
 
 Resources:
   WebappSecurityGroup:
@@ -105,6 +132,14 @@ Resources:
     Type: AWS::ECS::Cluster
     Properties:
       ClusterName: !Sub '${EnvironmentName}-webapp'
+
+  WebappRuntimeLeaseParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/${EnvironmentName}/webapp/runtime-lease-until'
+      Type: String
+      Value: ''
+      Tier: Standard
 
   WebappTaskExecutionRole:
     Type: AWS::IAM::Role
@@ -167,6 +202,227 @@ Resources:
                   - states:StopExecution
                 Resource: '*'
 
+  WebappRuntimeControllerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: WebappRuntimeController
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                  - cloudformation:UpdateStack
+                Resource:
+                  - !Sub 'arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}/*'
+              - Effect: Allow
+                Action:
+                  - states:ListExecutions
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:PutParameter
+                Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${EnvironmentName}/webapp/runtime-lease-until'
+
+  WebappRuntimeController:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${EnvironmentName}-webapp-runtime-controller'
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt WebappRuntimeControllerRole.Arn
+      Timeout: 60
+      Environment:
+        Variables:
+          STACK_NAME: !Ref AWS::StackName
+          PYTHON_STACK_NAME: !Ref PythonStackName
+          R_STACK_NAME: !Ref RStackName
+          IDLE_TIMEOUT_MINUTES: !Ref IdleTimeoutMinutes
+          RUNTIME_LEASE_PARAMETER: !Ref WebappRuntimeLeaseParameter
+      Code:
+        ZipFile: !Sub |
+          import boto3
+          import json
+          import os
+          from datetime import datetime, timedelta, timezone
+
+          cloudformation = boto3.client("cloudformation")
+          ssm = boto3.client("ssm")
+          stepfunctions = boto3.client("stepfunctions")
+
+          STACK_NAME = os.environ["STACK_NAME"]
+          PYTHON_STACK_NAME = os.environ["PYTHON_STACK_NAME"]
+          R_STACK_NAME = os.environ["R_STACK_NAME"]
+          IDLE_TIMEOUT_MINUTES = int(os.environ.get("IDLE_TIMEOUT_MINUTES", "60"))
+          RUNTIME_LEASE_PARAMETER = os.environ["RUNTIME_LEASE_PARAMETER"]
+
+          TERMINAL_STATUSES = ("SUCCEEDED", "FAILED", "TIMED_OUT", "ABORTED")
+
+          def parse_stack_parameters(stack):
+              return {item["ParameterKey"]: item["ParameterValue"] for item in stack.get("Parameters", [])}
+
+          def describe_stack(stack_name):
+              return cloudformation.describe_stacks(StackName=stack_name)["Stacks"][0]
+
+          def stack_in_progress(stack):
+              return str(stack.get("StackStatus", "")).endswith("_IN_PROGRESS")
+
+          def configured_state_machine_arns():
+              arns = []
+              for stack_name, keys in (
+                  (PYTHON_STACK_NAME, ("PythonScanOrchestrationStateMachineArn", "PythonLinuxScanOrchestrationStateMachineArn")),
+                  (R_STACK_NAME, ("RScanOrchestrationStateMachineArn", "RLinuxScanOrchestrationStateMachineArn", "RWindowsScanOrchestrationStateMachineArn")),
+              ):
+                  try:
+                      stack = describe_stack(stack_name)
+                  except Exception:
+                      continue
+                  outputs = {item["OutputKey"]: item["OutputValue"] for item in stack.get("Outputs", [])}
+                  for key in keys:
+                      value = str(outputs.get(key, "")).strip()
+                      if value and value not in arns and value != "None":
+                          arns.append(value)
+              return arns
+
+          def any_running(arns):
+              for arn in arns:
+                  executions = stepfunctions.list_executions(
+                      stateMachineArn=arn,
+                      statusFilter="RUNNING",
+                      maxResults=5,
+                  ).get("executions", [])
+                  if executions:
+                      return True
+              return False
+
+          def latest_completed_at(arns):
+              latest = None
+              for arn in arns:
+                  for status in TERMINAL_STATUSES:
+                      executions = stepfunctions.list_executions(
+                          stateMachineArn=arn,
+                          statusFilter=status,
+                          maxResults=5,
+                      ).get("executions", [])
+                      for execution in executions:
+                          stop_date = execution.get("stopDate")
+                          if stop_date is None:
+                              continue
+                          if latest is None or stop_date > latest:
+                              latest = stop_date
+              return latest
+
+          def get_manual_lease_until():
+              try:
+                  value = ssm.get_parameter(Name=RUNTIME_LEASE_PARAMETER)["Parameter"]["Value"].strip()
+              except Exception:
+                  return None
+              if not value:
+                  return None
+              try:
+                  return datetime.fromisoformat(value.replace("Z", "+00:00"))
+              except ValueError:
+                  return None
+
+          def set_manual_lease_until(lease_until):
+              value = lease_until.astimezone(timezone.utc).isoformat().replace("+00:00", "Z") if lease_until else ""
+              ssm.put_parameter(Name=RUNTIME_LEASE_PARAMETER, Value=value, Overwrite=True)
+
+          def update_runtime(stack, runtime_enabled, desired_count):
+              parameters = []
+              for item in stack.get("Parameters", []):
+                  key = item["ParameterKey"]
+                  if key == "RuntimeEnabled":
+                      parameters.append({"ParameterKey": key, "ParameterValue": "true" if runtime_enabled else "false"})
+                  elif key == "DesiredCount":
+                      parameters.append({"ParameterKey": key, "ParameterValue": str(desired_count)})
+                  else:
+                      parameters.append({"ParameterKey": key, "UsePreviousValue": True})
+              cloudformation.update_stack(
+                  StackName=STACK_NAME,
+                  UsePreviousTemplate=True,
+                  Capabilities=["CAPABILITY_NAMED_IAM"],
+                  Parameters=parameters,
+              )
+
+          def handler(event, context):
+              event = event or {}
+              action = str(event.get("action") or "reconcile").strip().lower()
+              now = datetime.now(timezone.utc)
+
+              stack = describe_stack(STACK_NAME)
+              if stack_in_progress(stack):
+                  return {"status": "stack-update-in-progress", "stack_status": stack.get("StackStatus")}
+
+              params = parse_stack_parameters(stack)
+              current_runtime = str(params.get("RuntimeEnabled", "false")).lower() == "true"
+              current_desired = int(str(params.get("DesiredCount", "0") or "0"))
+
+              if action == "enable":
+                  lease_minutes = int(event.get("lease_minutes") or IDLE_TIMEOUT_MINUTES)
+                  set_manual_lease_until(now + timedelta(minutes=lease_minutes))
+                  desired_runtime = True
+              elif action == "disable":
+                  set_manual_lease_until(None)
+                  desired_runtime = False
+              else:
+                  arns = configured_state_machine_arns()
+                  if any_running(arns):
+                      desired_runtime = True
+                  else:
+                      desired_runtime = False
+                      latest_completed = latest_completed_at(arns)
+                      if latest_completed and now - latest_completed <= timedelta(minutes=IDLE_TIMEOUT_MINUTES):
+                          desired_runtime = True
+                      lease_until = get_manual_lease_until()
+                      if lease_until and lease_until > now:
+                          desired_runtime = True
+
+              desired_count = 1 if desired_runtime else 0
+              if current_runtime == desired_runtime and current_desired == desired_count:
+                  return {
+                      "status": "no-change",
+                      "runtime_enabled": current_runtime,
+                      "desired_count": current_desired,
+                  }
+
+              update_runtime(stack, desired_runtime, desired_count)
+              return {
+                  "status": "update-started",
+                  "runtime_enabled": desired_runtime,
+                  "desired_count": desired_count,
+              }
+
+  WebappRuntimeControllerSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${EnvironmentName}-webapp-runtime-controller'
+      ScheduleExpression: rate(5 minutes)
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt WebappRuntimeController.Arn
+          Id: reconcile
+          Input: '{"action":"reconcile"}'
+
+  WebappRuntimeControllerSchedulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref WebappRuntimeController
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt WebappRuntimeControllerSchedule.Arn
+
   WebappTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
@@ -199,6 +455,14 @@ Resources:
               Value: !Ref PythonStackName
             - Name: R_STACK_NAME
               Value: !Ref RStackName
+            - Name: WEBAPP_PUBLIC_BASE_URL
+              Value: !If
+                - HasCustomDomain
+                - !If
+                  - HasTlsCertificate
+                  - !Sub 'https://${CustomDomainName}'
+                  - !Sub 'http://${CustomDomainName}'
+                - ''
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -208,6 +472,7 @@ Resources:
 
   WebappLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Condition: RuntimeEnabledCondition
     Properties:
       Name: !Sub '${EnvironmentName}-webapp'
       Scheme: internet-facing
@@ -218,6 +483,7 @@ Resources:
 
   WebappTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Condition: RuntimeEnabledCondition
     Properties:
       Name: !Sub '${EnvironmentName}-webapp'
       Port: !Ref ContainerPort
@@ -231,6 +497,7 @@ Resources:
 
   WebappHttpListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: RuntimeEnabledCondition
     Properties:
       LoadBalancerArn: !Ref WebappLoadBalancer
       Port: 80
@@ -248,7 +515,7 @@ Resources:
 
   WebappHttpsListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
-    Condition: HasTlsCertificate
+    Condition: RuntimeWithTls
     Properties:
       LoadBalancerArn: !Ref WebappLoadBalancer
       Port: 443
@@ -261,6 +528,7 @@ Resources:
 
   WebappService:
     Type: AWS::ECS::Service
+    Condition: RuntimeEnabledCondition
     DependsOn:
       - WebappHttpListener
     Properties:
@@ -282,16 +550,43 @@ Resources:
           ContainerName: webapp
           ContainerPort: !Ref ContainerPort
 
+  WebappDnsRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: RuntimeWithCustomDomain
+    Properties:
+      HostedZoneId: !Ref CustomDomainHostedZoneId
+      Name: !Ref CustomDomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt WebappLoadBalancer.DNSName
+        HostedZoneId: !GetAtt WebappLoadBalancer.CanonicalHostedZoneID
+
 Outputs:
   WebappUrl:
     Value: !If
-      - HasTlsCertificate
-      - !Sub 'https://${WebappLoadBalancer.DNSName}'
-      - !Sub 'http://${WebappLoadBalancer.DNSName}'
+      - HasCustomDomain
+      - !If
+        - HasTlsCertificate
+        - !Sub 'https://${CustomDomainName}'
+        - !Sub 'http://${CustomDomainName}'
+      - !If
+        - RuntimeWithTls
+        - !Sub 'https://${WebappLoadBalancer.DNSName}'
+        - !If
+          - RuntimeEnabledCondition
+          - !Sub 'http://${WebappLoadBalancer.DNSName}'
+          - ''
   WebappClusterArn:
     Value: !GetAtt WebappCluster.Arn
+  WebappControllerFunctionName:
+    Value: !Ref WebappRuntimeController
+  WebappRuntimeLeaseParameterName:
+    Value: !Ref WebappRuntimeLeaseParameter
   WebappServiceName:
-    Value: !Ref WebappService
+    Value: !If
+      - RuntimeEnabledCondition
+      - !Ref WebappService
+      - ''
   WebappRepositoryUri:
     Value: !GetAtt WebappRepository.RepositoryUri
   WebappLogGroupName:

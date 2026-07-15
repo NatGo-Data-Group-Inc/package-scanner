@@ -87,6 +87,7 @@ Project policies:
 - `scripts/deploy-python-ecs-cfn.sh`: deploy/update entrypoint for the Python ECS stack.
 - `scripts/deploy-r-ecs-cfn.sh`: deploy/update entrypoint for the R ECS stack.
 - `scripts/deploy-webapp-cfn.sh`: deploy/update entrypoint for the webapp service stack.
+- `scripts/set-webapp-runtime.sh`: enable, disable, or reconcile the hosted webapp runtime without a full scanner redeploy.
 - `scripts/build-webapp-image.sh`: build/push entrypoint for the webapp container image.
 - `scripts/start-python-scan.sh`: canonical scan start entrypoint.
 - `scripts/build-python-ecs-images.sh`: build/push entrypoint for the Python ECS Linux image.
@@ -117,17 +118,29 @@ Project policies:
     - Linux-only R ECS scans
 - Webapp stack:
   - dedicated ECS Fargate service for the operator GUI
-  - Application Load Balancer
+  - on-demand Application Load Balancer
   - ECR repository for the webapp image
+  - runtime controller Lambda and schedule for scan-aware startup/shutdown
   - optional `HTTPS` listener when deployed with an ACM certificate ARN
 
 Webapp deployment notes:
 
 - The hosted operator GUI uses `gunicorn` behind an ALB.
-- Default deployment exposes `HTTP` on port `80`.
+- Runtime resources are controlled separately from the persistent control plane.
+- Default deployment keeps the runtime disabled until explicitly started or a
+  scan is detected.
 - Pass `--tls-certificate-arn <acm-certificate-arn>` to
   `scripts/deploy-webapp-cfn.sh` to add `HTTPS` on `443` and redirect
   `80 -> 443`.
+- Use `scripts/set-webapp-runtime.sh --action enable` to bring the runtime up
+  on demand and `--action disable` to turn it back off.
+- After enabling the runtime, read the current URL from the
+  `WebappUrl` CloudFormation stack output.
+- When scanner Step Functions executions are running, the runtime controller
+  keeps the GUI up automatically and shuts it down 60 minutes after the last
+  execution completes.
+- Custom DNS is optional and should be treated as a later environment-specific
+  enhancement rather than the default dev path.
 - The ACM certificate must already exist in the same AWS region as the ALB.
 
 ## Quick Start

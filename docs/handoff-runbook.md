@@ -128,15 +128,33 @@ Deploy the dedicated operator webapp separately from the scanner stacks:
 
 Behavior:
 
-- default deployment is `HTTP` only on ALB port `80`
+- default deployment leaves the runtime disabled until explicitly enabled or a
+  scan is detected
+- use `./scripts/set-webapp-runtime.sh --action enable --profile <aws-profile>`
+  for manual bring-up
+- use `./scripts/set-webapp-runtime.sh --action disable --profile <aws-profile>`
+  for manual shutdown
+- while enabled, the runtime serves `HTTP` on ALB port `80`
 - pass `--tls-certificate-arn <acm-certificate-arn>` to enable `HTTPS` on `443`
 - when a certificate ARN is supplied, the ALB redirects `HTTP` to `HTTPS`
+- the runtime controller keeps the GUI up while scan executions are running and
+  shuts it down 60 minutes after the last execution completes
+- because the ALB is deleted when idle, the runtime URL changes between start
+  cycles and must be re-read from the stack output after each bring-up
+- custom DNS remains available as a later environment-specific enhancement, but
+  it is not the default dev workflow
 - the certificate must already exist in ACM in the same region as the ALB
 
 Verification:
 
 ```bash
-curl -sS http://<webapp-alb-hostname>/healthz
+WEBAPP_URL="$(aws cloudformation describe-stacks \
+  --stack-name package-scanner-webapp-dev \
+  --region us-east-1 \
+  --profile <aws-profile> \
+  --query "Stacks[0].Outputs[?OutputKey=='WebappUrl'].OutputValue | [0]" \
+  --output text)"
+curl -sS "${WEBAPP_URL}/healthz"
 ```
 
 If browser access fails but command-line access works, suspect browser-side

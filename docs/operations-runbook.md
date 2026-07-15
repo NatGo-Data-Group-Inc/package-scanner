@@ -113,10 +113,23 @@ IMAGE_TAG=$(date -u +%Y%m%dT%H%M%SZ)-<suffix>
 
 - Use `scripts/deploy-webapp-cfn.sh` to deploy the dedicated ECS Fargate
   operator webapp stack.
-- By default the ALB is `HTTP` only on port `80`.
+- The webapp stack now has a persistent control plane and an on-demand runtime.
+- By default the runtime is disabled after deploy unless `--runtime-enabled true`
+  is supplied.
+- Use `scripts/set-webapp-runtime.sh --action enable` for manual bring-up and
+  `--action disable` for manual teardown.
+- After enabling the runtime, resolve the current ALB URL from the
+  `WebappUrl` stack output before handing the link to an operator.
+- While runtime is enabled, the ALB serves `HTTP` on port `80` by default.
 - If browser policy or enterprise security tooling upgrades requests to
   `HTTPS`, supply `--tls-certificate-arn <acm-certificate-arn>` during deploy
   so the ALB exposes `443` and redirects `80 -> 443`.
+- The runtime controller keeps the GUI up while Python or R scan executions are
+  running and tears the ALB/Fargate runtime down 60 minutes after the last
+  Step Functions execution completes.
+- In the current dev model, the ALB hostname is ephemeral by design. Treat
+  custom DNS as a later environment-specific enhancement rather than the
+  default operational path.
 - The webapp stack can be updated independently of the scanner stacks.
 - The hosted webapp uses `gunicorn` and boto3-backed AWS calls; browser issues
   should be debugged separately from ALB reachability by checking both:

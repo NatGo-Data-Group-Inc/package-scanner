@@ -67,13 +67,44 @@ AWS-hosted deployment is now scaffolded separately from the scanner workers:
   --profile <aws-profile>
 ```
 
+Bring the hosted runtime up or down without redeploying the scanner stacks:
+
+```bash
+./scripts/set-webapp-runtime.sh \
+  --action enable \
+  --profile <aws-profile>
+```
+
+Fetch the current runtime URL after startup:
+
+```bash
+aws cloudformation describe-stacks \
+  --stack-name package-scanner-webapp-dev \
+  --query "Stacks[0].Outputs[?OutputKey=='WebappUrl'].OutputValue | [0]" \
+  --output text \
+  --profile <aws-profile>
+```
+
 Deployment notes:
 
-- The hosted webapp runs behind an ALB and serves plain `HTTP` by default.
+- The hosted webapp runs behind an ALB only while the runtime is enabled.
+- The persistent control plane remains deployed even when the ALB and Fargate
+  service are turned off.
+- Pass `--runtime-enabled true` to `deploy-webapp-cfn.sh` to leave the runtime
+  on after deploy, or use `set-webapp-runtime.sh` for day-to-day control.
 - Pass `--tls-certificate-arn <acm-certificate-arn>` to add an ALB `HTTPS`
   listener on `443`.
 - When a certificate ARN is supplied, the ALB also redirects `HTTP:80` requests
   to `HTTPS:443`.
+- A runtime controller Lambda polls the configured Python and R Step Functions
+  state machines every 5 minutes. If any scan is active, the GUI runtime stays
+  up. If no scan is active, the controller shuts the GUI down 60 minutes after
+  the last execution completes.
+- When the runtime is disabled, the ALB is deleted to remove idle cost. The
+  next startup gets a new ALB hostname, so the current URL should always be
+  read from `WebappUrl`.
+- Custom DNS support remains available in the template, but it is an optional
+  later enhancement and not the default dev workflow.
 - The certificate must already exist in ACM in the same region as the ALB.
 - The raw `*.elb.amazonaws.com` hostname cannot use an ACM-issued public
   certificate directly; use a DNS name you control and point it at the ALB.
