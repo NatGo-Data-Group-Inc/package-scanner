@@ -1,0 +1,298 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Dedicated ECS Fargate service for the package scanner operator webapp.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: package-scanner-dev
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+  AllowedIngressCidr:
+    Type: String
+    Default: 0.0.0.0/0
+  TlsCertificateArn:
+    Type: String
+    Default: ''
+  CatalogBucketName:
+    Type: String
+  InputBucketName:
+    Type: String
+  EphemeralBucketName:
+    Type: String
+  CatalogPrefix:
+    Type: String
+    Default: evidence
+  EphemeralPrefix:
+    Type: String
+    Default: deploy/tmp/r
+  PythonStackName:
+    Type: String
+    Default: cyber-scanner-dev-python-ecs
+  RStackName:
+    Type: String
+    Default: cyber-scanner-dev-r-ecs
+  ContainerPort:
+    Type: Number
+    Default: 8000
+  DesiredCount:
+    Type: Number
+    Default: 0
+  TaskCpu:
+    Type: String
+    Default: '1024'
+    AllowedValues: ['256', '512', '1024', '2048', '4096']
+  TaskMemory:
+    Type: String
+    Default: '2048'
+  WebappImageUri:
+    Type: String
+    Default: public.ecr.aws/docker/library/python:3.12-slim
+
+Conditions:
+  HasTlsCertificate: !Not [!Equals [!Ref TlsCertificateArn, '']]
+
+Resources:
+  WebappSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub '${EnvironmentName} package scanner webapp service'
+      VpcId: !Ref VpcId
+
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub '${EnvironmentName} package scanner webapp ALB'
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref AllowedIngressCidr
+        - !If
+          - HasTlsCertificate
+          - IpProtocol: tcp
+            FromPort: 443
+            ToPort: 443
+            CidrIp: !Ref AllowedIngressCidr
+          - !Ref AWS::NoValue
+
+  WebappSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref WebappSecurityGroup
+      IpProtocol: tcp
+      FromPort: !Ref ContainerPort
+      ToPort: !Ref ContainerPort
+      SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+
+  WebappLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/${EnvironmentName}/webapp'
+      RetentionInDays: 14
+
+  WebappRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub '${EnvironmentName}/webapp'
+      ImageScanningConfiguration:
+        ScanOnPush: true
+
+  WebappCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub '${EnvironmentName}-webapp'
+
+  WebappTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  WebappTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: WebappDataAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::${InputBucketName}'
+                  - !Sub 'arn:aws:s3:::${CatalogBucketName}'
+                  - !Sub 'arn:aws:s3:::${EphemeralBucketName}'
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub 'arn:aws:s3:::${InputBucketName}/*'
+                  - !Sub 'arn:aws:s3:::${CatalogBucketName}/*'
+                  - !Sub 'arn:aws:s3:::${EphemeralBucketName}/*'
+              - Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ecs:DescribeTasks
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - states:ListExecutions
+                  - states:DescribeExecution
+                  - states:GetExecutionHistory
+                  - states:StartExecution
+                  - states:StopExecution
+                Resource: '*'
+
+  WebappTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${EnvironmentName}-webapp'
+      Cpu: !Ref TaskCpu
+      Memory: !Ref TaskMemory
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !GetAtt WebappTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt WebappTaskRole.Arn
+      ContainerDefinitions:
+        - Name: webapp
+          Image: !Ref WebappImageUri
+          Essential: true
+          PortMappings:
+            - ContainerPort: !Ref ContainerPort
+          Environment:
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+            - Name: CATALOG_BUCKET
+              Value: !Ref CatalogBucketName
+            - Name: CATALOG_PREFIX
+              Value: !Ref CatalogPrefix
+            - Name: EPHEMERAL_BUCKET
+              Value: !Ref EphemeralBucketName
+            - Name: EPHEMERAL_PREFIX
+              Value: !Ref EphemeralPrefix
+            - Name: PYTHON_STACK_NAME
+              Value: !Ref PythonStackName
+            - Name: R_STACK_NAME
+              Value: !Ref RStackName
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref WebappLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: webapp
+
+  WebappLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub '${EnvironmentName}-webapp'
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref LoadBalancerSecurityGroup
+      Subnets: !Ref SubnetIds
+      Type: application
+
+  WebappTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${EnvironmentName}-webapp'
+      Port: !Ref ContainerPort
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VpcId
+      HealthCheckEnabled: true
+      HealthCheckPath: /healthz
+      Matcher:
+        HttpCode: '200'
+
+  WebappHttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref WebappLoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - !If
+          - HasTlsCertificate
+          - Type: redirect
+            RedirectConfig:
+              Port: '443'
+              Protocol: HTTPS
+              StatusCode: HTTP_301
+          - Type: forward
+            TargetGroupArn: !Ref WebappTargetGroup
+
+  WebappHttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: HasTlsCertificate
+    Properties:
+      LoadBalancerArn: !Ref WebappLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref TlsCertificateArn
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref WebappTargetGroup
+
+  WebappService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - WebappHttpListener
+    Properties:
+      Cluster: !Ref WebappCluster
+      DesiredCount: !Ref DesiredCount
+      LaunchType: FARGATE
+      TaskDefinition: !Ref WebappTaskDefinition
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 50
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref WebappSecurityGroup
+          Subnets: !Ref SubnetIds
+      LoadBalancers:
+        - TargetGroupArn: !Ref WebappTargetGroup
+          ContainerName: webapp
+          ContainerPort: !Ref ContainerPort
+
+Outputs:
+  WebappUrl:
+    Value: !If
+      - HasTlsCertificate
+      - !Sub 'https://${WebappLoadBalancer.DNSName}'
+      - !Sub 'http://${WebappLoadBalancer.DNSName}'
+  WebappClusterArn:
+    Value: !GetAtt WebappCluster.Arn
+  WebappServiceName:
+    Value: !Ref WebappService
+  WebappRepositoryUri:
+    Value: !GetAtt WebappRepository.RepositoryUri
+  WebappLogGroupName:
+    Value: !Ref WebappLogGroup
