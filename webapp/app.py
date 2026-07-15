@@ -578,6 +578,10 @@ def create_app() -> Flask:
                 profile=app.config["AWS_PROFILE"],
             )
         except Exception:
+            execution_input_cache[cache_key] = {
+                "expires_at": now + RECORD_CACHE_TTL_SECONDS,
+                "input": {},
+            }
             return {}
         raw_input = detail.get("input")
         if isinstance(raw_input, str) and raw_input.strip():
@@ -590,6 +594,10 @@ def create_app() -> Flask:
                 }
                 return result
             except json.JSONDecodeError:
+                execution_input_cache[cache_key] = {
+                    "expires_at": now + RECORD_CACHE_TTL_SECONDS,
+                    "input": {},
+                }
                 return {}
         result = raw_input if isinstance(raw_input, dict) else {}
         execution_input_cache[cache_key] = {

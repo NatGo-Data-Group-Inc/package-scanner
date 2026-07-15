@@ -56,9 +56,16 @@ The Flask browser is a read-only view over the catalog:
   --catalog-bucket <evidence-bucket>
 ```
 
-This wrapper starts the local webapp without the Flask debugger or reloader and
-uses a dedicated writable AWS home under `/tmp` so refreshed SSO credentials can
-be copied in cleanly.
+This wrapper starts the local webapp behind `gunicorn` and uses a dedicated
+writable AWS home under `/tmp` so refreshed SSO credentials can be copied in
+cleanly.
+
+AWS-hosted deployment is now scaffolded separately from the scanner workers:
+
+```bash
+./scripts/deploy-webapp-cfn.sh \
+  --profile <aws-profile>
+```
 
 For R ECS, the browser can watch more than one Step Functions orchestrator at
 once. By default it includes the combined, Linux-only, and Windows-only R ECS

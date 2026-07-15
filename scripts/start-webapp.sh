@@ -67,17 +67,15 @@ if [[ -z "${CATALOG_BUCKET}" ]]; then
   exit 1
 fi
 
-FLASK_CMD=""
-if [[ -x ".venv/bin/flask" ]]; then
-  FLASK_CMD=".venv/bin/flask"
-elif [[ -x ".venv/Scripts/flask.exe" ]]; then
-  FLASK_CMD=".venv/Scripts/flask.exe"
+GUNICORN_CMD=""
+if [[ -x ".venv/bin/python" ]]; then
+  GUNICORN_CMD=".venv/bin/python -m gunicorn"
 elif [[ -x ".venv/Scripts/python.exe" ]]; then
-  FLASK_CMD=".venv/Scripts/python.exe -m flask"
+  GUNICORN_CMD=".venv/Scripts/python.exe -m gunicorn"
 fi
 
-if [[ -z "${FLASK_CMD}" ]]; then
-  echo "Missing Flask executable. Expected .venv/bin/flask or .venv/Scripts/flask.exe." >&2
+if [[ -z "${GUNICORN_CMD}" ]]; then
+  echo "Missing gunicorn runtime. Expected .venv/bin/python or .venv/Scripts/python.exe with gunicorn installed." >&2
   exit 1
 fi
 
@@ -122,32 +120,35 @@ export CATALOG_PREFIX
 export EPHEMERAL_BUCKET
 export EPHEMERAL_PREFIX
 export R_STATE_MACHINE_ARNS="${R_STATE_MACHINE_ARNS:-arn:aws:states:us-east-1:807497180525:stateMachine:package-scanner-dev-r-ecs-scan-orchestrator,arn:aws:states:us-east-1:807497180525:stateMachine:package-scanner-dev-r-ecs-linux-scan-orchestrator,arn:aws:states:us-east-1:807497180525:stateMachine:package-scanner-dev-r-ecs-windows-scan-orchestrator}"
-export FLASK_APP="webapp/app.py"
-export FLASK_DEBUG="0"
 export WEBAPP_LOG_PATH="${LOG_FILE}"
 if [[ -n "${PROFILE}" ]]; then
   export AWS_PROFILE="${PROFILE}"
 fi
+export GUNICORN_WORKERS="${GUNICORN_WORKERS:-4}"
+export GUNICORN_THREADS="${GUNICORN_THREADS:-8}"
+export GUNICORN_TIMEOUT="${GUNICORN_TIMEOUT:-120}"
 
 app_pid="$(
-python - "${HOST}" "${PORT}" "${LOG_FILE}" "${FLASK_CMD}" <<'PY'
+python - "${HOST}" "${PORT}" "${LOG_FILE}" "${GUNICORN_CMD}" <<'PY'
 import os
 import shlex
 import subprocess
 import sys
 
-host, port, log_file, flask_cmd = sys.argv[1:5]
+host, port, log_file, gunicorn_cmd = sys.argv[1:5]
 env = os.environ.copy()
 with open(log_file, "ab", buffering=0) as log:
     proc = subprocess.Popen(
-        shlex.split(flask_cmd) + [
-            "run",
-            "--host",
-            host,
-            "--port",
-            port,
-            "--no-debugger",
-            "--no-reload",
+        shlex.split(gunicorn_cmd) + [
+            "--bind",
+            f"{host}:{port}",
+            "--workers",
+            env.get("GUNICORN_WORKERS", "4"),
+            "--threads",
+            env.get("GUNICORN_THREADS", "8"),
+            "--timeout",
+            env.get("GUNICORN_TIMEOUT", "120"),
+            "webapp.app:app",
         ],
         stdin=subprocess.DEVNULL,
         stdout=log,

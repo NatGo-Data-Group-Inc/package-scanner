@@ -1081,3 +1081,7 @@ Outputs:
     Value: !GetAtt RLinuxCluster.Arn
   RWindowsClusterArn:
     Value: !GetAtt RWindowsCluster.Arn
+  RLinuxAutoScalingGroupName:
+    Value: !Ref RLinuxAmd64ASG
+  RWindowsAutoScalingGroupName:
+    Value: !Ref RWindowsASG

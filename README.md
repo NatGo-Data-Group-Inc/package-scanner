@@ -80,11 +80,14 @@ Project policies:
 - `deployment/cfn/python-scan-stack.yaml`: Python scan infrastructure and the preserved CodeBuild-based path.
 - `deployment/cfn/python-ecs-scan-stack.yaml`: Python ECS infrastructure for Linux amd64/arm64 and Windows amd64 scanning.
 - `deployment/cfn/ecs-scan-stack.yaml`: R ECS infrastructure and orchestration.
+- `deployment/cfn/webapp-stack.yaml`: dedicated ECS Fargate infrastructure for the operator webapp.
 - `webapp/app.py`: read-only Flask browser for the scan catalog.
 - `api/openapi.yaml`: control-plane API contract for UI/backend integration.
 - `scripts/deploy-cfn.sh`: canonical deploy/update entrypoint.
 - `scripts/deploy-python-ecs-cfn.sh`: deploy/update entrypoint for the Python ECS stack.
 - `scripts/deploy-r-ecs-cfn.sh`: deploy/update entrypoint for the R ECS stack.
+- `scripts/deploy-webapp-cfn.sh`: deploy/update entrypoint for the webapp service stack.
+- `scripts/build-webapp-image.sh`: build/push entrypoint for the webapp container image.
 - `scripts/start-python-scan.sh`: canonical scan start entrypoint.
 - `scripts/build-python-ecs-images.sh`: build/push entrypoint for the Python ECS Linux image.
 - `scripts/build-python-ecs-windows-image.ps1`: build/push entrypoint for the Python ECS Windows image from a Windows Docker host.
@@ -112,6 +115,10 @@ Project policies:
   - Step Functions state machines for:
     - all-platform R ECS scans
     - Linux-only R ECS scans
+ - Webapp stack:
+  - dedicated ECS Fargate service for the operator GUI
+  - Application Load Balancer
+  - ECR repository for the webapp image
 
 ## Quick Start
 

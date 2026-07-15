@@ -152,6 +152,89 @@ stack_output() {
     "${AWS_ARGS[@]}"
 }
 
+cluster_name_from_arn() {
+  local cluster_arn="$1"
+  printf '%s\n' "${cluster_arn##*/}"
+}
+
+default_asg_name_for_cluster() {
+  local cluster_name="$1"
+  if [[ "${cluster_name}" == *"-r-linux" || "${cluster_name}" == *"-r-windows" ]]; then
+    printf '%s-amd64\n' "${cluster_name}"
+    return
+  fi
+  printf '%s\n' "${cluster_name}"
+}
+
+ensure_worker_capacity() {
+  local cluster_arn="$1"
+  local asg_output_key="$2"
+  local cluster_name asg_name asg_json min_size desired_capacity active_count attempts
+
+  cluster_name="$(cluster_name_from_arn "${cluster_arn}")"
+  asg_name="$(stack_output "${asg_output_key}")"
+  if [[ -z "${asg_name}" || "${asg_name}" == "None" ]]; then
+    asg_name="$(default_asg_name_for_cluster "${cluster_name}")"
+  fi
+  if [[ -z "${asg_name}" ]]; then
+    echo "Unable to resolve Auto Scaling group for cluster ${cluster_name}" >&2
+    exit 1
+  fi
+
+  asg_json="$(
+    aws autoscaling describe-auto-scaling-groups \
+      --auto-scaling-group-names "${asg_name}" \
+      --query 'AutoScalingGroups[0].{MinSize:MinSize,DesiredCapacity:DesiredCapacity}' \
+      --output json \
+      "${AWS_ARGS[@]}"
+  )"
+  if [[ -z "${asg_json}" || "${asg_json}" == "null" ]]; then
+    echo "Unable to describe Auto Scaling group ${asg_name} for cluster ${cluster_name}" >&2
+    exit 1
+  fi
+
+  min_size="$(
+    python -c 'import json,sys; data=json.load(sys.stdin); print(data.get("MinSize", ""))' <<<"${asg_json}"
+  )"
+  desired_capacity="$(
+    python -c 'import json,sys; data=json.load(sys.stdin); print(data.get("DesiredCapacity", ""))' <<<"${asg_json}"
+  )"
+
+  if [[ -z "${min_size}" || -z "${desired_capacity}" ]]; then
+    echo "Incomplete Auto Scaling data for ${asg_name}" >&2
+    exit 1
+  fi
+
+  if (( min_size < 1 || desired_capacity < 1 )); then
+    echo "Scaling ${asg_name} for ${cluster_name} to minimum worker capacity (min=1 desired=1)"
+    aws autoscaling update-auto-scaling-group \
+      --auto-scaling-group-name "${asg_name}" \
+      --min-size 1 \
+      --desired-capacity 1 \
+      "${AWS_ARGS[@]}" >/dev/null
+  fi
+
+  echo "Waiting for an ACTIVE ECS container instance in ${cluster_name}"
+  for attempts in $(seq 1 40); do
+    active_count="$(
+      aws ecs list-container-instances \
+        --cluster "${cluster_name}" \
+        --status ACTIVE \
+        --query 'length(containerInstanceArns)' \
+        --output text \
+        "${AWS_ARGS[@]}"
+    )"
+    if [[ "${active_count}" != "None" && "${active_count}" =~ ^[0-9]+$ ]] && (( active_count > 0 )); then
+      echo "Cluster ${cluster_name} has ${active_count} active container instance(s)"
+      return
+    fi
+    sleep 15
+  done
+
+  echo "Timed out waiting for ACTIVE ECS capacity in cluster ${cluster_name}" >&2
+  exit 1
+}
+
 if [[ -z "${EVIDENCE_BUCKET}" ]]; then
   EVIDENCE_BUCKET="$(stack_output EvidenceBucketName)"
 fi
@@ -194,6 +277,19 @@ if [[ -z "${STATE_MACHINE_ARN}" || "${STATE_MACHINE_ARN}" == "None" ]]; then
   echo "Missing stack output: ${STATE_MACHINE_OUTPUT_KEY}" >&2
   exit 1
 fi
+
+case "${PLATFORM_SET}" in
+  linux-only)
+    ensure_worker_capacity "$(stack_output RLinuxClusterArn)" "RLinuxAutoScalingGroupName"
+    ;;
+  windows-only)
+    ensure_worker_capacity "$(stack_output RWindowsClusterArn)" "RWindowsAutoScalingGroupName"
+    ;;
+  *)
+    ensure_worker_capacity "$(stack_output RLinuxClusterArn)" "RLinuxAutoScalingGroupName"
+    ensure_worker_capacity "$(stack_output RWindowsClusterArn)" "RWindowsAutoScalingGroupName"
+    ;;
+esac
 
 SCAN_TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 SCAN_EXECUTION_ID="r-scan-${SCAN_TIMESTAMP}-$(python - <<'PY'

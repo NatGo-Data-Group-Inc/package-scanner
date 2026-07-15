@@ -1020,3 +1020,9 @@ Outputs:
     Value: !GetAtt PythonLinuxArm64Cluster.Arn
   PythonWindowsAmd64ClusterArn:
     Value: !GetAtt PythonWindowsAmd64Cluster.Arn
+  PythonLinuxAmd64AutoScalingGroupName:
+    Value: !Ref PythonLinuxAmd64ASG
+  PythonLinuxArm64AutoScalingGroupName:
+    Value: !Ref PythonLinuxArm64ASG
+  PythonWindowsAmd64AutoScalingGroupName:
+    Value: !Ref PythonWindowsAmd64ASG
