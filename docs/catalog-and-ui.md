@@ -80,6 +80,21 @@ Python `Candidates` page behavior:
 - For successful `Locked` scans, the Python run detail page can trigger a
   separate follow-up build to generate relocatable environment artifacts later.
 
+Input semantics:
+
+- `Blueprint` / `environment.yml`:
+  - versioned entries are used as solver constraints during environment
+    planning and materialization; they are not ignored
+  - the realized environment can still differ in transitive dependency details
+    because the solver resolves the full environment around those constraints
+  - CPU-only normalization can still remove or rewrite GPU/CUDA-oriented
+    entries before solve
+- `Locked` / `requirements.txt`:
+  - intended for exact pinned pip package sets
+  - non-comment lines should use `package==version`
+  - unpinned lines are not a valid substitute for a locked package set and may
+    be skipped by downstream parsing/governance logic
+
 AWS-hosted deployment is now scaffolded separately from the scanner workers:
 
 ```bash

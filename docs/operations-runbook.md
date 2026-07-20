@@ -87,6 +87,22 @@ python3 scripts/build-candidate-from-env-artifacts.py \
   step requires artifacts, use the Python run detail page to trigger the
   deferred artifact build from the already-scanned locked requirements set.
 
+Input semantics:
+
+- `Blueprint` / `environment.yml`:
+  - explicit version pins are used as constraints during solve/materialization;
+    they are not ignored
+  - the final realized environment can still differ in transitive dependency
+    details because the solver resolves the full environment around those
+    constraints
+  - CPU-only normalization can still remove or rewrite GPU/CUDA-focused
+    entries before solve
+- `Locked` / `requirements.txt`:
+  - intended for exact pinned pip package sets
+  - non-comment lines should use `package==version`
+  - if versions are omitted, downstream governance parsing can skip those
+    entries and the input should not be treated as a true locked set
+
 Current Python Linux runtime expectations:
 - The active Linux scanner image is built on `ubuntu:24.04`, not Amazon Linux.
 - The runtime exports `CONDA_OVERRIDE_GLIBC` from the live host glibc version.

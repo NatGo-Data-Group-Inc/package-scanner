@@ -138,6 +138,21 @@ path; in S3 it should live under:
 inputs/python/candidates/<candidate-name>/requirements.txt
 ```
 
+Input semantics:
+
+- `Blueprint` / `environment.yml`:
+  - version pins are treated as solver constraints for the environment build;
+    they are not ignored
+  - the resulting realized environment can still differ in transitive packages
+    because the solver resolves the full environment around those constraints
+  - CPU-only normalization can still remove or rewrite GPU/CUDA-specific
+    entries before solve
+- `Locked` / `requirements.txt`:
+  - should represent an exact pinned pip package set
+  - non-comment lines should use `package==version`
+  - if versions are omitted, downstream governance parsing may skip those lines
+    and treat the input as not fully locked
+
 ### Step B: upload input
 
 ```bash
