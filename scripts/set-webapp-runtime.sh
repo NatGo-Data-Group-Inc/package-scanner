@@ -8,6 +8,11 @@ STACK_NAME="package-scanner-webapp-dev"
 ACTION=""
 LEASE_MINUTES="60"
 WAIT_TIMEOUT_SECONDS="600"
+CUSTOM_DOMAIN_NAME=""
+CUSTOM_DOMAIN_HOSTED_ZONE_ID=""
+TLS_CERTIFICATE_ARN=""
+CLEAR_CUSTOM_DOMAIN="false"
+CLEAR_TLS_CERTIFICATE="false"
 
 usage() {
   cat <<'EOF'
@@ -17,6 +22,11 @@ Options:
   --action <enable|disable|reconcile>
   --lease-minutes <minutes>      (default: 60; used by enable)
   --wait-timeout-seconds <secs>  (default: 600; used by enable)
+  --custom-domain-name <name>    (optional; used by enable)
+  --custom-domain-hosted-zone-id <zone-id>
+  --tls-certificate-arn <arn>    (optional; used by enable)
+  --clear-custom-domain          (used by enable)
+  --clear-tls-certificate        (used by enable)
   --stack-name <name>
   --region <region>
   --profile <profile>
@@ -29,6 +39,11 @@ while [[ $# -gt 0 ]]; do
     --action) ACTION="$2"; shift 2 ;;
     --lease-minutes) LEASE_MINUTES="$2"; shift 2 ;;
     --wait-timeout-seconds) WAIT_TIMEOUT_SECONDS="$2"; shift 2 ;;
+    --custom-domain-name) CUSTOM_DOMAIN_NAME="$2"; shift 2 ;;
+    --custom-domain-hosted-zone-id) CUSTOM_DOMAIN_HOSTED_ZONE_ID="$2"; shift 2 ;;
+    --tls-certificate-arn) TLS_CERTIFICATE_ARN="$2"; shift 2 ;;
+    --clear-custom-domain) CLEAR_CUSTOM_DOMAIN="true"; shift 1 ;;
+    --clear-tls-certificate) CLEAR_TLS_CERTIFICATE="true"; shift 1 ;;
     --stack-name) STACK_NAME="$2"; shift 2 ;;
     --region) REGION="$2"; shift 2 ;;
     --profile) PROFILE="$2"; shift 2 ;;
@@ -45,6 +60,22 @@ if [[ -z "${ACTION}" ]]; then
 fi
 if [[ "${ALLOW_DEFAULT_PROFILE}" != "true" && -z "${PROFILE}" ]]; then
   echo "Guardrail: --profile is required unless --allow-default-profile is explicitly set." >&2
+  exit 1
+fi
+if [[ -n "${CUSTOM_DOMAIN_NAME}" && -z "${CUSTOM_DOMAIN_HOSTED_ZONE_ID}" ]]; then
+  echo "Guardrail: --custom-domain-hosted-zone-id is required when --custom-domain-name is set." >&2
+  exit 1
+fi
+if [[ -z "${CUSTOM_DOMAIN_NAME}" && -n "${CUSTOM_DOMAIN_HOSTED_ZONE_ID}" ]]; then
+  echo "Guardrail: --custom-domain-name is required when --custom-domain-hosted-zone-id is set." >&2
+  exit 1
+fi
+if [[ "${CLEAR_CUSTOM_DOMAIN}" == "true" && ( -n "${CUSTOM_DOMAIN_NAME}" || -n "${CUSTOM_DOMAIN_HOSTED_ZONE_ID}" ) ]]; then
+  echo "Guardrail: --clear-custom-domain cannot be combined with custom domain values." >&2
+  exit 1
+fi
+if [[ "${CLEAR_TLS_CERTIFICATE}" == "true" && -n "${TLS_CERTIFICATE_ARN}" ]]; then
+  echo "Guardrail: --clear-tls-certificate cannot be combined with --tls-certificate-arn." >&2
   exit 1
 fi
 
@@ -66,7 +97,39 @@ if [[ -z "${FUNCTION_NAME}" || "${FUNCTION_NAME}" == "None" ]]; then
   exit 1
 fi
 
-PAYLOAD="$(printf '{"action":"%s","lease_minutes":%s}' "${ACTION}" "${LEASE_MINUTES}")"
+PAYLOAD="$(
+  ACTION="${ACTION}" \
+  LEASE_MINUTES="${LEASE_MINUTES}" \
+  CUSTOM_DOMAIN_NAME="${CUSTOM_DOMAIN_NAME}" \
+  CUSTOM_DOMAIN_HOSTED_ZONE_ID="${CUSTOM_DOMAIN_HOSTED_ZONE_ID}" \
+  TLS_CERTIFICATE_ARN="${TLS_CERTIFICATE_ARN}" \
+  CLEAR_CUSTOM_DOMAIN="${CLEAR_CUSTOM_DOMAIN}" \
+  CLEAR_TLS_CERTIFICATE="${CLEAR_TLS_CERTIFICATE}" \
+  python - <<'PY'
+import json
+import os
+
+payload = {
+    "action": os.environ["ACTION"],
+    "lease_minutes": int(os.environ["LEASE_MINUTES"]),
+}
+
+if os.environ["CUSTOM_DOMAIN_NAME"]:
+    payload["custom_domain_name"] = os.environ["CUSTOM_DOMAIN_NAME"]
+    payload["custom_domain_hosted_zone_id"] = os.environ["CUSTOM_DOMAIN_HOSTED_ZONE_ID"]
+
+if os.environ["TLS_CERTIFICATE_ARN"]:
+    payload["tls_certificate_arn"] = os.environ["TLS_CERTIFICATE_ARN"]
+
+if os.environ["CLEAR_CUSTOM_DOMAIN"] == "true":
+    payload["clear_custom_domain"] = True
+
+if os.environ["CLEAR_TLS_CERTIFICATE"] == "true":
+    payload["clear_tls_certificate"] = True
+
+print(json.dumps(payload, separators=(",", ":")))
+PY
+)"
 
 aws lambda invoke \
   --function-name "${FUNCTION_NAME}" \

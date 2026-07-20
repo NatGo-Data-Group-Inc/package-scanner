@@ -10,6 +10,21 @@ param(
   [int]$WaitTimeoutSeconds = 600,
 
   [Parameter(Mandatory = $false)]
+  [string]$CustomDomainName = "",
+
+  [Parameter(Mandatory = $false)]
+  [string]$CustomDomainHostedZoneId = "",
+
+  [Parameter(Mandatory = $false)]
+  [string]$TlsCertificateArn = "",
+
+  [Parameter(Mandatory = $false)]
+  [switch]$ClearCustomDomain,
+
+  [Parameter(Mandatory = $false)]
+  [switch]$ClearTlsCertificate,
+
+  [Parameter(Mandatory = $false)]
   [string]$StackName = "package-scanner-webapp-dev",
 
   [Parameter(Mandatory = $false)]
@@ -47,6 +62,11 @@ $bashArgs = @(
 )
 
 if ($Profile -ne "") { $bashArgs += @("--profile", $Profile) }
+if ($CustomDomainName -ne "") { $bashArgs += @("--custom-domain-name", $CustomDomainName) }
+if ($CustomDomainHostedZoneId -ne "") { $bashArgs += @("--custom-domain-hosted-zone-id", $CustomDomainHostedZoneId) }
+if ($TlsCertificateArn -ne "") { $bashArgs += @("--tls-certificate-arn", $TlsCertificateArn) }
+if ($ClearCustomDomain) { $bashArgs += "--clear-custom-domain" }
+if ($ClearTlsCertificate) { $bashArgs += "--clear-tls-certificate" }
 if ($AllowDefaultProfile) { $bashArgs += "--allow-default-profile" }
 
 & bash $bashScript @bashArgs
