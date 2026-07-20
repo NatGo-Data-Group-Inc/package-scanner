@@ -12,6 +12,9 @@ param(
   [string]$SourceEnvironmentFile = "",
 
   [Parameter(Mandatory = $false)]
+  [string]$SourceRequirementsFile = "",
+
+  [Parameter(Mandatory = $false)]
   [string]$EvidenceBucket = "",
 
   [Parameter(Mandatory = $false)]
@@ -52,6 +55,13 @@ param(
 
   [Parameter(Mandatory = $false)]
   [string]$SafetyApiKey = "",
+
+  [Parameter(Mandatory = $false)]
+  [ValidateSet("environment-yaml", "requirements-lock")]
+  [string]$InputType = "environment-yaml",
+
+  [Parameter(Mandatory = $false)]
+  [bool]$MaterializeAfterScan = $true,
 
   [Parameter(Mandatory = $false)]
   [ValidateSet("all", "linux-only", "linux-amd64", "linux-arm64", "windows-only")]
@@ -181,6 +191,7 @@ $bashArgs = @(
 )
 
 if ($SourceEnvironmentFile -ne "") { $bashArgs += @("--source-environment-file", $SourceEnvironmentFile) }
+if ($SourceRequirementsFile -ne "") { $bashArgs += @("--source-requirements-file", $SourceRequirementsFile) }
 if ($Profile -ne "") { $bashArgs += @("--profile", $Profile) }
 if ($AllowDefaultProfile) { $bashArgs += "--allow-default-profile" }
 if ($ExpectedAccountId -ne "") { $bashArgs += @("--expected-account-id", $ExpectedAccountId) }
@@ -192,6 +203,8 @@ if ($FortifyCommand -ne "") { $bashArgs += @("--fortify-command", $FortifyComman
 $bashArgs += @("--remediate-medium", $RemediateMedium.ToString().ToLowerInvariant())
 $bashArgs += @("--fail-on-medium", $FailOnMedium.ToString().ToLowerInvariant())
 if ($SafetyApiKey -ne "") { $bashArgs += @("--safety-api-key", $SafetyApiKey) }
+$bashArgs += @("--input-type", $InputType)
+$bashArgs += @("--materialize-after-scan", $MaterializeAfterScan.ToString().ToLowerInvariant())
 $bashArgs += @("--platform-set", $PlatformSet)
 
 & $bashExe $bashScriptForBash @bashArgs

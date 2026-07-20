@@ -544,6 +544,8 @@ Resources:
               completed_at = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
               platforms = []
               overall = "SUCCEEDED"
+              input_type = str(event.get("input_type") or "environment-yaml")
+              materialize_after_scan = str(event.get("materialize_after_scan") or "true").lower() == "true"
               for result in event["results"]:
                   platform = result["platform"]
                   status = result["status"]
@@ -556,20 +558,22 @@ Resources:
                   }
                   if status == "SUCCEEDED":
                       required = [
-                          f"{prefix}/requirements/python/{platform}/{run_segment}/environment.yml",
                           f"{prefix}/requirements/python/{platform}/{run_segment}/requirements.lock.txt",
                           f"{prefix}/traceability/python/{platform}/{run_segment}/materialization-summary.json",
                           f"{prefix}/traceability/python/{platform}/{run_segment}/run-metadata.json",
                       ]
+                      if input_type != "requirements-lock" or materialize_after_scan:
+                          required.insert(0, f"{prefix}/requirements/python/{platform}/{run_segment}/environment.yml")
                       missing = [key for key in required if not head_exists(bucket, key)]
                       bundle_prefix = f"{prefix}/packages/offline/python/{platform}/{run_segment}/"
                       bundle_keys = list_keys(bucket, bundle_prefix)
-                      tarballs = [key for key in bundle_keys if key.endswith(".tar.gz")]
-                      checksums = [key for key in bundle_keys if key.endswith(".tar.gz.sha256")]
-                      if not tarballs:
-                          missing.append(f"{bundle_prefix}*.tar.gz")
-                      if not checksums:
-                          missing.append(f"{bundle_prefix}*.tar.gz.sha256")
+                      if input_type != "requirements-lock" or materialize_after_scan:
+                          tarballs = [key for key in bundle_keys if key.endswith(".tar.gz")]
+                          checksums = [key for key in bundle_keys if key.endswith(".tar.gz.sha256")]
+                          if not tarballs:
+                              missing.append(f"{bundle_prefix}*.tar.gz")
+                          if not checksums:
+                              missing.append(f"{bundle_prefix}*.tar.gz.sha256")
                       platform_summary["bundle_keys"] = bundle_keys
                       platform_summary["missing"] = missing
                       platform_summary["validated"] = not missing
@@ -591,6 +595,8 @@ Resources:
                   "overall_status": overall,
                   "input_bucket": event.get("input_bucket"),
                   "input_object_key": event.get("input_object_key"),
+                  "input_type": input_type,
+                  "materialize_after_scan": materialize_after_scan,
                   "input_uri": f"s3://{event['input_bucket']}/{event['input_object_key']}" if event.get("input_bucket") and event.get("input_object_key") else None,
                   "platforms": platforms,
               }
@@ -612,6 +618,8 @@ Resources:
                   "evidence_prefix": prefix,
                   "input_bucket": event.get("input_bucket"),
                   "input_object_key": event.get("input_object_key"),
+                  "input_type": input_type,
+                  "materialize_after_scan": materialize_after_scan,
                   "input_uri": f"s3://{event['input_bucket']}/{event['input_object_key']}" if event.get("input_bucket") and event.get("input_object_key") else None,
                   "platforms": [],
                   "platform_count": len(platforms),
@@ -732,6 +740,8 @@ Resources:
                 "platform.$": "$$.Map.Item.Value",
                 "input_bucket.$": "$.input_bucket",
                 "input_object_key.$": "$.input_object_key",
+                "input_type.$": "$.input_type",
+                "materialize_after_scan.$": "$.materialize_after_scan",
                 "evidence_bucket.$": "$.evidence_bucket",
                 "evidence_prefix.$": "$.evidence_prefix",
                 "ephemeral_bucket.$": "$.ephemeral_bucket",
@@ -787,6 +797,8 @@ Resources:
                             "Environment": [
                               { "Name": "INPUT_BUCKET", "Value.$": "$.input_bucket" },
                               { "Name": "INPUT_OBJECT_KEY", "Value.$": "$.input_object_key" },
+                              { "Name": "INPUT_TYPE", "Value.$": "$.input_type" },
+                              { "Name": "MATERIALIZE_AFTER_SCAN", "Value.$": "$.materialize_after_scan" },
                               { "Name": "EVIDENCE_BUCKET", "Value.$": "$.evidence_bucket" },
                               { "Name": "EVIDENCE_PREFIX", "Value.$": "$.evidence_prefix" },
                               { "Name": "EPHEMERAL_BUCKET", "Value.$": "$.ephemeral_bucket" },
@@ -847,6 +859,8 @@ Resources:
                             "Environment": [
                               { "Name": "INPUT_BUCKET", "Value.$": "$.input_bucket" },
                               { "Name": "INPUT_OBJECT_KEY", "Value.$": "$.input_object_key" },
+                              { "Name": "INPUT_TYPE", "Value.$": "$.input_type" },
+                              { "Name": "MATERIALIZE_AFTER_SCAN", "Value.$": "$.materialize_after_scan" },
                               { "Name": "EVIDENCE_BUCKET", "Value.$": "$.evidence_bucket" },
                               { "Name": "EVIDENCE_PREFIX", "Value.$": "$.evidence_prefix" },
                               { "Name": "EPHEMERAL_BUCKET", "Value.$": "$.ephemeral_bucket" },
@@ -907,6 +921,8 @@ Resources:
                             "Environment": [
                               { "Name": "INPUT_BUCKET", "Value.$": "$.input_bucket" },
                               { "Name": "INPUT_OBJECT_KEY", "Value.$": "$.input_object_key" },
+                              { "Name": "INPUT_TYPE", "Value.$": "$.input_type" },
+                              { "Name": "MATERIALIZE_AFTER_SCAN", "Value.$": "$.materialize_after_scan" },
                               { "Name": "EVIDENCE_BUCKET", "Value.$": "$.evidence_bucket" },
                               { "Name": "EVIDENCE_PREFIX", "Value.$": "$.evidence_prefix" },
                               { "Name": "EPHEMERAL_BUCKET", "Value.$": "$.ephemeral_bucket" },
@@ -972,6 +988,8 @@ Resources:
                   "scan_timestamp.$": "$.scan_timestamp",
                   "input_bucket.$": "$.input_bucket",
                   "input_object_key.$": "$.input_object_key",
+                  "input_type.$": "$.input_type",
+                  "materialize_after_scan.$": "$.materialize_after_scan",
                   "evidence_bucket.$": "$.evidence_bucket",
                   "evidence_prefix.$": "$.evidence_prefix",
                   "results.$": "$.results"

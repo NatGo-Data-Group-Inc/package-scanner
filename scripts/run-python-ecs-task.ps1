@@ -22,6 +22,9 @@ $pythonCpuOnly = if ($env:PYTHON_CPU_ONLY) { $env:PYTHON_CPU_ONLY } else { 'true
 $pythonRestoreEnvCheckpoint = if ($env:PYTHON_RESTORE_ENV_CHECKPOINT) { $env:PYTHON_RESTORE_ENV_CHECKPOINT } else { 'false' }
 $pythonCheckpointIncludePkgs = if ($env:PYTHON_CHECKPOINT_INCLUDE_PKGS) { $env:PYTHON_CHECKPOINT_INCLUDE_PKGS } else { 'false' }
 $pythonCheckpointIncludeEnv = if ($env:PYTHON_CHECKPOINT_INCLUDE_ENV) { $env:PYTHON_CHECKPOINT_INCLUDE_ENV } else { 'false' }
+$inputType = if ($env:INPUT_TYPE) { $env:INPUT_TYPE } else { 'environment-yaml' }
+$materializeAfterScan = if ($env:MATERIALIZE_AFTER_SCAN) { $env:MATERIALIZE_AFTER_SCAN } else { 'true' }
+$requirementsOnlyScan = ($inputType -eq 'requirements-lock')
 $checkpointJob = $null
 
 function Write-State {
@@ -45,9 +48,7 @@ function Write-Checksum {
 
 function Pack-PythonEnv {
   param([string]$OutputFile, [string]$ChecksumFile)
-  if (-not (Test-Path $envPrefix)) {
-    return
-  }
+  if (-not (Test-Path $envPrefix)) { return }
   & $condaPackBin --prefix $envPrefix --output $OutputFile --format tar.gz --ignore-missing-files --force | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "conda-pack failed" }
   Write-Checksum -Path $OutputFile -ChecksumFile $ChecksumFile
@@ -62,12 +63,11 @@ function Restore-PackedPythonEnv {
   & $pythonBin "$scriptRoot\extract-archive.py" --archive $ArchivePath --destination $envPrefix
   if ($LASTEXITCODE -ne 0) { throw "restore packed env failed" }
   $condaUnpack = Join-Path $envPrefix 'Scripts\conda-unpack.exe'
-  if (Test-Path $condaUnpack) {
-    & $condaUnpack | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "conda-unpack failed" }
-  } else {
+  if (-not (Test-Path $condaUnpack)) {
     throw "conda-unpack was not found in restored environment $envPrefix"
   }
+  & $condaUnpack | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "conda-unpack failed" }
 }
 
 function Publish-Checkpoint {
@@ -134,12 +134,53 @@ function Start-CheckpointLoop {
   } -ArgumentList $checkpointIntervalSeconds, $runDir, $rootPrefix, $envPrefix, $checkpointPrefix, $Platform, $runId, $ts, $scriptRoot, $pythonBin, $condaPackBin, $pythonCheckpointIncludePkgs, $pythonCheckpointIncludeEnv
 }
 
+function Render-RequirementsEnvironment {
+  param([string]$RequirementsPath, [string]$EnvironmentPath)
+  & $pythonBin -c @'
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+requirements_path = Path(sys.argv[1])
+environment_path = Path(sys.argv[2])
+packages = []
+for raw in requirements_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+    line = raw.strip()
+    if not line or line.startswith("#"):
+        continue
+    packages.append(line)
+
+payload = {
+    "name": "target",
+    "channels": ["conda-forge"],
+    "dependencies": [
+        "python",
+        "pip",
+        {
+            "pip": packages,
+        },
+    ],
+}
+environment_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+'@ $RequirementsPath $EnvironmentPath
+  if ($LASTEXITCODE -ne 0) { throw "requirements render failed" }
+}
+
 try {
   New-Item -ItemType Directory -Force -Path $runDir, 'C:\scan-input', $rootPrefix | Out-Null
-  aws s3 cp "s3://${env:INPUT_BUCKET}/${env:INPUT_OBJECT_KEY}" "C:\scan-input\environment.yml" | Out-Null
-  Copy-Item "C:\scan-input\environment.yml" "$runDir\environment.yml" -Force
+  $inputFile = Join-Path 'C:\scan-input' ([System.IO.Path]::GetFileName($env:INPUT_OBJECT_KEY))
+  aws s3 cp "s3://${env:INPUT_BUCKET}/${env:INPUT_OBJECT_KEY}" $inputFile | Out-Null
 
-  if ($pythonCpuOnly -eq 'true') {
+  if ($requirementsOnlyScan) {
+    Copy-Item $inputFile "$runDir\requirements.lock.txt" -Force
+    Render-RequirementsEnvironment "$runDir\requirements.lock.txt" "$runDir\environment.yml"
+  } else {
+    Copy-Item $inputFile "$runDir\environment.yml" -Force
+  }
+
+  if (($requirementsOnlyScan -eq $false) -and ($pythonCpuOnly -eq 'true')) {
     Copy-Item "$runDir\environment.yml" "$runDir\environment.original.yml" -Force
     $cpuNormalizationScriptPath = Join-Path $runDir 'cpu-normalize-environment.py'
     $cpuNormalizationScript = @'
@@ -189,29 +230,29 @@ def cpu_tensorflow_spec(spec: str) -> str:
         return f"{parts[0]}={parts[1]}"
     return spec.strip().replace("tensorflow-gpu", "tensorflow")
 
-sanitized: list[str] = []
-removed: list[str] = []
-rewritten: list[str] = []
-conda_package_names: set[str] = set()
+sanitized = []
+removed = []
+rewritten = []
+conda_package_names = set()
 in_pip_section = False
-pip_indent: int | None = None
+pip_indent = None
 
 for line in lines:
     match = dependency_re.match(line)
     if not match:
-      continue
+        continue
     indent = match.group("indent")
     spec = match.group("spec").strip()
     if spec == "pip:":
-      in_pip_section = True
-      pip_indent = len(indent)
-      continue
+        in_pip_section = True
+        pip_indent = len(indent)
+        continue
     if in_pip_section and pip_indent is not None and len(indent) > pip_indent:
-      continue
+        continue
     in_pip_section = False
     name = package_name(spec)
     if name and name != "pip":
-      conda_package_names.add(canonical_package_name(name))
+        conda_package_names.add(canonical_package_name(name))
 
 in_pip_section = False
 pip_indent = None
@@ -219,8 +260,8 @@ pip_indent = None
 for line in lines:
     match = dependency_re.match(line)
     if not match:
-      sanitized.append(line)
-      continue
+        sanitized.append(line)
+        continue
 
     indent = match.group("indent")
     spec = match.group("spec").strip()
@@ -229,28 +270,28 @@ for line in lines:
     canonical_name = canonical_package_name(name)
 
     if spec == "pip:":
-      in_pip_section = True
-      pip_indent = len(indent)
-      sanitized.append(line)
-      continue
+        in_pip_section = True
+        pip_indent = len(indent)
+        sanitized.append(line)
+        continue
 
     in_nested_pip_dependency = in_pip_section and pip_indent is not None and len(indent) > pip_indent
     if not in_nested_pip_dependency:
-      in_pip_section = False
+        in_pip_section = False
 
     if in_nested_pip_dependency and canonical_name in conda_package_names:
-      removed.append(f"{spec} (pip duplicate of conda package)")
-      continue
+        removed.append(f"{spec} (pip duplicate of conda package)")
+        continue
 
     if name.startswith(gpu_package_prefixes):
-      removed.append(spec)
-      continue
+        removed.append(spec)
+        continue
 
     if name in tensorflow_packages and "cuda" in spec.lower():
-      replacement = cpu_tensorflow_spec(spec)
-      rewritten.append(f"{spec} -> {replacement}")
-      sanitized.append(f"{indent}- {replacement}{comment}")
-      continue
+        replacement = cpu_tensorflow_spec(spec)
+        rewritten.append(f"{spec} -> {replacement}")
+        sanitized.append(f"{indent}- {replacement}{comment}")
+        continue
 
     sanitized.append(line)
 
@@ -272,76 +313,84 @@ if removed or rewritten:
     if ($LASTEXITCODE -ne 0) { throw "cpu normalization failed" }
   }
 
-  & $pythonBin "$scriptRoot\plan-python-environment-install.py" --environment-file "$runDir\environment.yml" --run-dir $runDir
-  if ($LASTEXITCODE -ne 0) { throw "planner failed" }
+  if ($requirementsOnlyScan -and $materializeAfterScan -ne 'true') {
+    '[]' | Out-File "$runDir\conda-list.json" -Encoding ascii
+    '' | Out-File "$runDir\restore.log" -Encoding ascii
+    $pythonVersion = & $pythonBin -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')"
+  } else {
+    & $pythonBin "$scriptRoot\plan-python-environment-install.py" --environment-file "$runDir\environment.yml" --run-dir $runDir
+    if ($LASTEXITCODE -ne 0) { throw "planner failed" }
 
-  foreach ($planned in @(
-    "$runDir\environment.conda-core.yml",
-    "$runDir\environment.conda-native.yml",
-    "$runDir\environment.conda-python.yml",
-    "$runDir\environment.pip.requirements.txt",
-    "$runDir\environment.install-plan.json"
-  )) {
-    if (-not (Test-Path $planned)) { throw "planner-error: missing staged install artifact $planned" }
-  }
-
-  try {
-    aws s3 cp "$checkpointPrefix/latest/python-pkgs.tar.gz" "$runDir\checkpoint-python-pkgs.tar.gz" | Out-Null
-    if (Test-Path "$runDir\checkpoint-python-pkgs.tar.gz") {
-      $pkgsDir = Join-Path $rootPrefix 'pkgs'
-      New-Item -ItemType Directory -Force -Path $pkgsDir | Out-Null
-      & $pythonBin "$scriptRoot\extract-archive.py" --archive "$runDir\checkpoint-python-pkgs.tar.gz" --destination $pkgsDir
-      Remove-Item "$runDir\checkpoint-python-pkgs.tar.gz" -Force -ErrorAction SilentlyContinue
+    foreach ($planned in @(
+      "$runDir\environment.conda-core.yml",
+      "$runDir\environment.conda-native.yml",
+      "$runDir\environment.conda-python.yml",
+      "$runDir\environment.pip.requirements.txt",
+      "$runDir\environment.install-plan.json"
+    )) {
+      if (-not (Test-Path $planned)) { throw "planner-error: missing staged install artifact $planned" }
     }
-  } catch {}
 
-  if ($pythonRestoreEnvCheckpoint -eq 'true') {
     try {
-      aws s3 cp "$checkpointPrefix/latest/python-env.tar.gz" "$runDir\checkpoint-python-env.tar.gz" | Out-Null
-      if (Test-Path "$runDir\checkpoint-python-env.tar.gz") {
-        Restore-PackedPythonEnv "$runDir\checkpoint-python-env.tar.gz"
-        Remove-Item "$runDir\checkpoint-python-env.tar.gz" -Force -ErrorAction SilentlyContinue
+      aws s3 cp "$checkpointPrefix/latest/python-pkgs.tar.gz" "$runDir\checkpoint-python-pkgs.tar.gz" | Out-Null
+      if (Test-Path "$runDir\checkpoint-python-pkgs.tar.gz") {
+        $pkgsDir = Join-Path $rootPrefix 'pkgs'
+        New-Item -ItemType Directory -Force -Path $pkgsDir | Out-Null
+        & $pythonBin "$scriptRoot\extract-archive.py" --archive "$runDir\checkpoint-python-pkgs.tar.gz" --destination $pkgsDir
+        Remove-Item "$runDir\checkpoint-python-pkgs.tar.gz" -Force -ErrorAction SilentlyContinue
       }
     } catch {}
+
+    if ($pythonRestoreEnvCheckpoint -eq 'true') {
+      try {
+        aws s3 cp "$checkpointPrefix/latest/python-env.tar.gz" "$runDir\checkpoint-python-env.tar.gz" | Out-Null
+        if (Test-Path "$runDir\checkpoint-python-env.tar.gz") {
+          Restore-PackedPythonEnv "$runDir\checkpoint-python-env.tar.gz"
+          Remove-Item "$runDir\checkpoint-python-env.tar.gz" -Force -ErrorAction SilentlyContinue
+        }
+      } catch {}
+    }
+
+    Write-State -Phase 'materialize'
+    Start-CheckpointLoop
+
+    & {
+      if (Test-Path $envPrefix) {
+        & $mambaBin env update -r $rootPrefix -n target -f "$runDir\environment.conda-core.yml"
+      } else {
+        & $mambaBin create -r $rootPrefix -y -n target -f "$runDir\environment.conda-core.yml"
+      }
+      if ($LASTEXITCODE -ne 0) { throw "conda core stage failed" }
+
+      if ((Get-Item "$runDir\environment.conda-native.yml").Length -gt 0) {
+        & $mambaBin env update -r $rootPrefix -n target -f "$runDir\environment.conda-native.yml"
+        if ($LASTEXITCODE -ne 0) { throw "conda native stage failed" }
+      }
+
+      if ((Get-Item "$runDir\environment.conda-python.yml").Length -gt 0) {
+        & $mambaBin env update -r $rootPrefix -n target -f "$runDir\environment.conda-python.yml"
+        if ($LASTEXITCODE -ne 0) { throw "conda python stage failed" }
+      }
+
+      if ((Get-Item "$runDir\environment.pip.requirements.txt").Length -gt 0) {
+        & $mambaBin run -r $rootPrefix -n target python -m pip install --no-cache-dir --no-input -r "$runDir\environment.pip.requirements.txt"
+        if ($LASTEXITCODE -ne 0) { throw "pip stage failed" }
+      }
+    } *>&1 | Tee-Object -FilePath "$runDir\restore.log"
+
+    Stop-CheckpointLoop
+    Publish-Checkpoint -Phase 'restored'
+
+    $pythonVersion = & $mambaBin run -r $rootPrefix -n target python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')"
+    & $mambaBin run -r $rootPrefix -n target python -m pip list --format=freeze | Out-File "$runDir\requirements.lock.txt" -Encoding ascii
+    & $mambaBin list -r $rootPrefix -n target --json | Out-File "$runDir\conda-list.json" -Encoding ascii
+    $envPrefix | Out-File "$runDir\env-prefix.txt" -Encoding ascii
   }
 
-  Write-State -Phase 'materialize'
-  Start-CheckpointLoop
-
-  & {
-    if (Test-Path $envPrefix) {
-      & $mambaBin env update -r $rootPrefix -n target -f "$runDir\environment.conda-core.yml"
-    } else {
-      & $mambaBin create -r $rootPrefix -y -n target -f "$runDir\environment.conda-core.yml"
-    }
-    if ($LASTEXITCODE -ne 0) { throw "conda core stage failed" }
-
-    if ((Get-Item "$runDir\environment.conda-native.yml").Length -gt 0) {
-      & $mambaBin env update -r $rootPrefix -n target -f "$runDir\environment.conda-native.yml"
-      if ($LASTEXITCODE -ne 0) { throw "conda native stage failed" }
-    }
-
-    if ((Get-Item "$runDir\environment.conda-python.yml").Length -gt 0) {
-      & $mambaBin env update -r $rootPrefix -n target -f "$runDir\environment.conda-python.yml"
-      if ($LASTEXITCODE -ne 0) { throw "conda python stage failed" }
-    }
-
-    if ((Get-Item "$runDir\environment.pip.requirements.txt").Length -gt 0) {
-      & $mambaBin run -r $rootPrefix -n target python -m pip install --no-cache-dir --no-input -r "$runDir\environment.pip.requirements.txt"
-      if ($LASTEXITCODE -ne 0) { throw "pip stage failed" }
-    }
-  } *>&1 | Tee-Object -FilePath "$runDir\restore.log"
-
-  Stop-CheckpointLoop
-  Publish-Checkpoint -Phase 'restored'
-
-  $pythonVersion = & $mambaBin run -r $rootPrefix -n target python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')"
-  & $mambaBin run -r $rootPrefix -n target python -m pip list --format=freeze | Out-File "$runDir\requirements.lock.txt" -Encoding ascii
-  & $mambaBin list -r $rootPrefix -n target --json | Out-File "$runDir\conda-list.json" -Encoding ascii
-  $envPrefix | Out-File "$runDir\env-prefix.txt" -Encoding ascii
-  & $pythonBin "$scriptRoot\generate-python-materialization-summary.py" --run-dir $runDir --platform $Platform --python-version $pythonVersion --root-prefix $rootPrefix --env-prefix $envPrefix
+  & $pythonBin "$scriptRoot\generate-python-materialization-summary.py" --run-dir $runDir --platform $Platform --python-version $pythonVersion --root-prefix $rootPrefix --env-prefix $envPrefix --input-type $inputType
   $materializationValidationExit = 0
-  & $pythonBin -c @'
+  if ((-not $requirementsOnlyScan) -or $materializeAfterScan -eq 'true') {
+    & $pythonBin -c @'
 from __future__ import annotations
 
 import json
@@ -366,7 +415,8 @@ if missing_conda or missing_pip:
     )
     raise SystemExit(4)
 '@ "$runDir\materialization-summary.json"
-  if ($LASTEXITCODE -ne 0) { $materializationValidationExit = $LASTEXITCODE }
+    if ($LASTEXITCODE -ne 0) { $materializationValidationExit = $LASTEXITCODE }
+  }
 
   Write-State -Phase 'analysis'
   try {
@@ -381,20 +431,35 @@ if missing_conda or missing_pip:
       & safety --key $env:SAFETY_API_KEY scan --file "$runDir\requirements.lock.txt" --output json | Out-File "$runDir\safety-report.json" -Encoding ascii
     } catch {}
   }
+
   $govExit = 0
   Write-State -Phase 'governance'
   & $pythonBin "$scriptRoot\generate-governance-artifacts.py" --run-dir $runDir --platform $Platform --remediate-medium $env:REMEDIATE_MEDIUM --fail-on-medium $env:FAIL_ON_MEDIUM
   if ($LASTEXITCODE -ne 0) { $govExit = $LASTEXITCODE }
 
   Write-State -Phase 'publish'
-  & $pythonBin "$scriptRoot\bundle-directory.py" --source-dir "$rootPrefix\pkgs" --output-file "$runDir\python-pkgs-$Platform-$ts.tar.gz" --checksum-file "$runDir\python-pkgs-$Platform-$ts.tar.gz.sha256"
-  Pack-PythonEnv "$runDir\python-env-$Platform-$ts.tar.gz" "$runDir\python-env-$Platform-$ts.tar.gz.sha256"
+  $pkgsDir = Join-Path $rootPrefix 'pkgs'
+  if (Test-Path $pkgsDir) {
+    & $pythonBin "$scriptRoot\bundle-directory.py" --source-dir $pkgsDir --output-file "$runDir\python-pkgs-$Platform-$ts.tar.gz" --checksum-file "$runDir\python-pkgs-$Platform-$ts.tar.gz.sha256"
+  }
+  if ((-not $requirementsOnlyScan) -or $materializeAfterScan -eq 'true') {
+    Pack-PythonEnv "$runDir\python-env-$Platform-$ts.tar.gz" "$runDir\python-env-$Platform-$ts.tar.gz.sha256"
+  }
+
+  $environmentArtifacts = @('requirements.lock.txt', 'python-packages.cdx.json', 'materialization-summary.json')
+  if (Test-Path "$runDir\environment.yml") { $environmentArtifacts = @('environment.yml') + $environmentArtifacts }
+  if (Test-Path "$runDir\conda-list.json") { $environmentArtifacts += 'conda-list.json' }
+  foreach ($optional in @('environment.original.yml', 'environment.cpu-normalization.log')) {
+    if (Test-Path (Join-Path $runDir $optional)) { $environmentArtifacts += $optional }
+  }
   try {
-    tar -czf "$runDir\environment-artifacts.tar.gz" -C $runDir environment.yml requirements.lock.txt conda-list.json python-packages.cdx.json materialization-summary.json
+    tar -czf "$runDir\environment-artifacts.tar.gz" -C $runDir @environmentArtifacts
   } catch {}
 
   aws s3 cp "$runDir\" "s3://${env:EPHEMERAL_BUCKET}/${env:EPHEMERAL_PREFIX}/$Platform/$ts/" --recursive | Out-Null
-  aws s3 cp "$runDir\environment.yml" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/requirements/python/$Platform/$evidenceRunSegment/environment.yml" | Out-Null
+  Upload-IfExists "$runDir\environment.yml" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/requirements/python/$Platform/$evidenceRunSegment/environment.yml"
+  Upload-IfExists "$runDir\environment.original.yml" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/requirements/python/$Platform/$evidenceRunSegment/environment.original.yml"
+  Upload-IfExists "$runDir\environment.cpu-normalization.log" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/requirements/python/$Platform/$evidenceRunSegment/environment.cpu-normalization.log"
   Upload-IfExists "$runDir\requirements.lock.txt" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/requirements/python/$Platform/$evidenceRunSegment/requirements.lock.txt"
   Upload-IfExists "$runDir\approval-candidate-packages.csv" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/requirements/python/$Platform/$evidenceRunSegment/approval-candidate-packages.csv"
   Upload-IfExists "$runDir\python-packages.cdx.json" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/env-artifacts/python/$Platform/$evidenceRunSegment/python-packages.cdx.json"
@@ -414,11 +479,12 @@ if missing_conda or missing_pip:
   Upload-IfExists "$runDir\python-pkgs-$Platform-$ts.tar.gz.sha256" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/packages/offline/python/$Platform/$evidenceRunSegment/python-pkgs-$Platform-$ts.tar.gz.sha256"
   Upload-IfExists "$runDir\python-env-$Platform-$ts.tar.gz" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/env-artifacts/python/$Platform/$evidenceRunSegment/python-env-$Platform-$ts.tar.gz"
   Upload-IfExists "$runDir\python-env-$Platform-$ts.tar.gz.sha256" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/env-artifacts/python/$Platform/$evidenceRunSegment/python-env-$Platform-$ts.tar.gz.sha256"
-  $metaJson = "{`"platform`":`"$Platform`",`"timestamp_utc`":`"$ts`",`"scan_execution_id`":`"$runId`",`"python_version`":`"$pythonVersion`",`"ephemeral_prefix`":`"${env:EPHEMERAL_PREFIX}/$Platform/$ts`",`"offline_bundle_prefix`":`"${env:EVIDENCE_PREFIX}/packages/offline/python/$Platform/$evidenceRunSegment`",`"cleanup`":`"requested`"}"
+  $metaJson = "{`"platform`":`"$Platform`",`"timestamp_utc`":`"$ts`",`"scan_execution_id`":`"$runId`",`"python_version`":`"$pythonVersion`",`"input_type`":`"$inputType`",`"materialize_after_scan`":`"$materializeAfterScan`",`"ephemeral_prefix`":`"${env:EPHEMERAL_PREFIX}/$Platform/$ts`",`"offline_bundle_prefix`":`"${env:EVIDENCE_PREFIX}/packages/offline/python/$Platform/$evidenceRunSegment`",`"cleanup`":`"requested`"}"
   $metaJson | Out-File "$runDir\run-metadata.json" -Encoding ascii
   aws s3 cp "$runDir\run-metadata.json" "s3://${env:EVIDENCE_BUCKET}/${env:EVIDENCE_PREFIX}/traceability/python/$Platform/$evidenceRunSegment/run-metadata.json" | Out-Null
   Write-State -Phase 'completed'
   aws s3 cp "$runDir\stage-state.json" "$checkpointPrefix/latest/stage-state.json" | Out-Null
+
   if ($govExit -ne 0) { throw "Governance gate failed with exit $govExit" }
   if ($materializationValidationExit -ne 0) { throw "Materialization validation failed with exit $materializationValidationExit" }
 } catch {

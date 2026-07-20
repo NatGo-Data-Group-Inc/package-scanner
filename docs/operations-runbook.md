@@ -25,7 +25,9 @@ Use [handoff-runbook.md](./handoff-runbook.md) as the primary day-to-day operato
 ### Start Python Scan
 
 - Use `scripts/start-python-scan.sh`.
-- Ensure `environment.yml` is uploaded first.
+- Ensure the correct Python input type is uploaded first:
+  - `environment.yml` for a `Blueprint` scan
+  - `requirements.txt` for a `Locked` scan
 - For ECS-backed scans, the launcher now performs a prescan capacity guard on
   the target worker ASG. If `MinSize` or `DesiredCapacity` is below `1`, the
   script raises it to `1` before starting the scan and waits for at least one
@@ -53,12 +55,20 @@ python3 scripts/build-candidate-from-env-artifacts.py \
   `--target-subdir linux-64` so the Conda availability probe checks the Linux
   index rather than the local Windows subdir.
 - The generated candidate YAML is a normalized package request for this
-  pipeline, not an exact lockfile. If you need to reproduce the realized build
-  exactly, scan the exported `environment.yml` directly instead of relying on
-  the normalized candidate to preserve every build pin.
-- For local YAML files under `candidates/`, the webapp also provides a
-  `Candidates` page. Use that page to upload the selected YAML and start a
-  Python ECS scan without manually pre-populating checkpoint or ephemeral
+  pipeline, not an exact lockfile. Treat it as a `Blueprint`, not a locked
+  package set. If you need to reproduce the realized build exactly, use the
+  exported pinned `requirements.txt` as a `Locked` candidate or scan the
+  exported `environment.yml` directly instead of relying on the normalized
+  candidate to preserve every build pin.
+- The webapp `Candidates` page now groups Python candidates by name and
+  distinguishes:
+  - `Blueprint`: `environment.yml`
+  - `Locked`: `requirements.txt`
+- Candidate artifacts can come from:
+  - local repo files under `candidates/`
+  - S3 input objects under `inputs/python/candidates/<candidate-name>/...`
+- The page supports view/edit and upload for both artifact types, and can start
+  either scan mode without manually pre-populating checkpoint or ephemeral
   paths.
 - The candidate-start GUI path resolves the input, evidence, ephemeral buckets,
   and Linux ECS state machine from the Python ECS CloudFormation stack at submit
@@ -72,6 +82,10 @@ python3 scripts/build-candidate-from-env-artifacts.py \
 - For CPU-only MIP workers, Python ECS materialization normalizes GPU/CUDA-pinned
   candidate specs before solving and retains both the original YAML and the
   normalization log in the evidence bundle.
+- For `Locked` Python scans, the initial run can complete without generating a
+  relocatable environment bundle. If a later enclave handoff or reproducibility
+  step requires artifacts, use the Python run detail page to trigger the
+  deferred artifact build from the already-scanned locked requirements set.
 
 Current Python Linux runtime expectations:
 - The active Linux scanner image is built on `ubuntu:24.04`, not Amazon Linux.

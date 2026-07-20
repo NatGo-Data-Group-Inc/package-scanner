@@ -81,6 +81,18 @@ def load_requested_packages(environment_path: Path) -> tuple[list[str], list[str
     return sorted(set(conda_requested)), sorted(set(pip_requested))
 
 
+def load_requested_requirements(requirements_path: Path) -> list[str]:
+    if not requirements_path.exists():
+        return []
+    requested: list[str] = []
+    for raw in requirements_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        requested.append(package_name(line))
+    return sorted(set(requested))
+
+
 def load_conda_package_names(conda_list_path: Path) -> list[str]:
     if not conda_list_path.exists():
         return []
@@ -131,13 +143,18 @@ def main() -> int:
     parser.add_argument("--python-version", required=True)
     parser.add_argument("--root-prefix", required=True)
     parser.add_argument("--env-prefix", required=True)
+    parser.add_argument("--input-type", default="environment-yaml")
     args = parser.parse_args()
 
     run_dir = Path(args.run_dir)
     requirements_path = run_dir / "requirements.lock.txt"
     conda_list_path = run_dir / "conda-list.json"
     environment_path = run_dir / "environment.yml"
-    requested_conda_packages, requested_pip_packages = load_requested_packages(environment_path)
+    if args.input_type == "requirements-lock":
+        requested_conda_packages = []
+        requested_pip_packages = load_requested_requirements(requirements_path)
+    else:
+        requested_conda_packages, requested_pip_packages = load_requested_packages(environment_path)
     realized_conda_packages = load_conda_package_names(conda_list_path)
     realized_pip_packages = load_pip_package_names(requirements_path)
     realized_package_names = set(realized_conda_packages) | set(realized_pip_packages)
@@ -150,6 +167,7 @@ def main() -> int:
     summary = {
         "platform": args.platform,
         "python_version": args.python_version,
+        "input_type": args.input_type,
         "requirements_lock_sha256": sha256_text(requirements_path) if requirements_path.exists() else "",
         "environment_yml_sha256": sha256_text(environment_path) if environment_path.exists() else "",
         "pip_package_count": count_packages(requirements_path),

@@ -48,7 +48,8 @@ python scripts/promote-scan-run.py \
 
 ## Flask Browser
 
-The Flask browser is a read-only view over the catalog:
+The Flask browser is a read/write operator surface over the catalog and Python
+candidate inputs:
 
 ```bash
 ./scripts/start-webapp.sh \
@@ -59,6 +60,25 @@ The Flask browser is a read-only view over the catalog:
 This wrapper starts the local webapp behind `gunicorn` and uses a dedicated
 writable AWS home under `/tmp` so refreshed SSO credentials can be copied in
 cleanly.
+
+Python `Candidates` page behavior:
+
+- Python candidates are grouped by candidate name.
+- Each candidate can have up to two attached artifact types:
+  - `Blueprint`: `environment.yml`
+  - `Locked`: `requirements.txt`
+- `Blueprint` is the build/materialize + scan path.
+- `Locked` is the scan-first path for exact pinned pip versions. It does not
+  require environment artifact generation during the initial scan.
+- Candidate artifacts can be discovered from either:
+  - local repo files under `candidates/`
+  - S3 inputs under `inputs/python/candidates/<candidate-name>/...`
+- The page supports:
+  - viewing/editing local and S3-backed candidate artifacts
+  - uploading `environment.yml` or `requirements.txt` artifacts to local or S3
+  - starting either scan mode from the browser
+- For successful `Locked` scans, the Python run detail page can trigger a
+  separate follow-up build to generate relocatable environment artifacts later.
 
 AWS-hosted deployment is now scaffolded separately from the scanner workers:
 

@@ -1216,6 +1216,22 @@ def create_app() -> Flask:
         record = attach_input_context(ecosystem, record)
         for platform in record.get("platforms", []):
             paths = platform.setdefault("paths", {})
+            run_metadata = {}
+            run_metadata_key = paths.get("run_metadata_key")
+            if run_metadata_key:
+                run_metadata = s3_get_json_optional(record["evidence_bucket"], run_metadata_key) or {}
+            platform["run_metadata"] = run_metadata
+            platform["requirements_only_scan"] = ecosystem == "python" and str(run_metadata.get("input_type") or "").strip() == "requirements-lock"
+            if platform["requirements_only_scan"]:
+                platform["artifacts_requested"] = str(run_metadata.get("materialize_after_scan") or "").strip().lower() == "true"
+            else:
+                platform["artifacts_requested"] = True
+            platform["supports_artifact_build"] = bool(
+                ecosystem == "python"
+                and platform["requirements_only_scan"]
+                and not platform["artifacts_requested"]
+                and str(platform.get("status") or "").upper() == "SUCCEEDED"
+            )
             governance_prefix = paths.get("governance_prefix")
             model_results_prefix = paths.get("model_results_prefix")
             if governance_prefix:
@@ -1677,24 +1693,174 @@ def create_app() -> Flask:
                 return str(item.get("Value") or "")
         return ""
 
-    def candidate_files() -> list[dict]:
-        candidates_dir = repo_root() / "candidates"
-        if not candidates_dir.exists():
-            return []
-        rows = []
-        for path in sorted([*candidates_dir.glob("*.yml"), *candidates_dir.glob("*.yaml")]):
-            rows.append(
-                {
-                    "name": path.stem,
-                    "filename": path.name,
-                    "size": path.stat().st_size,
-                    "ecosystem": "python",
-                }
-            )
-        return rows
+    def python_input_bucket_name() -> str:
+        stack = describe_stack(app.config["PYTHON_STACK_NAME"])
+        return stack_output_value(stack, "InputBucketName")
 
-    def active_python_candidate_runs() -> dict[str, dict]:
-        active_by_candidate: dict[str, dict] = {}
+    def register_candidate(rows: dict[tuple[str, str], dict], row: dict) -> None:
+        key = (row["name"], row["input_kind"])
+        existing = rows.get(key)
+        if existing and existing.get("source") == "local":
+            return
+        rows[key] = row
+
+    def candidate_files(include_remote: bool = True) -> list[dict]:
+        rows: dict[tuple[str, str], dict] = {}
+        candidates_dir = repo_root() / "candidates"
+        if candidates_dir.exists():
+            for path in sorted([*candidates_dir.glob("*.yml"), *candidates_dir.glob("*.yaml")]):
+                register_candidate(
+                    rows,
+                    {
+                        "name": path.stem,
+                        "filename": path.name,
+                        "size": path.stat().st_size,
+                        "ecosystem": "python",
+                        "input_kind": "environment-yaml",
+                        "scan_action": "full-build-scan",
+                        "start_path": f"/candidates/python/{path.stem}/start",
+                        "start_button_label": "Start Full Build + Scan",
+                        "description": "Build the environment from environment.yml, then scan and publish artifacts.",
+                        "source": "local",
+                    },
+                )
+            for path in sorted(candidates_dir.glob("*.requirements.txt")):
+                name = path.name[: -len(".requirements.txt")]
+                register_candidate(
+                    rows,
+                    {
+                        "name": name,
+                        "filename": path.name,
+                        "size": path.stat().st_size,
+                        "ecosystem": "python",
+                        "input_kind": "requirements-lock",
+                        "scan_action": "requirements-scan",
+                        "start_path": f"/candidates/python/{name}/start-requirements",
+                        "start_button_label": "Scan Existing requirements.txt",
+                        "description": "Scan the provided pip requirements set now and defer environment artifact builds until requested.",
+                        "source": "local",
+                    },
+                )
+
+        if include_remote:
+            try:
+                input_bucket = python_input_bucket_name()
+                if input_bucket:
+                    prefix = "inputs/python/candidates/"
+                    token = None
+                    while True:
+                        page = s3_list_page(
+                            input_bucket,
+                            prefix,
+                            region=app.config["AWS_REGION"],
+                            profile=app.config["AWS_PROFILE"],
+                            max_keys=200,
+                            continuation_token=token,
+                        )
+                        for key in page["keys"]:
+                            if not key.startswith(prefix):
+                                continue
+                            if key.endswith("/environment.yml"):
+                                name = key[len(prefix):].split("/", 1)[0]
+                                register_candidate(
+                                    rows,
+                                    {
+                                        "name": name,
+                                        "filename": key.rsplit("/", 1)[-1],
+                                        "size": None,
+                                        "ecosystem": "python",
+                                        "input_kind": "environment-yaml",
+                                        "scan_action": "full-build-scan",
+                                        "start_path": f"/candidates/python/{name}/start",
+                                        "start_button_label": "Start Full Build + Scan",
+                                        "description": "Build the environment from environment.yml, then scan and publish artifacts.",
+                                        "source": "s3",
+                                        "s3_bucket": input_bucket,
+                                        "s3_key": key,
+                                    },
+                                )
+                            elif key.endswith("/requirements.txt") or key.endswith("/requirements.lock.requirements.txt"):
+                                name = key[len(prefix):].split("/", 1)[0]
+                                register_candidate(
+                                    rows,
+                                    {
+                                        "name": name,
+                                        "filename": key.rsplit("/", 1)[-1],
+                                        "size": None,
+                                        "ecosystem": "python",
+                                        "input_kind": "requirements-lock",
+                                        "scan_action": "requirements-scan",
+                                        "start_path": f"/candidates/python/{name}/start-requirements",
+                                        "start_button_label": "Scan Existing requirements.txt",
+                                        "description": "Scan the provided pip requirements set now and defer environment artifact builds until requested.",
+                                        "source": "s3",
+                                        "s3_bucket": input_bucket,
+                                        "s3_key": key,
+                                    },
+                                )
+                        if not page["is_truncated"]:
+                            break
+                        token = page["next_continuation_token"]
+            except AwsAuthExpiredError:
+                raise
+            except Exception as exc:
+                app.logger.warning("s3 candidate discovery failed error=%s", exc)
+
+        return sorted(rows.values(), key=lambda row: (row["name"], row["input_kind"], row["filename"]))
+
+    def candidate_groups(include_remote: bool = True) -> list[dict]:
+        groups: dict[str, dict] = {}
+        for artifact in candidate_files(include_remote=include_remote):
+            group = groups.setdefault(
+                artifact["name"],
+                {
+                    "name": artifact["name"],
+                    "ecosystem": "python",
+                    "environment": None,
+                    "requirements": None,
+                },
+            )
+            if artifact["input_kind"] == "environment-yaml":
+                group["environment"] = artifact
+            elif artifact["input_kind"] == "requirements-lock":
+                group["requirements"] = artifact
+        return sorted(groups.values(), key=lambda row: row["name"])
+
+    def resolve_python_candidate_source(candidate_name: str, input_kind: str, preferred_source: str | None = None) -> dict | None:
+        safe_name = candidate_name.strip()
+        if not safe_name or "/" in safe_name or "\\" in safe_name:
+            return None
+        local_candidate = None
+        if input_kind == "requirements-lock":
+            local_path = repo_root() / "candidates" / f"{safe_name}.requirements.txt"
+            if local_path.exists():
+                local_candidate = {"source": "local", "path": local_path, "input_object_key": f"inputs/python/candidates/{safe_name}/requirements.lock.requirements.txt"}
+        else:
+            local_path = repo_root() / "candidates" / f"{safe_name}.yml"
+            if not local_path.exists():
+                local_path = repo_root() / "candidates" / f"{safe_name}.yaml"
+            if local_path.exists():
+                local_candidate = {"source": "local", "path": local_path, "input_object_key": f"inputs/python/candidates/{safe_name}/environment.yml"}
+
+        if preferred_source == "local":
+            return local_candidate
+        if local_candidate and preferred_source != "s3":
+            return local_candidate
+
+        s3_candidate = None
+        for candidate in candidate_files():
+            if candidate.get("name") == safe_name and candidate.get("input_kind") == input_kind and candidate.get("source") == "s3":
+                s3_candidate = {"source": "s3", "input_object_key": candidate.get("s3_key"), "s3_bucket": candidate.get("s3_bucket")}
+                break
+
+        if preferred_source == "s3" and s3_candidate:
+            return s3_candidate
+        if preferred_source == "local" and local_candidate:
+            return local_candidate
+        return local_candidate or s3_candidate
+
+    def active_python_candidate_runs() -> dict[tuple[str, str], dict]:
+        active_by_candidate: dict[tuple[str, str], dict] = {}
         for execution in live_running_execution_map("python").values():
             execution_arn = str(execution.get("executionArn") or "")
             execution_input = parse_execution_input(execution_arn) if execution_arn else {}
@@ -1706,26 +1872,81 @@ def create_app() -> Flask:
             candidate_name = remainder.split("/", 1)[0]
             if not candidate_name:
                 continue
-            active_by_candidate[candidate_name] = {
+            input_kind = "requirements-lock" if input_key.endswith(".requirements.txt") else "environment-yaml"
+            active_by_candidate[(candidate_name, input_kind)] = {
                 "execution_id": execution.get("name"),
                 "execution_arn": execution_arn,
                 "status": execution.get("status") or "RUNNING",
                 "started_at": execution.get("startDate"),
                 "started_display": format_display_datetime(execution.get("startDate")),
                 "input_object_key": input_key,
+                "input_kind": input_kind,
             }
         return active_by_candidate
 
-    def candidate_files_with_active_state() -> list[dict]:
+    def candidate_groups_with_active_state() -> list[dict]:
         active_by_candidate = active_python_candidate_runs()
-        rows = []
-        for candidate in candidate_files():
+        groups = []
+        for candidate in candidate_groups():
             row = dict(candidate)
-            active_run = active_by_candidate.get(row["name"])
-            row["active_run"] = active_run
-            row["start_disabled"] = active_run is not None
-            rows.append(row)
-        return rows
+            for field_name in ("environment", "requirements"):
+                artifact = row.get(field_name)
+                if not artifact:
+                    continue
+                artifact_row = dict(artifact)
+                active_run = active_by_candidate.get((artifact_row["name"], artifact_row["input_kind"]))
+                artifact_row["active_run"] = active_run
+                artifact_row["start_disabled"] = active_run is not None
+                artifact_row["edit_path"] = f"/candidates/python/{artifact_row['name']}/{field_name}/edit?source={artifact_row.get('source', 'local')}"
+                row[field_name] = artifact_row
+            groups.append(row)
+        return groups
+
+    def candidate_artifact_details(candidate_name: str, artifact_name: str, source: str | None = None) -> tuple[str, dict]:
+        artifact_map = {
+            "environment": "environment-yaml",
+            "requirements": "requirements-lock",
+        }
+        input_kind = artifact_map.get(artifact_name)
+        if not input_kind:
+            abort(404)
+        candidate_source = resolve_python_candidate_source(candidate_name, input_kind, preferred_source=source)
+        if not candidate_source:
+            abort(404)
+        return input_kind, candidate_source
+
+    def load_candidate_artifact_text(candidate_source: dict) -> str:
+        if candidate_source.get("source") == "local":
+            return Path(candidate_source["path"]).read_text(encoding="utf-8")
+        bucket = str(candidate_source.get("s3_bucket") or "").strip() or python_input_bucket_name()
+        key = str(candidate_source.get("input_object_key") or "").strip()
+        if not bucket or not key:
+            raise RuntimeError("Candidate S3 source is incomplete.")
+        return s3_get_bytes(
+            bucket,
+            key,
+            region=app.config["AWS_REGION"],
+            profile=app.config["AWS_PROFILE"],
+        ).decode("utf-8-sig", errors="ignore")
+
+    def save_candidate_artifact_text(candidate_source: dict, input_kind: str, content: str) -> None:
+        normalized = content if content.endswith("\n") else f"{content}\n"
+        if candidate_source.get("source") == "local":
+            path = Path(candidate_source["path"])
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(normalized, encoding="utf-8")
+            return
+        bucket = str(candidate_source.get("s3_bucket") or "").strip() or python_input_bucket_name()
+        key = str(candidate_source.get("input_object_key") or "").strip()
+        content_type = "text/plain" if input_kind == "requirements-lock" else "application/x-yaml"
+        s3_put_bytes(
+            bucket,
+            key,
+            normalized.encode("utf-8"),
+            region=app.config["AWS_REGION"],
+            profile=app.config["AWS_PROFILE"],
+            content_type=content_type,
+        )
 
     def input_artifact_group(ecosystem: str, bucket: str | None, key: str | None) -> dict:
         artifact_key = str(key or "").strip()
@@ -1927,7 +2148,10 @@ def create_app() -> Flask:
             return group
 
         for candidate in candidate_files():
-            key = f"inputs/python/candidates/{candidate['name']}/environment.yml"
+            if candidate.get("input_kind") == "requirements-lock":
+                key = f"inputs/python/candidates/{candidate['name']}/requirements.lock.requirements.txt"
+            else:
+                key = f"inputs/python/candidates/{candidate['name']}/environment.yml"
             group = ensure_group("python", "", key)
             group["local_filename"] = candidate["filename"]
 
@@ -2372,35 +2596,141 @@ def create_app() -> Flask:
     def candidates():
         auth_error = None
         history = []
+        candidates = []
+        message = str(request.args.get("message") or "").strip()
         try:
+            candidates = candidate_groups_with_active_state()
             history = candidate_history()
         except AwsAuthExpiredError as exc:
             auth_error = str(exc)
+            candidates = candidate_groups(include_remote=False)
         except Exception as exc:
             app.logger.warning("candidate history lookup failed error=%s", exc)
         return render_template(
             "candidates.html",
-            candidates=candidate_files_with_active_state(),
+            candidates=candidates,
             history=history,
             auth_error=auth_error,
+            message=message,
         )
+
+    @app.route("/candidates/python/<candidate_name>/<artifact_name>/edit", methods=["GET", "POST"])
+    def edit_python_candidate_artifact(candidate_name: str, artifact_name: str):
+        source = str(request.args.get("source") or request.form.get("source") or "").strip().lower() or None
+        input_kind, candidate_source = candidate_artifact_details(candidate_name, artifact_name, source)
+        if request.method == "POST":
+            content = str(request.form.get("content") or "")
+            save_candidate_artifact_text(candidate_source, input_kind, content)
+            return redirect("/candidates?message=Candidate+artifact+saved")
+        content = load_candidate_artifact_text(candidate_source)
+        return render_template(
+            "candidate_editor.html",
+            candidate_name=candidate_name,
+            artifact_name=artifact_name,
+            input_kind=input_kind,
+            source=candidate_source.get("source", "local"),
+            input_object_key=candidate_source.get("input_object_key", ""),
+            content=content,
+        )
+
+    @app.route("/candidates/python/upload", methods=["POST"])
+    def upload_python_candidate_artifact():
+        candidate_name = str(request.form.get("candidate_name") or "").strip()
+        artifact_name = str(request.form.get("artifact_name") or "").strip()
+        destination = str(request.form.get("destination") or "s3").strip().lower()
+        upload = request.files.get("artifact_file")
+        if not candidate_name or "/" in candidate_name or "\\" in candidate_name:
+            abort(400, "A valid candidate name is required")
+        if artifact_name not in {"environment", "requirements"}:
+            abort(400, "Unsupported candidate artifact type")
+        if destination not in {"local", "s3"}:
+            abort(400, "Unsupported upload destination")
+        if upload is None or not upload.filename:
+            abort(400, "A file upload is required")
+
+        payload = upload.read()
+        if not payload:
+            abort(400, "Uploaded file was empty")
+
+        if artifact_name == "environment":
+            input_kind = "environment-yaml"
+            local_path = repo_root() / "candidates" / f"{candidate_name}.yml"
+            input_object_key = f"inputs/python/candidates/{candidate_name}/environment.yml"
+            content_type = "application/x-yaml"
+        else:
+            input_kind = "requirements-lock"
+            local_path = repo_root() / "candidates" / f"{candidate_name}.requirements.txt"
+            input_object_key = f"inputs/python/candidates/{candidate_name}/requirements.lock.requirements.txt"
+            content_type = "text/plain"
+
+        if destination == "local":
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            local_path.write_bytes(payload)
+        else:
+            input_bucket = python_input_bucket_name()
+            if not input_bucket:
+                abort(500, "Python input bucket could not be resolved")
+            s3_put_bytes(
+                input_bucket,
+                input_object_key,
+                payload,
+                region=app.config["AWS_REGION"],
+                profile=app.config["AWS_PROFILE"],
+                content_type=content_type,
+            )
+
+        return redirect("/candidates?message=Candidate+artifact+uploaded")
 
     @app.route("/candidates/python/<candidate_name>/start", methods=["POST"])
     def start_python_candidate(candidate_name: str):
         safe_name = candidate_name.strip()
         if not safe_name or "/" in safe_name or "\\" in safe_name:
             abort(400, "Invalid candidate name")
-
-        candidate_path = repo_root() / "candidates" / f"{safe_name}.yml"
-        if not candidate_path.exists():
-            candidate_path = repo_root() / "candidates" / f"{safe_name}.yaml"
-        if not candidate_path.exists():
+        candidate_source = resolve_python_candidate_source(safe_name, "environment-yaml")
+        if not candidate_source:
             abort(404, "Candidate YAML not found")
 
         platform = request.form.get("platform", "linux-amd64")
         if platform not in {"linux-amd64", "linux-arm64", "windows-amd64"}:
             abort(400, "Unsupported Python ECS platform")
 
+        return launch_python_candidate_scan(
+            candidate_name=safe_name,
+            candidate_source=candidate_source,
+            platform=platform,
+            input_kind="environment-yaml",
+            materialize_after_scan=True,
+        )
+
+    @app.route("/candidates/python/<candidate_name>/start-requirements", methods=["POST"])
+    def start_python_requirements_candidate(candidate_name: str):
+        safe_name = candidate_name.strip()
+        if not safe_name or "/" in safe_name or "\\" in safe_name:
+            abort(400, "Invalid candidate name")
+        candidate_source = resolve_python_candidate_source(safe_name, "requirements-lock")
+        if not candidate_source:
+            abort(404, "Candidate requirements.txt not found")
+
+        platform = request.form.get("platform", "linux-amd64")
+        if platform not in {"linux-amd64", "linux-arm64"}:
+            abort(400, "Requirements-only Python scans currently support linux-amd64 and linux-arm64")
+
+        return launch_python_candidate_scan(
+            candidate_name=safe_name,
+            candidate_source=candidate_source,
+            platform=platform,
+            input_kind="requirements-lock",
+            materialize_after_scan=False,
+        )
+
+    def launch_python_candidate_scan(
+        *,
+        candidate_name: str,
+        candidate_source: dict,
+        platform: str,
+        input_kind: str,
+        materialize_after_scan: bool,
+    ):
         stack = describe_stack(app.config["PYTHON_STACK_NAME"])
         input_bucket = stack_output_value(stack, "InputBucketName")
         evidence_bucket = stack_output_value(stack, "EvidenceBucketName")
@@ -2408,15 +2738,15 @@ def create_app() -> Flask:
         state_machine_arn = stack_output_value(stack, "PythonScanOrchestrationStateMachineArn") or stack_output_value(stack, "PythonLinuxScanOrchestrationStateMachineArn")
         if not all([input_bucket, evidence_bucket, ephemeral_bucket, state_machine_arn]):
             abort(500, f"Python ECS stack {app.config['PYTHON_STACK_NAME']} is missing required outputs")
+        input_object_key = str(candidate_source.get("input_object_key") or "").strip()
+        if not input_object_key:
+            abort(500, "Candidate source is missing an input object key")
 
-        timestamp = utc_compact_timestamp()
-        execution_name = f"python-scan-{timestamp}-{uuid.uuid4().hex[:8]}"
-        input_object_key = f"inputs/python/candidates/{safe_name}/environment.yml"
-        active_run = active_python_candidate_runs().get(safe_name)
+        active_run = active_python_candidate_runs().get((candidate_name, input_kind))
         if active_run:
             return render_template(
                 "candidate_started.html",
-                candidate_name=safe_name,
+                candidate_name=candidate_name,
                 platform=platform,
                 execution_name=active_run.get("execution_id"),
                 execution_arn=active_run.get("execution_arn"),
@@ -2424,18 +2754,27 @@ def create_app() -> Flask:
                 summary_uri="",
                 auth_error=None,
                 already_running=True,
+                input_kind=input_kind,
+                scan_mode="build-artifacts" if materialize_after_scan and input_kind == "requirements-lock" else input_kind,
             ), 409
-        s3_put_bytes(
-            input_bucket,
-            input_object_key,
-            candidate_path.read_bytes(),
-            region=app.config["AWS_REGION"],
-            profile=app.config["AWS_PROFILE"],
-            content_type="application/x-yaml",
-        )
+
+        timestamp = utc_compact_timestamp()
+        execution_name = f"python-scan-{timestamp}-{uuid.uuid4().hex[:8]}"
+        if candidate_source.get("source") == "local":
+            content_type = "text/plain" if input_kind == "requirements-lock" else "application/x-yaml"
+            s3_put_bytes(
+                input_bucket,
+                input_object_key,
+                Path(candidate_source["path"]).read_bytes(),
+                region=app.config["AWS_REGION"],
+                profile=app.config["AWS_PROFILE"],
+                content_type=content_type,
+            )
         execution_input = {
             "input_bucket": input_bucket,
             "input_object_key": input_object_key,
+            "input_type": input_kind,
+            "materialize_after_scan": str(materialize_after_scan).lower(),
             "evidence_bucket": evidence_bucket,
             "evidence_prefix": app.config["CATALOG_PREFIX"],
             "ephemeral_bucket": ephemeral_bucket,
@@ -2463,7 +2802,7 @@ def create_app() -> Flask:
         )
         return render_template(
             "candidate_started.html",
-            candidate_name=safe_name,
+            candidate_name=candidate_name,
             platform=platform,
             execution_name=execution_name,
             execution_arn=start_data.get("executionArn"),
@@ -2471,6 +2810,8 @@ def create_app() -> Flask:
             summary_uri=f"s3://{evidence_bucket}/{app.config['CATALOG_PREFIX']}/orchestration/python/{execution_name}/orchestration-summary.json",
             auth_error=None,
             already_running=False,
+            input_kind=input_kind,
+            scan_mode="build-artifacts" if materialize_after_scan and input_kind == "requirements-lock" else input_kind,
         )
 
     @app.route("/runs/<ecosystem>/<execution_id>")
@@ -2498,6 +2839,79 @@ def create_app() -> Flask:
             record=enriched,
             auth_error=auth_error,
             verify_status_by_platform=verify_status_by_platform,
+        )
+
+    @app.route("/runs/python/<execution_id>/<platform>/build-artifacts", methods=["POST"])
+    def build_python_artifacts_from_requirements(execution_id: str, platform: str):
+        if platform not in {"linux-amd64", "linux-arm64"}:
+            abort(400, "Requirements-only artifact builds currently support linux-amd64 and linux-arm64")
+        try:
+            record = enrich_record(load_record("python", execution_id), "python")
+        except AwsAuthExpiredError as exc:
+            return render_template("download_error.html", auth_error=str(exc), key=execution_id), 401
+        except Exception:
+            abort(404)
+
+        selected_platform = next((item for item in record.get("platforms", []) if item.get("platform") == platform), None)
+        if not selected_platform or not selected_platform.get("supports_artifact_build"):
+            abort(409, "This run does not support deferred artifact generation")
+
+        stack = describe_stack(app.config["PYTHON_STACK_NAME"])
+        input_bucket = stack_output_value(stack, "InputBucketName")
+        evidence_bucket = stack_output_value(stack, "EvidenceBucketName")
+        ephemeral_bucket = stack_output_value(stack, "EphemeralBucketName")
+        state_machine_arn = stack_output_value(stack, "PythonScanOrchestrationStateMachineArn") or stack_output_value(stack, "PythonLinuxScanOrchestrationStateMachineArn")
+        if not all([input_bucket, evidence_bucket, ephemeral_bucket, state_machine_arn]):
+            abort(500, f"Python ECS stack {app.config['PYTHON_STACK_NAME']} is missing required outputs")
+
+        source_input_key = str(record.get("input_object_key") or "").strip()
+        if not source_input_key.endswith(".requirements.txt"):
+            abort(409, "The source run was not started from a requirements candidate")
+
+        timestamp = utc_compact_timestamp()
+        execution_name = f"python-scan-{timestamp}-{uuid.uuid4().hex[:8]}"
+        execution_input = {
+            "input_bucket": input_bucket,
+            "input_object_key": source_input_key,
+            "input_type": "requirements-lock",
+            "materialize_after_scan": "true",
+            "evidence_bucket": evidence_bucket,
+            "evidence_prefix": app.config["CATALOG_PREFIX"],
+            "ephemeral_bucket": ephemeral_bucket,
+            "ephemeral_prefix": "deploy/tmp/python",
+            "remediate_medium": "true",
+            "fail_on_medium": "false",
+            "safety_api_key": "",
+            "scan_timestamp": timestamp,
+            "scan_execution_id": execution_name,
+            "platforms": [platform],
+        }
+        start_data = aws_json(
+            [
+                "stepfunctions",
+                "start-execution",
+                "--state-machine-arn",
+                state_machine_arn,
+                "--name",
+                execution_name,
+                "--input",
+                json.dumps(execution_input),
+            ],
+            region=app.config["AWS_REGION"],
+            profile=app.config["AWS_PROFILE"],
+        )
+        return render_template(
+            "candidate_started.html",
+            candidate_name=record.get("input_label") or execution_id,
+            platform=platform,
+            execution_name=execution_name,
+            execution_arn=start_data.get("executionArn"),
+            input_uri=f"s3://{input_bucket}/{source_input_key}",
+            summary_uri=f"s3://{evidence_bucket}/{app.config['CATALOG_PREFIX']}/orchestration/python/{execution_name}/orchestration-summary.json",
+            auth_error=None,
+            already_running=False,
+            input_kind="requirements-lock",
+            scan_mode="build-artifacts",
         )
 
     @app.route("/verify-local-host/<ecosystem>/<execution_id>/<platform_name>", methods=["POST"])

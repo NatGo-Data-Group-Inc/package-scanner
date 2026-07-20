@@ -1,64 +1,193 @@
 {% extends "base.html" %}
 {% block body %}
-<h1>Build Candidates</h1>
+<h1>Python Candidates</h1>
 <p class="muted">
-  Start scans from YAML files in the local <code>candidates/</code> directory.
-  The GUI resolves S3 buckets and the Python ECS state machine from the deployed stack when you submit.
+  Treat each candidate as a named package set with up to two attached artifacts:
+  a <code>Blueprint</code> <code>environment.yml</code> for materialize-and-scan workflows,
+  and a <code>Locked</code> <code>requirements.txt</code> for exact-version scan-first workflows.
 </p>
 
+{% if message %}
+<div class="callout">{{ message }}</div>
+{% endif %}
+
+<div class="card">
+  <h2>Upload Blueprint</h2>
+  <form method="post" action="/candidates/python/upload" enctype="multipart/form-data">
+    <input type="hidden" name="artifact_name" value="environment">
+    <label>
+      Candidate name
+      <input type="text" name="candidate_name" placeholder="dbb_v2200" required>
+    </label>
+    <label>
+      Destination
+      <select name="destination">
+        <option value="s3" selected>S3 input bucket</option>
+        <option value="local">local candidates directory</option>
+      </select>
+    </label>
+    <label>
+      environment.yml
+      <input type="file" name="artifact_file" accept=".yml,.yaml" required>
+    </label>
+    <button type="submit">Upload Blueprint</button>
+  </form>
+
+  <h2>Upload Locked Requirements</h2>
+  <form method="post" action="/candidates/python/upload" enctype="multipart/form-data">
+    <input type="hidden" name="artifact_name" value="requirements">
+    <label>
+      Candidate name
+      <input type="text" name="candidate_name" placeholder="dbb_v2200" required>
+    </label>
+    <label>
+      Destination
+      <select name="destination">
+        <option value="s3" selected>S3 input bucket</option>
+        <option value="local">local candidates directory</option>
+      </select>
+    </label>
+    <label>
+      requirements.txt
+      <input type="file" name="artifact_file" accept=".txt" required>
+    </label>
+    <button type="submit">Upload Locked Requirements</button>
+  </form>
+</div>
+
 {% if candidates %}
-<table>
-  <thead>
-    <tr><th>Candidate</th><th>Type</th><th>Size</th><th>Start Scan</th></tr>
-  </thead>
-  <tbody>
-    {% for candidate in candidates %}
-    <tr>
-      <td><code>{{ candidate.filename }}</code></td>
-      <td><span class="chip badge-python">{{ candidate.ecosystem }}</span></td>
-      <td>{{ candidate.size }} bytes</td>
-      <td>
-        {% if candidate.active_run %}
-        <p class="muted">
-          Active scan already running:
-          <code>{{ candidate.active_run.execution_id }}</code>
-          {% if candidate.active_run.started_display %}started {{ candidate.active_run.started_display }}{% endif %}
-        </p>
+  {% for candidate in candidates %}
+  <div class="card">
+    <h2>{{ candidate.name }}</h2>
+    <div class="chip-row">
+      <span class="chip badge-python">PYTHON</span>
+      {% if candidate.environment %}
+      <span class="chip">Blueprint</span>
+      {% endif %}
+      {% if candidate.requirements %}
+      <span class="chip">Locked</span>
+      {% endif %}
+    </div>
+
+    <table>
+      <thead>
+        <tr><th>Artifact</th><th>Origin</th><th>Start Scan</th><th>Edit</th></tr>
+      </thead>
+      <tbody>
+        {% if candidate.environment %}
+        <tr>
+          <td>
+            <strong>Blueprint</strong>
+            <div><code>{{ candidate.environment.filename }}</code></div>
+            <div class="muted">Build the environment from this file, then scan and publish artifacts.</div>
+          </td>
+          <td>
+            <span class="chip">{{ candidate.environment.source|upper }}</span>
+            {% if candidate.environment.source == 's3' %}
+            <div class="muted"><code>{{ candidate.environment.s3_key }}</code></div>
+            {% else %}
+            <div class="muted">{{ candidate.environment.size }} bytes</div>
+            {% endif %}
+          </td>
+          <td>
+            {% if candidate.environment.active_run %}
+            <p class="muted">
+              Active scan already running:
+              <code>{{ candidate.environment.active_run.execution_id }}</code>
+              {% if candidate.environment.active_run.started_display %}started {{ candidate.environment.active_run.started_display }}{% endif %}
+            </p>
+            {% endif %}
+            <form method="post" action="{{ candidate.environment.start_path }}">
+              <label>
+                Platform
+                <select name="platform" {% if candidate.environment.start_disabled %}disabled{% endif %}>
+                  <option value="linux-amd64" selected>linux-amd64</option>
+                  <option value="linux-arm64">linux-arm64</option>
+                  <option value="windows-amd64">windows-amd64</option>
+                </select>
+              </label>
+              <label>
+                Remediate medium
+                <select name="remediate_medium" {% if candidate.environment.start_disabled %}disabled{% endif %}>
+                  <option value="true" selected>true</option>
+                  <option value="false">false</option>
+                </select>
+              </label>
+              <label>
+                Fail on medium
+                <select name="fail_on_medium" {% if candidate.environment.start_disabled %}disabled{% endif %}>
+                  <option value="false" selected>false</option>
+                  <option value="true">true</option>
+                </select>
+              </label>
+              <button type="submit" {% if candidate.environment.start_disabled %}disabled{% endif %}>
+                {{ 'Already Running' if candidate.environment.start_disabled else 'Start Build + Scan' }}
+              </button>
+            </form>
+          </td>
+          <td><a href="{{ candidate.environment.edit_path }}">view / edit</a></td>
+        </tr>
         {% endif %}
-        <form method="post" action="/candidates/python/{{ candidate.name }}/start">
-          <label>
-            Platform
-            <select name="platform" {% if candidate.start_disabled %}disabled{% endif %}>
-              <option value="linux-amd64" selected>linux-amd64</option>
-              <option value="linux-arm64">linux-arm64</option>
-              <option value="windows-amd64">windows-amd64</option>
-            </select>
-          </label>
-          <label>
-            Remediate medium
-            <select name="remediate_medium" {% if candidate.start_disabled %}disabled{% endif %}>
-              <option value="true" selected>true</option>
-              <option value="false">false</option>
-            </select>
-          </label>
-          <label>
-            Fail on medium
-            <select name="fail_on_medium" {% if candidate.start_disabled %}disabled{% endif %}>
-              <option value="false" selected>false</option>
-              <option value="true">true</option>
-            </select>
-          </label>
-          <button type="submit" {% if candidate.start_disabled %}disabled{% endif %}>
-            {{ 'Already Running' if candidate.start_disabled else 'Start' }}
-          </button>
-        </form>
-      </td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
+
+        {% if candidate.requirements %}
+        <tr>
+          <td>
+            <strong>Locked</strong>
+            <div><code>{{ candidate.requirements.filename }}</code></div>
+            <div class="muted">Scan the exact pinned requirements first, then build environment artifacts later only if needed.</div>
+          </td>
+          <td>
+            <span class="chip">{{ candidate.requirements.source|upper }}</span>
+            {% if candidate.requirements.source == 's3' %}
+            <div class="muted"><code>{{ candidate.requirements.s3_key }}</code></div>
+            {% else %}
+            <div class="muted">{{ candidate.requirements.size }} bytes</div>
+            {% endif %}
+          </td>
+          <td>
+            {% if candidate.requirements.active_run %}
+            <p class="muted">
+              Active scan already running:
+              <code>{{ candidate.requirements.active_run.execution_id }}</code>
+              {% if candidate.requirements.active_run.started_display %}started {{ candidate.requirements.active_run.started_display }}{% endif %}
+            </p>
+            {% endif %}
+            <form method="post" action="{{ candidate.requirements.start_path }}">
+              <label>
+                Platform
+                <select name="platform" {% if candidate.requirements.start_disabled %}disabled{% endif %}>
+                  <option value="linux-amd64" selected>linux-amd64</option>
+                  <option value="linux-arm64">linux-arm64</option>
+                </select>
+              </label>
+              <label>
+                Remediate medium
+                <select name="remediate_medium" {% if candidate.requirements.start_disabled %}disabled{% endif %}>
+                  <option value="true" selected>true</option>
+                  <option value="false">false</option>
+                </select>
+              </label>
+              <label>
+                Fail on medium
+                <select name="fail_on_medium" {% if candidate.requirements.start_disabled %}disabled{% endif %}>
+                  <option value="false" selected>false</option>
+                  <option value="true">true</option>
+                </select>
+              </label>
+              <button type="submit" {% if candidate.requirements.start_disabled %}disabled{% endif %}>
+                {{ 'Already Running' if candidate.requirements.start_disabled else 'Start Locked Scan' }}
+              </button>
+            </form>
+          </td>
+          <td><a href="{{ candidate.requirements.edit_path }}">view / edit</a></td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+  {% endfor %}
 {% else %}
-<p class="muted">No YAML candidates found under <code>candidates/</code>.</p>
+<p class="muted">No Python candidate artifacts were found locally or in the S3 input bucket.</p>
 {% endif %}
 
 <h2>Scan History By Starting Artifact</h2>

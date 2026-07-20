@@ -24,7 +24,9 @@ Project policies:
 
 ## Scope (current)
 
-- Python package scans from a Conda `environment.yml`.
+- Python package scans from either:
+  - a Conda `environment.yml` blueprint
+  - a pinned `requirements.txt` package set for scan-first workflows
 - R package scans from an `renv.lock`.
 - Python platform-native scan runs:
   - linux/amd64
@@ -52,6 +54,8 @@ Project policies:
 
 - Input contract:
   - `s3://<input-bucket>/inputs/python/environment.yml`
+  - `s3://<input-bucket>/inputs/python/candidates/<candidate-name>/environment.yml`
+  - `s3://<input-bucket>/inputs/python/candidates/<candidate-name>/requirements.txt`
   - `s3://<input-bucket>/inputs/r/renv.lock`
 - Evidence bucket (long-term):
   - `evidence/requirements/python/<platform>/<timestamp>/<execution-id>/...`
@@ -143,6 +147,22 @@ Webapp deployment notes:
   enhancement rather than the default dev path.
 - The ACM certificate must already exist in the same AWS region as the ALB.
 
+Webapp candidate notes:
+
+- The local/browser `Candidates` page now groups Python candidates by name and
+  distinguishes:
+  - `Blueprint`: `environment.yml`, intended for build/materialize + scan
+  - `Locked`: `requirements.txt`, intended for exact-version scan-first flows
+- Candidate artifacts can come from either:
+  - the local repo `candidates/` directory
+  - the Python input bucket under `inputs/python/candidates/<name>/...`
+- The page supports viewing/editing both local and S3-backed candidate
+  artifacts, plus uploading new `environment.yml` or `requirements.txt`
+  artifacts to either destination.
+- A `Locked` scan can succeed without producing a relocatable Python
+  environment. In that case, the run detail page offers a separate follow-up
+  action to build environment artifacts later from the scanned locked input.
+
 ## Quick Start
 
 1. Deploy the stack (canonical bash):
@@ -213,6 +233,40 @@ Python ECS path:
   --stack-name cyber-scanner-dev-python-ecs \
   --region us-east-1 \
   --profile <aws-profile>
+```
+
+PowerShell examples for the same Python ECS paths:
+
+Blueprint scan from `environment.yml`:
+
+```powershell
+.\scripts\start-python-scan.ps1 `
+  -StackName cyber-scanner-dev-python-ecs `
+  -InputBucket <input-bucket> `
+  -SourceEnvironmentFile .\environment.yml `
+  -InputType environment-yaml `
+  -MaterializeAfterScan $true `
+  -PlatformSet all `
+  -Region us-east-1 `
+  -Profile <aws-profile> `
+  -ExpectedAccountId <12-digit-account-id> `
+  -DeploymentLockToken <env-lock-token>
+```
+
+Locked scan from `requirements.txt`:
+
+```powershell
+.\scripts\start-python-scan.ps1 `
+  -StackName cyber-scanner-dev-python-ecs `
+  -InputBucket <input-bucket> `
+  -SourceRequirementsFile .\requirements.txt `
+  -InputType requirements-lock `
+  -MaterializeAfterScan $false `
+  -PlatformSet linux-only `
+  -Region us-east-1 `
+  -Profile <aws-profile> `
+  -ExpectedAccountId <12-digit-account-id> `
+  -DeploymentLockToken <env-lock-token>
 ```
 
 Build and push the Windows Python image from a Windows Docker host:

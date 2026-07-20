@@ -7,6 +7,13 @@
   <p class="bad">A scan for this candidate is already active. A duplicate scan was not submitted.</p>
   {% endif %}
   <p><strong>Candidate:</strong> <code>{{ candidate_name }}</code></p>
+  {% if scan_mode == 'build-artifacts' %}
+  <p><strong>Mode:</strong> Build deferred environment artifacts from the previously scanned requirements set.</p>
+  {% elif input_kind == 'requirements-lock' %}
+  <p><strong>Mode:</strong> Scan existing pinned <code>requirements.txt</code> without building environment artifacts.</p>
+  {% else %}
+  <p><strong>Mode:</strong> Build environment and scan from <code>environment.yml</code>.</p>
+  {% endif %}
   <p><strong>Platform:</strong> <span class="chip badge-{{ platform }}">{{ platform }}</span></p>
   <p><strong>Execution:</strong> <code>{{ execution_name }}</code></p>
   <p><strong>Input:</strong> <code>{{ input_uri }}</code></p>

@@ -19,6 +19,8 @@ CONDA_PACK_BIN="${CONDA_PACK_BIN:-conda-pack}"
 PYTHON_RESTORE_ENV_CHECKPOINT="${PYTHON_RESTORE_ENV_CHECKPOINT:-false}"
 PYTHON_CHECKPOINT_INCLUDE_PKGS="${PYTHON_CHECKPOINT_INCLUDE_PKGS:-false}"
 PYTHON_CHECKPOINT_INCLUDE_ENV="${PYTHON_CHECKPOINT_INCLUDE_ENV:-false}"
+INPUT_TYPE="${INPUT_TYPE:-environment-yaml}"
+MATERIALIZE_AFTER_SCAN="${MATERIALIZE_AFTER_SCAN:-true}"
 
 if [[ -z "${CONDA_OVERRIDE_GLIBC:-}" ]] && command -v getconf >/dev/null 2>&1; then
   glibc_version="$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}')"
@@ -47,6 +49,40 @@ upload_if_exists() {
     aws s3 cp "${path}" "${dest}" >/dev/null
   fi
   return 0
+}
+
+render_requirements_environment() {
+  local requirements_path="$1"
+  local environment_path="$2"
+  "${PYTHON_BIN}" - "${requirements_path}" "${environment_path}" <<'PY'
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+requirements_path = Path(sys.argv[1])
+environment_path = Path(sys.argv[2])
+packages: list[str] = []
+for raw in requirements_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+    line = raw.strip()
+    if not line or line.startswith("#"):
+        continue
+    packages.append(line)
+
+payload = {
+    "name": "target",
+    "channels": ["conda-forge"],
+    "dependencies": [
+        "python",
+        "pip",
+        {
+            "pip": packages,
+        },
+    ],
+}
+environment_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+PY
 }
 
 pack_python_env() {
@@ -143,10 +179,18 @@ publish_failure_diagnostics() {
 trap publish_failure_diagnostics ERR
 
 mkdir -p "${RUN_DIR}" "${ROOT_PREFIX}" /tmp/scan-input
-aws s3 cp "s3://${INPUT_BUCKET}/${INPUT_OBJECT_KEY}" /tmp/scan-input/environment.yml >/dev/null
-cp /tmp/scan-input/environment.yml "${RUN_DIR}/environment.yml"
+input_basename="$(basename "${INPUT_OBJECT_KEY}")"
+aws s3 cp "s3://${INPUT_BUCKET}/${INPUT_OBJECT_KEY}" "/tmp/scan-input/${input_basename}" >/dev/null
+REQUIREMENTS_ONLY_SCAN="false"
+if [[ "${INPUT_TYPE}" == "requirements-lock" || "${INPUT_OBJECT_KEY}" == *.requirements.txt ]]; then
+  REQUIREMENTS_ONLY_SCAN="true"
+  cp "/tmp/scan-input/${input_basename}" "${RUN_DIR}/requirements.lock.txt"
+  render_requirements_environment "${RUN_DIR}/requirements.lock.txt" "${RUN_DIR}/environment.yml"
+else
+  cp "/tmp/scan-input/${input_basename}" "${RUN_DIR}/environment.yml"
+fi
 
-if [[ "${PYTHON_CPU_ONLY}" == "true" ]]; then
+if [[ "${REQUIREMENTS_ONLY_SCAN}" != "true" && "${PYTHON_CPU_ONLY}" == "true" ]]; then
   cp "${RUN_DIR}/environment.yml" "${RUN_DIR}/environment.original.yml"
   "${PYTHON_BIN}" - "${RUN_DIR}/environment.yml" <<'PY'
 from __future__ import annotations
@@ -279,76 +323,88 @@ if removed or rewritten:
 PY
 fi
 
-"${PYTHON_BIN}" "${SCRIPT_ROOT}/plan-python-environment-install.py" \
-  --environment-file "${RUN_DIR}/environment.yml" \
-  --run-dir "${RUN_DIR}"
-
-for planned_file in \
-  "${RUN_DIR}/environment.conda-core.yml" \
-  "${RUN_DIR}/environment.conda-native.yml" \
-  "${RUN_DIR}/environment.conda-python.yml" \
-  "${RUN_DIR}/environment.pip.requirements.txt" \
-  "${RUN_DIR}/environment.install-plan.json"
-do
-  if [[ ! -f "${planned_file}" ]]; then
-    echo "planner-error: missing staged install artifact ${planned_file}" >&2
-    exit 2
-  fi
-done
-
-if aws s3 ls "${CHECKPOINT_PREFIX}/latest/python-pkgs.tar.gz" >/dev/null 2>&1; then
-  aws s3 cp "${CHECKPOINT_PREFIX}/latest/python-pkgs.tar.gz" "${RUN_DIR}/checkpoint-python-pkgs.tar.gz" >/dev/null
-  mkdir -p "${ROOT_PREFIX}/pkgs"
-  "${PYTHON_BIN}" "${SCRIPT_ROOT}/extract-archive.py" --archive "${RUN_DIR}/checkpoint-python-pkgs.tar.gz" --destination "${ROOT_PREFIX}/pkgs"
-  rm -f "${RUN_DIR}/checkpoint-python-pkgs.tar.gz"
-fi
-if [[ "${PYTHON_RESTORE_ENV_CHECKPOINT}" == "true" ]] && aws s3 ls "${CHECKPOINT_PREFIX}/latest/python-env.tar.gz" >/dev/null 2>&1; then
-  aws s3 cp "${CHECKPOINT_PREFIX}/latest/python-env.tar.gz" "${RUN_DIR}/checkpoint-python-env.tar.gz" >/dev/null
-  restore_packed_python_env "${RUN_DIR}/checkpoint-python-env.tar.gz"
-  rm -f "${RUN_DIR}/checkpoint-python-env.tar.gz"
-fi
-
-write_state "materialize"
-start_checkpoint_loop
-
-if [[ -d "${ENV_PREFIX}" ]]; then
-  "${MAMBA_BIN}" env update -r "${ROOT_PREFIX}" -n target -f "${RUN_DIR}/environment.conda-core.yml" > "${RUN_DIR}/restore.log" 2>&1
+if [[ "${REQUIREMENTS_ONLY_SCAN}" == "true" && "${MATERIALIZE_AFTER_SCAN}" != "true" ]]; then
+  printf '[]\n' > "${RUN_DIR}/conda-list.json"
+  : > "${RUN_DIR}/restore.log"
+  PYTHON_VERSION="$("${PYTHON_BIN}" - <<'PY'
+import sys
+print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
+PY
+)"
 else
-  "${MAMBA_BIN}" create -r "${ROOT_PREFIX}" -y -n target -f "${RUN_DIR}/environment.conda-core.yml" > "${RUN_DIR}/restore.log" 2>&1
-fi
+  "${PYTHON_BIN}" "${SCRIPT_ROOT}/plan-python-environment-install.py" \
+    --environment-file "${RUN_DIR}/environment.yml" \
+    --run-dir "${RUN_DIR}"
 
-if [[ -s "${RUN_DIR}/environment.conda-native.yml" ]]; then
-  "${MAMBA_BIN}" env update -r "${ROOT_PREFIX}" -n target -f "${RUN_DIR}/environment.conda-native.yml" >> "${RUN_DIR}/restore.log" 2>&1
-fi
+  for planned_file in \
+    "${RUN_DIR}/environment.conda-core.yml" \
+    "${RUN_DIR}/environment.conda-native.yml" \
+    "${RUN_DIR}/environment.conda-python.yml" \
+    "${RUN_DIR}/environment.pip.requirements.txt" \
+    "${RUN_DIR}/environment.install-plan.json"
+  do
+    if [[ ! -f "${planned_file}" ]]; then
+      echo "planner-error: missing staged install artifact ${planned_file}" >&2
+      exit 2
+    fi
+  done
 
-if [[ -s "${RUN_DIR}/environment.conda-python.yml" ]]; then
-  "${MAMBA_BIN}" env update -r "${ROOT_PREFIX}" -n target -f "${RUN_DIR}/environment.conda-python.yml" >> "${RUN_DIR}/restore.log" 2>&1
-fi
+  if aws s3 ls "${CHECKPOINT_PREFIX}/latest/python-pkgs.tar.gz" >/dev/null 2>&1; then
+    aws s3 cp "${CHECKPOINT_PREFIX}/latest/python-pkgs.tar.gz" "${RUN_DIR}/checkpoint-python-pkgs.tar.gz" >/dev/null
+    mkdir -p "${ROOT_PREFIX}/pkgs"
+    "${PYTHON_BIN}" "${SCRIPT_ROOT}/extract-archive.py" --archive "${RUN_DIR}/checkpoint-python-pkgs.tar.gz" --destination "${ROOT_PREFIX}/pkgs"
+    rm -f "${RUN_DIR}/checkpoint-python-pkgs.tar.gz"
+  fi
+  if [[ "${PYTHON_RESTORE_ENV_CHECKPOINT}" == "true" ]] && aws s3 ls "${CHECKPOINT_PREFIX}/latest/python-env.tar.gz" >/dev/null 2>&1; then
+    aws s3 cp "${CHECKPOINT_PREFIX}/latest/python-env.tar.gz" "${RUN_DIR}/checkpoint-python-env.tar.gz" >/dev/null
+    restore_packed_python_env "${RUN_DIR}/checkpoint-python-env.tar.gz"
+    rm -f "${RUN_DIR}/checkpoint-python-env.tar.gz"
+  fi
 
-if [[ -s "${RUN_DIR}/environment.pip.requirements.txt" ]]; then
-  "${MAMBA_BIN}" run -r "${ROOT_PREFIX}" -n target python -m pip install --no-cache-dir --no-input -r "${RUN_DIR}/environment.pip.requirements.txt" >> "${RUN_DIR}/restore.log" 2>&1
-fi
+  write_state "materialize"
+  start_checkpoint_loop
 
-stop_checkpoint_loop
-publish_checkpoint "restored"
+  if [[ -d "${ENV_PREFIX}" ]]; then
+    "${MAMBA_BIN}" env update -r "${ROOT_PREFIX}" -n target -f "${RUN_DIR}/environment.conda-core.yml" > "${RUN_DIR}/restore.log" 2>&1
+  else
+    "${MAMBA_BIN}" create -r "${ROOT_PREFIX}" -y -n target -f "${RUN_DIR}/environment.conda-core.yml" > "${RUN_DIR}/restore.log" 2>&1
+  fi
 
-PYTHON_VERSION="$("${MAMBA_BIN}" run -r "${ROOT_PREFIX}" -n target python - <<'PY'
+  if [[ -s "${RUN_DIR}/environment.conda-native.yml" ]]; then
+    "${MAMBA_BIN}" env update -r "${ROOT_PREFIX}" -n target -f "${RUN_DIR}/environment.conda-native.yml" >> "${RUN_DIR}/restore.log" 2>&1
+  fi
+
+  if [[ -s "${RUN_DIR}/environment.conda-python.yml" ]]; then
+    "${MAMBA_BIN}" env update -r "${ROOT_PREFIX}" -n target -f "${RUN_DIR}/environment.conda-python.yml" >> "${RUN_DIR}/restore.log" 2>&1
+  fi
+
+  if [[ -s "${RUN_DIR}/environment.pip.requirements.txt" ]]; then
+    "${MAMBA_BIN}" run -r "${ROOT_PREFIX}" -n target python -m pip install --no-cache-dir --no-input -r "${RUN_DIR}/environment.pip.requirements.txt" >> "${RUN_DIR}/restore.log" 2>&1
+  fi
+
+  stop_checkpoint_loop
+  publish_checkpoint "restored"
+
+  PYTHON_VERSION="$("${MAMBA_BIN}" run -r "${ROOT_PREFIX}" -n target python - <<'PY'
 import sys
 print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
 PY
 )"
 
-"${MAMBA_BIN}" run -r "${ROOT_PREFIX}" -n target python -m pip list --format=freeze > "${RUN_DIR}/requirements.lock.txt"
-"${MAMBA_BIN}" list -r "${ROOT_PREFIX}" -n target --json > "${RUN_DIR}/conda-list.json"
-printf '%s\n' "${ENV_PREFIX}" > "${RUN_DIR}/env-prefix.txt"
+  "${MAMBA_BIN}" run -r "${ROOT_PREFIX}" -n target python -m pip list --format=freeze > "${RUN_DIR}/requirements.lock.txt"
+  "${MAMBA_BIN}" list -r "${ROOT_PREFIX}" -n target --json > "${RUN_DIR}/conda-list.json"
+  printf '%s\n' "${ENV_PREFIX}" > "${RUN_DIR}/env-prefix.txt"
+fi
 "${PYTHON_BIN}" "${SCRIPT_ROOT}/generate-python-materialization-summary.py" \
   --run-dir "${RUN_DIR}" \
   --platform "${TARGET_PLATFORM}" \
   --python-version "${PYTHON_VERSION}" \
   --root-prefix "${ROOT_PREFIX}" \
-  --env-prefix "${ENV_PREFIX}"
+  --env-prefix "${ENV_PREFIX}" \
+  --input-type "${INPUT_TYPE}"
 MATERIALIZATION_VALIDATION_EXIT=0
-"${PYTHON_BIN}" - "${RUN_DIR}/materialization-summary.json" <<'PY' || MATERIALIZATION_VALIDATION_EXIT=$?
+if [[ "${REQUIREMENTS_ONLY_SCAN}" != "true" || "${MATERIALIZE_AFTER_SCAN}" == "true" ]]; then
+  "${PYTHON_BIN}" - "${RUN_DIR}/materialization-summary.json" <<'PY' || MATERIALIZATION_VALIDATION_EXIT=$?
 from __future__ import annotations
 
 import json
@@ -372,6 +428,7 @@ if missing_conda or missing_pip:
     )
     raise SystemExit(4)
 PY
+fi
 
 write_state "analysis"
 "${PYTHON_BIN}" -m cyclonedx_py requirements "${RUN_DIR}/requirements.lock.txt" -o "${RUN_DIR}/python-packages.cdx.json" || true
@@ -389,18 +446,26 @@ write_state "governance"
   --fail-on-medium "${FAIL_ON_MEDIUM:-false}" || GOVERNANCE_EXIT=$?
 
 write_state "publish"
-"${PYTHON_BIN}" "${SCRIPT_ROOT}/bundle-directory.py" \
-  --source-dir "${ROOT_PREFIX}/pkgs" \
-  --output-file "${RUN_DIR}/python-pkgs-${TARGET_PLATFORM}-${TS}.tar.gz" \
-  --checksum-file "${RUN_DIR}/python-pkgs-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
-pack_python_env "${RUN_DIR}/python-env-${TARGET_PLATFORM}-${TS}.tar.gz" "${RUN_DIR}/python-env-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
+if [[ -d "${ROOT_PREFIX}/pkgs" ]]; then
+  "${PYTHON_BIN}" "${SCRIPT_ROOT}/bundle-directory.py" \
+    --source-dir "${ROOT_PREFIX}/pkgs" \
+    --output-file "${RUN_DIR}/python-pkgs-${TARGET_PLATFORM}-${TS}.tar.gz" \
+    --checksum-file "${RUN_DIR}/python-pkgs-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
+fi
+if [[ "${REQUIREMENTS_ONLY_SCAN}" != "true" || "${MATERIALIZE_AFTER_SCAN}" == "true" ]]; then
+  pack_python_env "${RUN_DIR}/python-env-${TARGET_PLATFORM}-${TS}.tar.gz" "${RUN_DIR}/python-env-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
+fi
 environment_artifacts=(
-  environment.yml
   requirements.lock.txt
-  conda-list.json
   python-packages.cdx.json
   materialization-summary.json
 )
+if [[ -f "${RUN_DIR}/environment.yml" ]]; then
+  environment_artifacts=(environment.yml "${environment_artifacts[@]}")
+fi
+if [[ -f "${RUN_DIR}/conda-list.json" ]]; then
+  environment_artifacts+=(conda-list.json)
+fi
 for optional_artifact in environment.original.yml environment.cpu-normalization.log; do
   if [[ -f "${RUN_DIR}/${optional_artifact}" ]]; then
     environment_artifacts+=("${optional_artifact}")
@@ -409,7 +474,7 @@ done
 tar -czf "${RUN_DIR}/environment-artifacts.tar.gz" -C "${RUN_DIR}" "${environment_artifacts[@]}"
 
 aws s3 cp "${RUN_DIR}/" "s3://${EPHEMERAL_BUCKET}/${EPHEMERAL_PREFIX}/${TARGET_PLATFORM}/${TS}/" --recursive >/dev/null
-aws s3 cp "${RUN_DIR}/environment.yml" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/environment.yml" >/dev/null
+upload_if_exists "${RUN_DIR}/environment.yml" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/environment.yml"
 upload_if_exists "${RUN_DIR}/environment.original.yml" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/environment.original.yml"
 upload_if_exists "${RUN_DIR}/environment.cpu-normalization.log" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/environment.cpu-normalization.log"
 upload_if_exists "${RUN_DIR}/requirements.lock.txt" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/requirements.lock.txt"
@@ -431,7 +496,7 @@ upload_if_exists "${RUN_DIR}/python-pkgs-${TARGET_PLATFORM}-${TS}.tar.gz" "s3://
 upload_if_exists "${RUN_DIR}/python-pkgs-${TARGET_PLATFORM}-${TS}.tar.gz.sha256" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/packages/offline/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/python-pkgs-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
 upload_if_exists "${RUN_DIR}/python-env-${TARGET_PLATFORM}-${TS}.tar.gz" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/python-env-${TARGET_PLATFORM}-${TS}.tar.gz"
 upload_if_exists "${RUN_DIR}/python-env-${TARGET_PLATFORM}-${TS}.tar.gz.sha256" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/python-env-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
-printf '{"platform":"%s","timestamp_utc":"%s","scan_execution_id":"%s","python_version":"%s","ephemeral_prefix":"%s/%s/%s","offline_bundle_prefix":"%s/packages/offline/python/%s/%s","cleanup":"requested"}' "${TARGET_PLATFORM}" "${TS}" "${RUN_ID}" "${PYTHON_VERSION}" "${EPHEMERAL_PREFIX}" "${TARGET_PLATFORM}" "${TS}" "${EVIDENCE_PREFIX}" "${TARGET_PLATFORM}" "${EVIDENCE_RUN_SEGMENT}" > "${RUN_DIR}/run-metadata.json"
+printf '{"platform":"%s","timestamp_utc":"%s","scan_execution_id":"%s","python_version":"%s","input_type":"%s","materialize_after_scan":"%s","ephemeral_prefix":"%s/%s/%s","offline_bundle_prefix":"%s/packages/offline/python/%s/%s","cleanup":"requested"}' "${TARGET_PLATFORM}" "${TS}" "${RUN_ID}" "${PYTHON_VERSION}" "${INPUT_TYPE}" "${MATERIALIZE_AFTER_SCAN}" "${EPHEMERAL_PREFIX}" "${TARGET_PLATFORM}" "${TS}" "${EVIDENCE_PREFIX}" "${TARGET_PLATFORM}" "${EVIDENCE_RUN_SEGMENT}" > "${RUN_DIR}/run-metadata.json"
 aws s3 cp "${RUN_DIR}/run-metadata.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/run-metadata.json" >/dev/null
 write_state "completed"
 aws s3 cp "${RUN_DIR}/stage-state.json" "${CHECKPOINT_PREFIX}/latest/stage-state.json" >/dev/null

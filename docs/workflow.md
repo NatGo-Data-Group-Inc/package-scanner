@@ -80,7 +80,8 @@ What this does:
 
 ### Step A: prepare Python input
 
-Create `environment.yml` with pinned packages:
+Create a `Blueprint` `environment.yml` when the workflow should solve/build the
+environment before scanning:
 
 ```yaml
 name: target
@@ -118,13 +119,24 @@ If you capture from Windows for the Linux ECS pipeline, include
 the Linux index instead of the local Windows index.
 
 This candidate output is normalized on purpose. It does not preserve every
-version/build pin from the realized environment. If exact reproduction matters,
-scan the exported `environment.yml` directly.
+version/build pin from the realized environment. Treat it as a `Blueprint`.
+If exact reproduction matters, prefer one of these instead:
+- scan the exported `environment.yml` directly
+- use the exported pinned `requirements.txt` as a `Locked` candidate
 
 If you must change one package version in a candidate manually, prefer changing
 the package version and leaving the build string off unless you have verified
 that exact build exists in the configured channels. For example, prefer
 `idna=3.15` over guessing a build string.
+
+If you already have an exact pinned pip package set and want to scan that set
+first without materializing the environment yet, use a `Locked`
+`requirements.txt` candidate instead. In the browser UI this is the `Locked`
+path; in S3 it should live under:
+
+```text
+inputs/python/candidates/<candidate-name>/requirements.txt
+```
 
 ### Step B: upload input
 
@@ -148,6 +160,42 @@ aws s3 cp ./environment.yml \
   --deployment-lock-token <env-lock-token> \
   --remediate-medium true \
   --fail-on-medium false
+```
+
+PowerShell `Blueprint` example:
+
+```powershell
+.\scripts\start-python-scan.ps1 `
+  -StackName package-scanner-dev `
+  -InputBucket <input-bucket> `
+  -SourceEnvironmentFile .\environment.yml `
+  -InputType environment-yaml `
+  -MaterializeAfterScan $true `
+  -PlatformSet all `
+  -Region us-east-1 `
+  -Profile <aws-profile> `
+  -ExpectedAccountId <12-digit-account-id> `
+  -DeploymentLockToken <env-lock-token> `
+  -RemediateMedium $true `
+  -FailOnMedium $false
+```
+
+PowerShell `Locked` example:
+
+```powershell
+.\scripts\start-python-scan.ps1 `
+  -StackName package-scanner-dev `
+  -InputBucket <input-bucket> `
+  -SourceRequirementsFile .\requirements.txt `
+  -InputType requirements-lock `
+  -MaterializeAfterScan $false `
+  -PlatformSet linux-only `
+  -Region us-east-1 `
+  -Profile <aws-profile> `
+  -ExpectedAccountId <12-digit-account-id> `
+  -DeploymentLockToken <env-lock-token> `
+  -RemediateMedium $true `
+  -FailOnMedium $false
 ```
 
 ### Step D: get report artifacts
@@ -363,6 +411,33 @@ Equivalent wrappers:
 - `scripts/start-r-scan.ps1`
 
 Wrappers pass through to bash scripts with equivalent switches.
+
+Examples:
+
+Blueprint:
+
+```powershell
+.\scripts\start-python-scan.ps1 `
+  -StackName package-scanner-dev `
+  -InputBucket <input-bucket> `
+  -SourceEnvironmentFile .\environment.yml `
+  -InputType environment-yaml `
+  -MaterializeAfterScan $true `
+  -DeploymentLockToken <env-lock-token>
+```
+
+Locked:
+
+```powershell
+.\scripts\start-python-scan.ps1 `
+  -StackName package-scanner-dev `
+  -InputBucket <input-bucket> `
+  -SourceRequirementsFile .\requirements.txt `
+  -InputType requirements-lock `
+  -MaterializeAfterScan $false `
+  -PlatformSet linux-only `
+  -DeploymentLockToken <env-lock-token>
+```
 
 ## 11) Turnover Guidance
 

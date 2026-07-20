@@ -5,6 +5,7 @@ STACK_NAME=""
 INPUT_BUCKET=""
 INPUT_OBJECT_KEY="inputs/python/environment.yml"
 SOURCE_ENVIRONMENT_FILE=""
+SOURCE_REQUIREMENTS_FILE=""
 EVIDENCE_BUCKET=""
 EVIDENCE_PREFIX="evidence"
 EPHEMERAL_BUCKET=""
@@ -20,6 +21,10 @@ REMEDIATE_MEDIUM="true"
 FAIL_ON_MEDIUM="false"
 SAFETY_API_KEY=""
 PLATFORM_SET="all"
+INPUT_TYPE="environment-yaml"
+MATERIALIZE_AFTER_SCAN="true"
+INPUT_TYPE_EXPLICIT="false"
+MATERIALIZE_AFTER_SCAN_EXPLICIT="false"
 
 usage() {
   cat <<'EOF'
@@ -32,6 +37,7 @@ Required:
 Optional:
   --input-object-key <key>                (default: inputs/python/environment.yml)
   --source-environment-file <path>        (default: no upload; use existing S3 object)
+  --source-requirements-file <path>       (default: no upload; use existing S3 object)
   --evidence-bucket <bucket>              (default: auto from stack output)
   --evidence-prefix <prefix>              (default: evidence)
   --ephemeral-bucket <bucket>             (default: auto from stack output)
@@ -46,6 +52,9 @@ Optional:
   --remediate-medium <true|false>         (default: true)
   --fail-on-medium <true|false>           (default: false)
   --safety-api-key <key>                  (default: empty/unauthenticated)
+  --input-type <environment-yaml|requirements-lock>
+                                           (default: environment-yaml)
+  --materialize-after-scan <true|false>   (default: true)
   --platform-set <all|linux-only|linux-amd64|linux-arm64|windows-only>
                                            (default: all)
 EOF
@@ -57,6 +66,7 @@ while [[ $# -gt 0 ]]; do
     --input-bucket) INPUT_BUCKET="$2"; shift 2 ;;
     --input-object-key) INPUT_OBJECT_KEY="$2"; shift 2 ;;
     --source-environment-file) SOURCE_ENVIRONMENT_FILE="$2"; shift 2 ;;
+    --source-requirements-file) SOURCE_REQUIREMENTS_FILE="$2"; shift 2 ;;
     --evidence-bucket) EVIDENCE_BUCKET="$2"; shift 2 ;;
     --evidence-prefix) EVIDENCE_PREFIX="$2"; shift 2 ;;
     --ephemeral-bucket) EPHEMERAL_BUCKET="$2"; shift 2 ;;
@@ -71,6 +81,8 @@ while [[ $# -gt 0 ]]; do
     --remediate-medium) REMEDIATE_MEDIUM="$2"; shift 2 ;;
     --fail-on-medium) FAIL_ON_MEDIUM="$2"; shift 2 ;;
     --safety-api-key) SAFETY_API_KEY="$2"; shift 2 ;;
+    --input-type) INPUT_TYPE="$2"; INPUT_TYPE_EXPLICIT="true"; shift 2 ;;
+    --materialize-after-scan) MATERIALIZE_AFTER_SCAN="$2"; MATERIALIZE_AFTER_SCAN_EXPLICIT="true"; shift 2 ;;
     --platform-set) PLATFORM_SET="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
@@ -94,9 +106,38 @@ if [[ "${PLATFORM_SET}" != "all" && "${PLATFORM_SET}" != "linux-only" && "${PLAT
   echo "Guardrail: --platform-set must be one of: all, linux-only, linux-amd64, linux-arm64, windows-only" >&2
   exit 1
 fi
+if [[ "${INPUT_TYPE}" != "environment-yaml" && "${INPUT_TYPE}" != "requirements-lock" ]]; then
+  echo "Guardrail: --input-type must be one of: environment-yaml, requirements-lock" >&2
+  exit 1
+fi
+if [[ "${MATERIALIZE_AFTER_SCAN}" != "true" && "${MATERIALIZE_AFTER_SCAN}" != "false" ]]; then
+  echo "Guardrail: --materialize-after-scan must be true or false" >&2
+  exit 1
+fi
+if [[ -n "${SOURCE_ENVIRONMENT_FILE}" && -n "${SOURCE_REQUIREMENTS_FILE}" ]]; then
+  echo "Guardrail: --source-environment-file and --source-requirements-file are mutually exclusive." >&2
+  exit 1
+fi
 if [[ -n "${SOURCE_ENVIRONMENT_FILE}" && ! -f "${SOURCE_ENVIRONMENT_FILE}" ]]; then
   echo "Source environment file not found: ${SOURCE_ENVIRONMENT_FILE}" >&2
   exit 1
+fi
+if [[ -n "${SOURCE_REQUIREMENTS_FILE}" && ! -f "${SOURCE_REQUIREMENTS_FILE}" ]]; then
+  echo "Source requirements file not found: ${SOURCE_REQUIREMENTS_FILE}" >&2
+  exit 1
+fi
+if [[ -n "${SOURCE_REQUIREMENTS_FILE}" ]]; then
+  if [[ "${INPUT_TYPE_EXPLICIT}" == "true" && "${INPUT_TYPE}" != "requirements-lock" ]]; then
+    echo "Guardrail: --source-requirements-file requires --input-type requirements-lock." >&2
+    exit 1
+  fi
+  INPUT_TYPE="requirements-lock"
+  if [[ "${INPUT_OBJECT_KEY}" == "inputs/python/environment.yml" ]]; then
+    INPUT_OBJECT_KEY="inputs/python/requirements.lock.requirements.txt"
+  fi
+  if [[ "${MATERIALIZE_AFTER_SCAN_EXPLICIT}" != "true" ]]; then
+    MATERIALIZE_AFTER_SCAN="false"
+  fi
 fi
 
 AWS_ARGS=(--region "${REGION}")
@@ -228,6 +269,10 @@ if [[ -n "${SOURCE_ENVIRONMENT_FILE}" ]]; then
   echo "Uploading ${SOURCE_ENVIRONMENT_FILE} to s3://${INPUT_BUCKET}/${INPUT_OBJECT_KEY}"
   aws s3 cp "${SOURCE_ENVIRONMENT_FILE}" "s3://${INPUT_BUCKET}/${INPUT_OBJECT_KEY}" "${AWS_ARGS[@]}" >/dev/null
 fi
+if [[ -n "${SOURCE_REQUIREMENTS_FILE}" ]]; then
+  echo "Uploading ${SOURCE_REQUIREMENTS_FILE} to s3://${INPUT_BUCKET}/${INPUT_OBJECT_KEY}"
+  aws s3 cp "${SOURCE_REQUIREMENTS_FILE}" "s3://${INPUT_BUCKET}/${INPUT_OBJECT_KEY}" "${AWS_ARGS[@]}" >/dev/null
+fi
 
 if [[ -z "${EVIDENCE_BUCKET}" ]]; then
   EVIDENCE_BUCKET="$(stack_output EvidenceBucketName)"
@@ -329,7 +374,7 @@ start_ecs_scan() {
       --state-machine-arn "${state_machine_arn}" \
       --name "${execution_name}" \
       --input "$(cat <<EOF
-{"input_bucket":"${INPUT_BUCKET}","input_object_key":"${INPUT_OBJECT_KEY}","evidence_bucket":"${EVIDENCE_BUCKET}","evidence_prefix":"${EVIDENCE_PREFIX}","ephemeral_bucket":"${EPHEMERAL_BUCKET}","ephemeral_prefix":"${EPHEMERAL_PREFIX}","remediate_medium":"${REMEDIATE_MEDIUM}","fail_on_medium":"${FAIL_ON_MEDIUM}","safety_api_key":"${SAFETY_API_KEY}","scan_timestamp":"${timestamp}","scan_execution_id":"${execution_name}","platforms":${platforms_json}}
+{"input_bucket":"${INPUT_BUCKET}","input_object_key":"${INPUT_OBJECT_KEY}","input_type":"${INPUT_TYPE}","materialize_after_scan":"${MATERIALIZE_AFTER_SCAN}","evidence_bucket":"${EVIDENCE_BUCKET}","evidence_prefix":"${EVIDENCE_PREFIX}","ephemeral_bucket":"${EPHEMERAL_BUCKET}","ephemeral_prefix":"${EPHEMERAL_PREFIX}","remediate_medium":"${REMEDIATE_MEDIUM}","fail_on_medium":"${FAIL_ON_MEDIUM}","safety_api_key":"${SAFETY_API_KEY}","scan_timestamp":"${timestamp}","scan_execution_id":"${execution_name}","platforms":${platforms_json}}
 EOF
 )" \
       --query "executionArn" \

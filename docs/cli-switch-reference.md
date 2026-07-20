@@ -173,6 +173,8 @@ Parameter names are PowerShell-style (for example `-StackName`, `-InputBucket`, 
 - `-StackName` (mandatory)
 - `-InputBucket` (mandatory)
 - `-InputObjectKey`
+- `-SourceEnvironmentFile`
+- `-SourceRequirementsFile`
 - `-EvidenceBucket`
 - `-EvidencePrefix`
 - `-EphemeralBucket`
@@ -187,6 +189,37 @@ Parameter names are PowerShell-style (for example `-StackName`, `-InputBucket`, 
 - `-RemediateMedium`
 - `-FailOnMedium`
 - `-SafetyApiKey`
+- `-InputType`
+- `-MaterializeAfterScan`
+- `-PlatformSet`
+
+Examples:
+
+Blueprint:
+
+```powershell
+.\scripts\start-python-scan.ps1 `
+  -StackName package-scanner-dev `
+  -InputBucket <input-bucket> `
+  -SourceEnvironmentFile .\environment.yml `
+  -InputType environment-yaml `
+  -MaterializeAfterScan $true `
+  -PlatformSet all `
+  -DeploymentLockToken <env-lock-token>
+```
+
+Locked:
+
+```powershell
+.\scripts\start-python-scan.ps1 `
+  -StackName package-scanner-dev `
+  -InputBucket <input-bucket> `
+  -SourceRequirementsFile .\requirements.txt `
+  -InputType requirements-lock `
+  -MaterializeAfterScan $false `
+  -PlatformSet linux-only `
+  -DeploymentLockToken <env-lock-token>
+```
 
 ### `scripts/start-r-scan.ps1` parameters
 

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Edit Candidate Artifact</h1>
+<div class="card">
+  <p><strong>Candidate:</strong> <code>{{ candidate_name }}</code></p>
+  <p><strong>Artifact:</strong> <span class="chip">{{ artifact_name }}</span> <span class="chip">{{ input_kind }}</span></p>
+  <p><strong>Source:</strong> <span class="chip">{{ source|upper }}</span></p>
+  <p><strong>Path:</strong> <code>{{ input_object_key }}</code></p>
+</div>
+
+<form method="post" action="/candidates/python/{{ candidate_name }}/{{ artifact_name }}/edit">
+  <input type="hidden" name="source" value="{{ source }}">
+  <label style="width: 100%;">
+    File contents
+    <textarea name="content" rows="32" style="width: 100%; font-family: monospace;">{{ content }}</textarea>
+  </label>
+  <button type="submit">Save</button>
+  <a href="/candidates">Cancel</a>
+</form>
+{% endblock %}
