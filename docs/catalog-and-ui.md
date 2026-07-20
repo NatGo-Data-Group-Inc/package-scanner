@@ -78,6 +78,17 @@ Bring the hosted runtime up or down without redeploying the scanner stacks:
 The enable command waits for startup completion and prints
 `WebappUrl=<current-url>` on success.
 
+If an enclave needs a custom browser hostname and TLS, pass those at startup:
+
+```bash
+./scripts/set-webapp-runtime.sh \
+  --action enable \
+  --profile <aws-profile> \
+  --custom-domain-name package-scanner.natgodatagroup.com \
+  --custom-domain-hosted-zone-id <route53-hosted-zone-id> \
+  --tls-certificate-arn <acm-certificate-arn>
+```
+
 Deployment notes:
 
 - The hosted webapp runs behind an ALB only while the runtime is enabled.
@@ -85,6 +96,9 @@ Deployment notes:
   service are turned off.
 - Pass `--runtime-enabled true` to `deploy-webapp-cfn.sh` to leave the runtime
   on after deploy, or use `set-webapp-runtime.sh` for day-to-day control.
+- Runtime start can also update the custom DNS name and ACM certificate so
+  those settings remain enclave-specific configuration rather than a single
+  baked-in deployment value.
 - Pass `--tls-certificate-arn <acm-certificate-arn>` to add an ALB `HTTPS`
   listener on `443`.
 - When a certificate ARN is supplied, the ALB also redirects `HTTP:80` requests

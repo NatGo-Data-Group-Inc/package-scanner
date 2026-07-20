@@ -118,6 +118,9 @@ IMAGE_TAG=$(date -u +%Y%m%dT%H%M%SZ)-<suffix>
   is supplied.
 - Use `scripts/set-webapp-runtime.sh --action enable` for manual bring-up and
   `--action disable` for manual teardown.
+- When an enclave has its own DNS zone and certificate, pass
+  `--custom-domain-name`, `--custom-domain-hosted-zone-id`, and
+  `--tls-certificate-arn` to the `enable` command.
 - A successful `enable` prints `WebappUrl=<current-url>` for the operator.
 - While runtime is enabled, the ALB serves `HTTP` on port `80` by default.
 - If browser policy or enterprise security tooling upgrades requests to

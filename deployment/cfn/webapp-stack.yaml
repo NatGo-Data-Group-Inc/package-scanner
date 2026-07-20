@@ -229,6 +229,7 @@ Resources:
                 Action:
                   - ecs:CreateService
                   - ecs:DeleteService
+                  - ecs:DescribeClusters
                   - ecs:DescribeServices
                   - ecs:UpdateService
                   - ecs:TagResource
@@ -384,7 +385,8 @@ Resources:
               )
               ssm.put_parameter(Name=RUNTIME_LEASE_PARAMETER, Value=value, Overwrite=True)
 
-          def update_runtime(stack, runtime_enabled, desired_count):
+          def update_runtime(stack, runtime_enabled, desired_count, overrides=None):
+              overrides = overrides or {}
               parameters = []
               for item in stack.get("Parameters", []):
                   key = item["ParameterKey"]
@@ -392,6 +394,8 @@ Resources:
                       parameters.append({"ParameterKey": key, "ParameterValue": "true" if runtime_enabled else "false"})
                   elif key == "DesiredCount":
                       parameters.append({"ParameterKey": key, "ParameterValue": str(desired_count)})
+                  elif key in overrides:
+                      parameters.append({"ParameterKey": key, "ParameterValue": str(overrides[key])})
                   else:
                       parameters.append({"ParameterKey": key, "UsePreviousValue": True})
               cloudformation.update_stack(
@@ -413,9 +417,37 @@ Resources:
               params = parse_stack_parameters(stack)
               current_runtime = str(params.get("RuntimeEnabled", "false")).lower() == "true"
               current_desired = int(str(params.get("DesiredCount", "0") or "0"))
+              overrides = {}
 
               if action == "enable":
                   lease_minutes = int(event.get("lease_minutes") or IDLE_TIMEOUT_MINUTES)
+                  custom_domain_name = str(event.get("custom_domain_name") or "").strip()
+                  custom_domain_hosted_zone_id = str(event.get("custom_domain_hosted_zone_id") or "").strip()
+                  tls_certificate_arn = str(event.get("tls_certificate_arn") or "").strip()
+                  clear_custom_domain = bool(event.get("clear_custom_domain"))
+                  clear_tls_certificate = bool(event.get("clear_tls_certificate"))
+
+                  if custom_domain_name and not custom_domain_hosted_zone_id:
+                      return {"status": "invalid-request", "message": "custom_domain_hosted_zone_id is required when custom_domain_name is set"}
+                  if custom_domain_hosted_zone_id and not custom_domain_name:
+                      return {"status": "invalid-request", "message": "custom_domain_name is required when custom_domain_hosted_zone_id is set"}
+                  if clear_custom_domain and (custom_domain_name or custom_domain_hosted_zone_id):
+                      return {"status": "invalid-request", "message": "clear_custom_domain cannot be combined with custom_domain_name/custom_domain_hosted_zone_id"}
+                  if clear_tls_certificate and tls_certificate_arn:
+                      return {"status": "invalid-request", "message": "clear_tls_certificate cannot be combined with tls_certificate_arn"}
+
+                  if clear_custom_domain:
+                      overrides["CustomDomainName"] = ""
+                      overrides["CustomDomainHostedZoneId"] = ""
+                  elif custom_domain_name:
+                      overrides["CustomDomainName"] = custom_domain_name
+                      overrides["CustomDomainHostedZoneId"] = custom_domain_hosted_zone_id
+
+                  if clear_tls_certificate:
+                      overrides["TlsCertificateArn"] = ""
+                  elif tls_certificate_arn:
+                      overrides["TlsCertificateArn"] = tls_certificate_arn
+
                   set_manual_lease_until(now + timedelta(minutes=lease_minutes))
                   desired_runtime = True
               elif action == "disable":
@@ -435,18 +467,19 @@ Resources:
                           desired_runtime = True
 
               desired_count = 1 if desired_runtime else 0
-              if current_runtime == desired_runtime and current_desired == desired_count:
+              if current_runtime == desired_runtime and current_desired == desired_count and not overrides:
                   return {
                       "status": "no-change",
                       "runtime_enabled": current_runtime,
                       "desired_count": current_desired,
                   }
 
-              update_runtime(stack, desired_runtime, desired_count)
+              update_runtime(stack, desired_runtime, desired_count, overrides)
               return {
                   "status": "update-started",
                   "runtime_enabled": desired_runtime,
                   "desired_count": desired_count,
+                  "overrides": overrides,
               }
 
   WebappRuntimeControllerSchedule:

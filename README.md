@@ -134,6 +134,10 @@ Webapp deployment notes:
   `80 -> 443`.
 - Use `scripts/set-webapp-runtime.sh --action enable` to bring the runtime up
   on demand and `--action disable` to turn it back off.
+- `scripts/set-webapp-runtime.sh --action enable` also accepts optional
+  enclave-specific `--custom-domain-name`, `--custom-domain-hosted-zone-id`,
+  and `--tls-certificate-arn` overrides so DNS/TLS can be set when the runtime
+  is started rather than hardcoded to one environment.
 - On successful enable, `scripts/set-webapp-runtime.sh` prints
   `WebappUrl=<current-url>`.
 - When scanner Step Functions executions are running, the runtime controller

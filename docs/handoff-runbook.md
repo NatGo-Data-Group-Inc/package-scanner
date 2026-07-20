@@ -134,6 +134,9 @@ Behavior:
   for manual bring-up
 - use `./scripts/set-webapp-runtime.sh --action disable --profile <aws-profile>`
   for manual shutdown
+- use `--custom-domain-name`, `--custom-domain-hosted-zone-id`, and
+  `--tls-certificate-arn` with `enable` when an enclave provides its own DNS
+  authority and ACM certificate
 - while enabled, the runtime serves `HTTP` on ALB port `80`
 - pass `--tls-certificate-arn <acm-certificate-arn>` to enable `HTTPS` on `443`
 - when a certificate ARN is supplied, the ALB redirects `HTTP` to `HTTPS`
