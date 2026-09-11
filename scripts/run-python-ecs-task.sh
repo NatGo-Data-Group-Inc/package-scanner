@@ -21,6 +21,7 @@ PYTHON_CHECKPOINT_INCLUDE_PKGS="${PYTHON_CHECKPOINT_INCLUDE_PKGS:-false}"
 PYTHON_CHECKPOINT_INCLUDE_ENV="${PYTHON_CHECKPOINT_INCLUDE_ENV:-false}"
 INPUT_TYPE="${INPUT_TYPE:-environment-yaml}"
 MATERIALIZE_AFTER_SCAN="${MATERIALIZE_AFTER_SCAN:-true}"
+CONDA_SUBDIR=""
 
 if [[ -z "${CONDA_OVERRIDE_GLIBC:-}" ]] && command -v getconf >/dev/null 2>&1; then
   glibc_version="$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}')"
@@ -49,6 +50,26 @@ upload_if_exists() {
     aws s3 cp "${path}" "${dest}" >/dev/null
   fi
   return 0
+}
+
+publish_preflight_artifacts() {
+  local stage="$1"
+  local source_dir="${RUN_DIR}/preflight-${stage}"
+  local trace_prefix="s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}"
+  local env_prefix="s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}"
+  local model_prefix="s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/model-results/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}"
+  local requirements_prefix="s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}"
+  upload_if_exists "${source_dir}/preflight-summary.json" "${trace_prefix}/preflight-${stage}-summary.json"
+  upload_if_exists "${source_dir}/conda-dry-run.json" "${trace_prefix}/preflight-${stage}-conda-dry-run.json"
+  upload_if_exists "${source_dir}/resolved-packages.json" "${trace_prefix}/preflight-${stage}-resolved-packages.json"
+  upload_if_exists "${source_dir}/installed-packages.json" "${trace_prefix}/preflight-${stage}-installed-packages.json"
+  upload_if_exists "${source_dir}/installed-inventory-difference.json" "${trace_prefix}/preflight-${stage}-inventory-difference.json"
+  upload_if_exists "${source_dir}/conda-resolved.cdx.json" "${env_prefix}/preflight-${stage}-conda-resolved.cdx.json"
+  upload_if_exists "${source_dir}/installed-conda.cdx.json" "${env_prefix}/preflight-${stage}-installed-conda.cdx.json"
+  upload_if_exists "${source_dir}/conda-${CONDA_SUBDIR}.explicit.txt" "${requirements_prefix}/preflight-${stage}-conda-${CONDA_SUBDIR}.explicit.txt"
+  upload_if_exists "${source_dir}/osv-report.json" "${model_prefix}/preflight-${stage}-osv-report.json"
+  upload_if_exists "${source_dir}/trivy-sbom-report.json" "${model_prefix}/preflight-${stage}-trivy-sbom-report.json"
+  upload_if_exists "${source_dir}/installed-trivy-sbom-report.json" "${model_prefix}/preflight-${stage}-trivy-sbom-report.json"
 }
 
 render_requirements_environment() {
@@ -173,6 +194,8 @@ publish_failure_diagnostics() {
   stop_checkpoint_loop
   write_state "failed"
   upload_if_exists "${RUN_DIR}/restore.log" "${CHECKPOINT_PREFIX}/failures/restore.log"
+  publish_preflight_artifacts plan || true
+  publish_preflight_artifacts installed || true
   upload_if_exists "${RUN_DIR}/stage-state.json" "${CHECKPOINT_PREFIX}/failures/stage-state.json"
   publish_checkpoint "failed"
 }
@@ -323,6 +346,24 @@ if removed or rewritten:
 PY
 fi
 
+case "${TARGET_PLATFORM}" in
+  linux-amd64) CONDA_SUBDIR="linux-64" ;;
+  linux-arm64) CONDA_SUBDIR="linux-aarch64" ;;
+  *) echo "Conda preflight is unsupported for target platform: ${TARGET_PLATFORM}" >&2; exit 2 ;;
+esac
+
+# Gate before package archives are downloaded. This is deliberately skipped
+# only for an analysis-only pip requirements scan, which has no Conda plan.
+if [[ "${REQUIREMENTS_ONLY_SCAN}" != "true" || "${MATERIALIZE_AFTER_SCAN}" == "true" ]]; then
+  "${PYTHON_BIN}" "${SCRIPT_ROOT}/preflight-conda-environment.py" \
+    --environment-file "${RUN_DIR}/environment.yml" \
+    --out-dir "${RUN_DIR}/preflight-plan" \
+    --conda-bin "${MAMBA_BIN}" \
+    --trivy-bin trivy \
+    --platform "${CONDA_SUBDIR}"
+  publish_preflight_artifacts plan
+fi
+
 if [[ "${REQUIREMENTS_ONLY_SCAN}" == "true" && "${MATERIALIZE_AFTER_SCAN}" != "true" ]]; then
   printf '[]\n' > "${RUN_DIR}/conda-list.json"
   : > "${RUN_DIR}/restore.log"
@@ -394,6 +435,17 @@ PY
   "${MAMBA_BIN}" run -r "${ROOT_PREFIX}" -n target python -m pip list --format=freeze > "${RUN_DIR}/requirements.lock.txt"
   "${MAMBA_BIN}" list -r "${ROOT_PREFIX}" -n target --json > "${RUN_DIR}/conda-list.json"
   printf '%s\n' "${ENV_PREFIX}" > "${RUN_DIR}/env-prefix.txt"
+
+  # Verify that the built prefix exactly matches a fresh target solve, and
+  # scan the installed Conda inventory before it can be delivered.
+  "${PYTHON_BIN}" "${SCRIPT_ROOT}/preflight-conda-environment.py" \
+    --environment-file "${RUN_DIR}/environment.yml" \
+    --out-dir "${RUN_DIR}/preflight-installed" \
+    --conda-bin "${MAMBA_BIN}" \
+    --trivy-bin trivy \
+    --platform "${CONDA_SUBDIR}" \
+    --installed-prefix "${ENV_PREFIX}"
+  publish_preflight_artifacts installed
 fi
 "${PYTHON_BIN}" "${SCRIPT_ROOT}/generate-python-materialization-summary.py" \
   --run-dir "${RUN_DIR}" \
