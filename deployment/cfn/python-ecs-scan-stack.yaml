@@ -564,6 +564,11 @@ Resources:
                       ]
                       if input_type != "requirements-lock" or materialize_after_scan:
                           required.insert(0, f"{prefix}/requirements/python/{platform}/{run_segment}/environment.yml")
+                      if (input_type != "requirements-lock" or materialize_after_scan) and platform.startswith("linux"):
+                          required.extend([
+                              f"{prefix}/traceability/python/{platform}/{run_segment}/preflight-plan-summary.json",
+                              f"{prefix}/traceability/python/{platform}/{run_segment}/preflight-installed-summary.json",
+                          ])
                       missing = [key for key in required if not head_exists(bucket, key)]
                       bundle_prefix = f"{prefix}/packages/offline/python/{platform}/{run_segment}/"
                       bundle_keys = list_keys(bucket, bundle_prefix)
@@ -653,6 +658,8 @@ Resources:
                               "materialization_summary_key": f"{traceability_prefix}materialization-summary.json",
                               "governance_summary_key": f"{traceability_prefix}governance-summary.json",
                               "run_metadata_key": f"{traceability_prefix}run-metadata.json",
+                              "preflight_plan_summary_key": f"{traceability_prefix}preflight-plan-summary.json",
+                              "preflight_installed_summary_key": f"{traceability_prefix}preflight-installed-summary.json",
                               "vulnerability_findings_key": f"{prefix}/governance/python/{platform}/{run_segment}/vulnerability-findings.csv",
                               "remediation_required_key": f"{prefix}/governance/python/{platform}/{run_segment}/remediation-required.csv",
                               "remediation_exceptions_key": f"{prefix}/governance/python/{platform}/{run_segment}/remediation-exceptions.csv",
@@ -660,6 +667,10 @@ Resources:
                               "trivy_report_key": f"{prefix}/model-results/python/{platform}/{run_segment}/trivy-sbom-report.json",
                               "safety_report_key": f"{prefix}/model-results/python/{platform}/{run_segment}/safety-report.json",
                               "osv_report_key": None,
+                              "preflight_plan_osv_report_key": f"{prefix}/model-results/python/{platform}/{run_segment}/preflight-plan-osv-report.json",
+                              "preflight_installed_osv_report_key": f"{prefix}/model-results/python/{platform}/{run_segment}/preflight-installed-osv-report.json",
+                              "preflight_plan_trivy_report_key": f"{prefix}/model-results/python/{platform}/{run_segment}/preflight-plan-trivy-sbom-report.json",
+                              "preflight_installed_trivy_report_key": f"{prefix}/model-results/python/{platform}/{run_segment}/preflight-installed-trivy-sbom-report.json",
                           },
                       }
                   )

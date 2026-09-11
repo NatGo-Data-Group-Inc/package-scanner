@@ -82,6 +82,17 @@ python3 scripts/build-candidate-from-env-artifacts.py \
 - For CPU-only MIP workers, Python ECS materialization normalizes GPU/CUDA-pinned
   candidate specs before solving and retains both the original YAML and the
   normalization log in the evidence bundle.
+- Linux Conda `Blueprint` scans are preflight-gated before package archives are
+  downloaded. The worker dry-resolves the normalized candidate for its target
+  architecture, writes an exact Conda explicit lockfile and plan SBOM, and
+  scans the plan with OSV and Trivy. High/Critical findings stop the run;
+  Medium findings remain visible but are allowed.
+- After materialization, the worker repeats the assessment against the
+  installed Conda inventory and verifies it matches the resolved plan. Both
+  preflight summaries, SBOMs, vulnerability reports, and lockfiles are stored
+  in the normal evidence prefixes and included in the Python support bundle.
+  Rebuild and deploy the Linux scanner image before relying on this behavior in
+  AWS; it does not require a separate service, bucket, or launch command.
 - For `Locked` Python scans, the initial run can complete without generating a
   relocatable environment bundle. If a later enclave handoff or reproducibility
   step requires artifacts, use the Python run detail page to trigger the
@@ -192,6 +203,8 @@ Python artifacts (per platform/timestamp in evidence bucket):
 - Model results: `evidence/model-results/python/<platform>/<ts>/trivy-sbom-report.json` (plus `safety-report.json` if enabled)
 - Governance: `evidence/governance/python/<platform>/<ts>/vulnerability-findings.csv`, `remediation-required.csv`, `remediation-exceptions.csv`, `remediation-spreadsheet.csv`, `governance-summary.json`
 - Traceability: `evidence/traceability/python/<platform>/<ts>/run-metadata.json`, `materialization-summary.json`
+- Conda preflight: `preflight-plan-*` and `preflight-installed-*` artifacts in
+  the same requirements, env-artifacts, model-results, and traceability prefixes.
 - Offline/cache artifacts:
   - `evidence/packages/offline/python/<platform>/<ts>/python-pkgs-<platform>-<ts>.tar.gz`
   - `evidence/env-artifacts/python/<platform>/<ts>/python-env-<platform>-<ts>.tar.gz`

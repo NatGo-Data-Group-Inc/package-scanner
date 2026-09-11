@@ -47,6 +47,8 @@ def artifact_bundle_entries(platform: dict) -> list[tuple[str, str]]:
         ("materialization-summary.json", paths.get("materialization_summary_key")),
         ("governance-summary.json", paths.get("governance_summary_key")),
         ("run-metadata.json", paths.get("run_metadata_key")),
+        ("preflight-plan-summary.json", paths.get("preflight_plan_summary_key")),
+        ("preflight-installed-summary.json", paths.get("preflight_installed_summary_key")),
         (
             "approval-candidate-packages.csv",
             f"{paths.get('requirements_prefix', '')}approval-candidate-packages.csv" if paths.get("requirements_prefix") else None,
@@ -58,6 +60,10 @@ def artifact_bundle_entries(platform: dict) -> list[tuple[str, str]]:
         ("trivy-sbom-report.json", paths.get("trivy_report_key")),
         ("safety-report.json", paths.get("safety_report_key")),
         ("osv-report.json", paths.get("osv_report_key")),
+        ("preflight-plan-osv-report.json", paths.get("preflight_plan_osv_report_key")),
+        ("preflight-installed-osv-report.json", paths.get("preflight_installed_osv_report_key")),
+        ("preflight-plan-trivy-sbom-report.json", paths.get("preflight_plan_trivy_report_key")),
+        ("preflight-installed-trivy-sbom-report.json", paths.get("preflight_installed_trivy_report_key")),
     ]
     return [(filename, key) for filename, key in entries if key]
 
@@ -95,6 +101,7 @@ def posit_handoff_bundle_entries(platform: dict, scan_timestamp: str) -> list[tu
 def python_handoff_bundle_entries(platform: dict, scan_timestamp: str) -> list[tuple[str, str]]:
     paths = platform.get("paths", {})
     platform_name = platform.get("platform")
+    conda_subdir = {"linux-amd64": "linux-64", "linux-arm64": "linux-aarch64"}.get(platform_name)
     entries = [
         ("environment.yml", f"{paths.get('requirements_prefix', '')}environment.yml" if paths.get("requirements_prefix") else None),
         (
@@ -104,6 +111,30 @@ def python_handoff_bundle_entries(platform: dict, scan_timestamp: str) -> list[t
         (
             "conda-list.json",
             f"{paths.get('env_artifacts_prefix', '')}conda-list.json" if paths.get("env_artifacts_prefix") else None,
+        ),
+        ("preflight-plan-summary.json", paths.get("preflight_plan_summary_key")),
+        ("preflight-installed-summary.json", paths.get("preflight_installed_summary_key")),
+        ("preflight-plan-osv-report.json", paths.get("preflight_plan_osv_report_key")),
+        ("preflight-installed-osv-report.json", paths.get("preflight_installed_osv_report_key")),
+        ("preflight-plan-trivy-sbom-report.json", paths.get("preflight_plan_trivy_report_key")),
+        ("preflight-installed-trivy-sbom-report.json", paths.get("preflight_installed_trivy_report_key")),
+        (
+            f"preflight-plan-conda-{conda_subdir}.explicit.txt" if conda_subdir else "",
+            f"{paths.get('requirements_prefix', '')}preflight-plan-conda-{conda_subdir}.explicit.txt"
+            if paths.get("requirements_prefix") and conda_subdir
+            else None,
+        ),
+        (
+            f"preflight-installed-conda-{conda_subdir}.explicit.txt" if conda_subdir else "",
+            f"{paths.get('requirements_prefix', '')}preflight-installed-conda-{conda_subdir}.explicit.txt"
+            if paths.get("requirements_prefix") and conda_subdir
+            else None,
+        ),
+        (
+            "preflight-installed-inventory-difference.json",
+            f"{paths.get('traceability_prefix', '')}preflight-installed-inventory-difference.json"
+            if paths.get("traceability_prefix")
+            else None,
         ),
         ("materialization-summary.json", paths.get("materialization_summary_key")),
         ("run-metadata.json", paths.get("run_metadata_key")),

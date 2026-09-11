@@ -1,0 +1,43 @@
+name: bottom-solve
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  # CPU-only preflight target: Linux x86_64, Python 3.11.
+  # Keep these direct requirements unpinned so the solver can select the
+  # newest mutually compatible package set before vulnerability evaluation.
+  - python=3.11
+  # OSV fixes the setuptools advisory found in preflight at 83.0.0.
+  - setuptools>=83.0.0
+  - pyarrow
+  - pytorch
+  - artic
+  - bcftools
+  - biopython
+  - blas
+  - blas-devel
+  - blast
+  - cutadapt
+  - kaleido-core
+  - kraken2
+  - krona
+  - mafft
+  - matplotlib-base
+  - matplotlib-inline
+  - minimap2
+  - multiqc
+  - nanoplot
+  - numpy
+  - pango
+  - pigz
+  - plotly
+  - porechop
+  - primalbedtools
+  - pyfaidx
+  - reportlab
+  - samtools
+  - seaborn
+  - seaborn-base
+  - sourmash
+  - sourmash-minimal
+  - trim-galore

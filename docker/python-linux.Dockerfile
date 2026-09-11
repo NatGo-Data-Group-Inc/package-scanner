@@ -49,6 +49,7 @@ COPY scripts/extract-archive.py /opt/package-scanner/scripts/extract-archive.py
 COPY scripts/generate-governance-artifacts.py /opt/package-scanner/scripts/generate-governance-artifacts.py
 COPY scripts/generate-python-materialization-summary.py /opt/package-scanner/scripts/generate-python-materialization-summary.py
 COPY scripts/plan-python-environment-install.py /opt/package-scanner/scripts/plan-python-environment-install.py
+COPY scripts/preflight-conda-environment.py /opt/package-scanner/scripts/preflight-conda-environment.py
 COPY scripts/run-python-ecs-task.sh /opt/package-scanner/scripts/run-python-ecs-task.sh
 COPY package_scanner /opt/package-scanner/package_scanner
 

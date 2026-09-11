@@ -83,6 +83,8 @@ def build_catalog_record(
                     "materialization_summary_key": f"{paths['traceability_prefix']}materialization-summary.json",
                     "governance_summary_key": f"{paths['traceability_prefix']}governance-summary.json",
                     "run_metadata_key": f"{paths['traceability_prefix']}run-metadata.json",
+                    "preflight_plan_summary_key": f"{paths['traceability_prefix']}preflight-plan-summary.json" if ecosystem == "python" else None,
+                    "preflight_installed_summary_key": f"{paths['traceability_prefix']}preflight-installed-summary.json" if ecosystem == "python" else None,
                     "preflight_native_deps_key": f"{paths['traceability_prefix']}preflight-native-deps.json" if ecosystem == "r" else None,
                     "vulnerability_findings_key": f"{paths['governance_prefix']}vulnerability-findings.csv",
                     "remediation_required_key": f"{paths['governance_prefix']}remediation-required.csv",
@@ -91,6 +93,10 @@ def build_catalog_record(
                     "trivy_report_key": f"{paths['model_results_prefix']}trivy-sbom-report.json",
                     "safety_report_key": f"{paths['model_results_prefix']}safety-report.json" if ecosystem == "python" else None,
                     "osv_report_key": f"{paths['model_results_prefix']}osv-report.json" if ecosystem == "r" else None,
+                    "preflight_plan_osv_report_key": f"{paths['model_results_prefix']}preflight-plan-osv-report.json" if ecosystem == "python" else None,
+                    "preflight_installed_osv_report_key": f"{paths['model_results_prefix']}preflight-installed-osv-report.json" if ecosystem == "python" else None,
+                    "preflight_plan_trivy_report_key": f"{paths['model_results_prefix']}preflight-plan-trivy-sbom-report.json" if ecosystem == "python" else None,
+                    "preflight_installed_trivy_report_key": f"{paths['model_results_prefix']}preflight-installed-trivy-sbom-report.json" if ecosystem == "python" else None,
                 },
             }
         )

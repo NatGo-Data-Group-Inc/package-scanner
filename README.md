@@ -46,6 +46,16 @@ Project policies:
   - remediation-required list
   - remediation-exceptions list
   - remediation spreadsheet (action tracker)
+- Local Conda preflight for an unpinned candidate:
+  - dry-resolves package metadata without creating an environment or downloading
+    package archives
+  - generates a CycloneDX SBOM from the resolved Conda plan and scans it with Trivy
+  - checks the resolved package names and versions against OSV's PyPI data
+  - fails only on High or Critical findings; Medium is reported but allowed
+- AWS Linux Conda blueprint scans use that same preflight before materializing
+  and again against the installed inventory. The resulting lockfile, SBOMs,
+  reports, and summaries use the existing evidence, catalog, web UI, and
+  Python handoff-bundle paths.
 - Split S3 model:
   - long-term evidence artifacts
   - short-lived deployment/build artifacts
@@ -164,6 +174,27 @@ Webapp candidate notes:
   action to build environment artifacts later from the scanned locked input.
 
 ## Quick Start
+
+### Local Conda preflight
+
+Use this before a costly environment materialization. It needs a Conda-compatible
+solver (`conda`, `mamba`, or `micromamba`) and network access to the configured
+channels and OSV. The command writes its evidence to the chosen output directory;
+it does not create the requested environment.
+
+```bash
+python3 scripts/preflight-conda-environment.py \
+  --environment-file candidates/bottom-solve.yml \
+  --out-dir /tmp/bottom-solve-preflight \
+  --conda-bin micromamba \
+  --platform linux-64
+```
+
+The evidence includes `conda-dry-run.json`, `resolved-packages.json`,
+`conda-resolved.cdx.json`, `trivy-sbom-report.json`, `osv-report.json`, and
+`preflight-summary.json`. OSV has no Conda ecosystem, so
+its assessment covers packages whose Conda names and versions correspond to PyPI
+packages; native Conda coverage requires a Conda-capable vulnerability scanner.
 
 1. Deploy the stack (canonical bash):
 
