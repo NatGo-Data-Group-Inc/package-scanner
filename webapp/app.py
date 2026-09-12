@@ -346,7 +346,7 @@ def parse_state_machine_arns(configured: str | None, legacy: str | None, default
 
 ACTIVE_RUN_STAGE_ORDER = {
     "r": ["preflight", "restore", "restored", "analysis", "governance", "publish", "completed"],
-    "python": ["materialize", "restored", "analysis", "governance", "publish", "completed"],
+    "python": ["preflight-plan", "materialize", "preflight-installed", "restored", "analysis", "governance", "publish", "completed"],
 }
 
 
@@ -360,6 +360,10 @@ def stage_display_name(stage: str | None) -> str:
         "retrying": "Retrying",
         "finalizing": "Finalizing",
         "failed": "Failed",
+        "preflight-plan": "Preflight plan",
+        "preflight-installed": "Installed preflight",
+        "preflight-plan-failed": "Preflight plan failed",
+        "preflight-installed-failed": "Installed preflight failed",
     }
     if normalized.lower() in special:
         return special[normalized.lower()]
@@ -387,6 +391,7 @@ def stage_steps_for_run(ecosystem: str, current_stage: str | None, status: str) 
     normalized_stage = str(current_stage or "").strip().lower()
     normalized_status = str(status or "").strip().upper()
     failed = normalized_status in {"FAILED", "TIMED_OUT", "ABORTED"}
+    failed_stage = normalized_stage.removesuffix("-failed") if normalized_stage.endswith("-failed") else normalized_stage
     steps: list[dict[str, str]] = []
     if normalized_status == "RUNNING" and normalized_stage in {"completed", "finalizing"}:
         for index, stage in enumerate(order):
@@ -394,13 +399,13 @@ def stage_steps_for_run(ecosystem: str, current_stage: str | None, status: str) 
             steps.append({"name": stage_display_name(stage), "status": step_status})
         return steps
     for stage in order:
-        if failed and stage == normalized_stage:
+        if failed and stage == failed_stage:
             step_status = "failed"
         elif normalized_status == "SUCCEEDED" and normalized_stage == "completed":
             step_status = "done"
         elif normalized_stage == stage:
             step_status = "current"
-        elif normalized_stage in order and order.index(stage) < order.index(normalized_stage):
+        elif failed_stage in order and order.index(stage) < order.index(failed_stage):
             step_status = "done"
         else:
             step_status = "pending"
@@ -408,6 +413,24 @@ def stage_steps_for_run(ecosystem: str, current_stage: str | None, status: str) 
     if normalized_status == "RUNNING" and normalized_stage in {"queued", "starting", "retrying"} and steps:
         steps[0]["status"] = "current"
     return steps
+
+
+def preflight_summary_view(summary: dict | None) -> dict | None:
+    if not isinstance(summary, dict):
+        return None
+    gate = summary.get("vulnerability_gate") or {}
+    findings = gate.get("findings_by_severity") or {}
+    findings_display = ", ".join(
+        f"{severity.title()}: {count}" for severity, count in sorted(findings.items())
+    ) or "No findings"
+    installed = summary.get("installed_environment") or {}
+    return {
+        "package_count": summary.get("package_count"),
+        "gate_status": str(gate.get("status") or "unknown").upper(),
+        "blocking_findings": gate.get("blocking_findings", 0),
+        "findings_display": findings_display,
+        "inventory_matches": installed.get("inventory_matches_dry_plan"),
+    }
 
 
 def status_class(status: str) -> str:
@@ -1276,6 +1299,18 @@ def create_app() -> Flask:
                     paths.setdefault("safety_report_key", f"{model_results_prefix}safety-report.json")
                 if ecosystem == "r":
                     paths.setdefault("osv_report_key", f"{model_results_prefix}osv-report.json")
+            if ecosystem == "python":
+                plan = preflight_summary_view(
+                    s3_get_json_optional(record["evidence_bucket"], paths.get("preflight_plan_summary_key", ""))
+                    if paths.get("preflight_plan_summary_key")
+                    else None
+                )
+                installed = preflight_summary_view(
+                    s3_get_json_optional(record["evidence_bucket"], paths.get("preflight_installed_summary_key", ""))
+                    if paths.get("preflight_installed_summary_key")
+                    else None
+                )
+                platform["preflight"] = {"plan": plan, "installed": installed} if plan or installed else None
             try:
                 platform["unknown_findings_count"] = len(unknown_findings_for_platform(record, platform, ecosystem))
             except Exception:

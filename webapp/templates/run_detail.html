@@ -22,6 +22,22 @@
   <h2>{{ platform.platform }}</h2>
   <p>Status: <span class="{{ 'ok' if platform.status == 'SUCCEEDED' else 'bad' }}">{{ platform.status }}</span></p>
   <p>Validated: {{ platform.validated }}</p>
+  {% if ecosystem == 'python' and platform.preflight %}
+  <div class="card">
+    <h3>Conda Preflight</h3>
+    <p class="muted">The plan gate runs before environment materialization; the installed gate verifies the realized Conda prefix afterward.</p>
+    {% for label, check, key in [('Plan preflight', platform.preflight.plan, platform.paths.preflight_plan_summary_key), ('Installed preflight', platform.preflight.installed, platform.paths.preflight_installed_summary_key)] %}
+    {% if check %}
+    <p><strong>{{ label }}:</strong> <span class="{{ 'ok' if check.gate_status == 'PASS' else 'bad' }}">{{ check.gate_status }}</span>
+      {% if check.package_count is not none %}<span class="muted">{{ check.package_count }} resolved packages</span>{% endif %}
+      {% if check.blocking_findings %}<span class="bad">{{ check.blocking_findings }} blocking findings</span>{% endif %}
+      <a href="/download?bucket={{ record.evidence_bucket }}&key={{ key|urlencode }}">summary</a>
+    </p>
+    <p class="muted">{{ check.findings_display }}{% if label == 'Installed preflight' and check.inventory_matches is not none %}; inventory {{ 'matches' if check.inventory_matches else 'does not match' }} dry plan{% endif %}</p>
+    {% endif %}
+    {% endfor %}
+  </div>
+  {% endif %}
   <p><a href="/download-bundle/{{ ecosystem }}/{{ record.execution_id }}/{{ platform.platform }}">download review bundle</a></p>
   {% if ecosystem == 'r' and platform.status == 'SUCCEEDED' %}
   <p><a href="/download-posit-handoff-bundle/{{ record.execution_id }}/{{ platform.platform }}">download Posit handoff bundle</a></p>

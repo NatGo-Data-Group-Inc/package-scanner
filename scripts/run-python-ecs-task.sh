@@ -35,6 +35,7 @@ if [[ "${TARGET_PLATFORM}" == "linux-amd64" && -z "${CONDA_OVERRIDE_ARCHSPEC:-}"
 fi
 
 checkpoint_pid=""
+CURRENT_STAGE="starting"
 
 write_state() {
   local phase="$1"
@@ -152,7 +153,7 @@ restore_packed_python_env() {
 
 publish_checkpoint() {
   local phase="${1:-materialize}"
-  write_state "${phase}"
+  publish_stage_state "${phase}"
   if [[ "${PYTHON_CHECKPOINT_INCLUDE_PKGS}" == "true" && -d "${ROOT_PREFIX}/pkgs" ]]; then
     "${PYTHON_BIN}" "${SCRIPT_ROOT}/bundle-directory.py" \
       --source-dir "${ROOT_PREFIX}/pkgs" \
@@ -168,6 +169,12 @@ publish_checkpoint() {
     aws s3 cp "${RUN_DIR}/checkpoint-python-env.tar.gz.sha256" "${CHECKPOINT_PREFIX}/latest/python-env.tar.gz.sha256" >/dev/null
     rm -f "${RUN_DIR}/checkpoint-python-env.tar.gz" "${RUN_DIR}/checkpoint-python-env.tar.gz.sha256"
   fi
+}
+
+publish_stage_state() {
+  local phase="$1"
+  CURRENT_STAGE="${phase}"
+  write_state "${phase}"
   aws s3 cp "${RUN_DIR}/stage-state.json" "${CHECKPOINT_PREFIX}/latest/stage-state.json" >/dev/null
 }
 
@@ -192,12 +199,16 @@ start_checkpoint_loop() {
 publish_failure_diagnostics() {
   set +e
   stop_checkpoint_loop
-  write_state "failed"
+  local failed_phase="failed"
+  if [[ "${CURRENT_STAGE}" == "preflight-plan" || "${CURRENT_STAGE}" == "preflight-installed" ]]; then
+    failed_phase="${CURRENT_STAGE}-failed"
+  fi
+  write_state "${failed_phase}"
   upload_if_exists "${RUN_DIR}/restore.log" "${CHECKPOINT_PREFIX}/failures/restore.log"
   publish_preflight_artifacts plan || true
   publish_preflight_artifacts installed || true
   upload_if_exists "${RUN_DIR}/stage-state.json" "${CHECKPOINT_PREFIX}/failures/stage-state.json"
-  publish_checkpoint "failed"
+  publish_stage_state "${failed_phase}"
 }
 trap publish_failure_diagnostics ERR
 
@@ -355,6 +366,7 @@ esac
 # Gate before package archives are downloaded. This is deliberately skipped
 # only for an analysis-only pip requirements scan, which has no Conda plan.
 if [[ "${REQUIREMENTS_ONLY_SCAN}" != "true" || "${MATERIALIZE_AFTER_SCAN}" == "true" ]]; then
+  publish_stage_state "preflight-plan"
   "${PYTHON_BIN}" "${SCRIPT_ROOT}/preflight-conda-environment.py" \
     --environment-file "${RUN_DIR}/environment.yml" \
     --out-dir "${RUN_DIR}/preflight-plan" \
@@ -362,6 +374,7 @@ if [[ "${REQUIREMENTS_ONLY_SCAN}" != "true" || "${MATERIALIZE_AFTER_SCAN}" == "t
     --trivy-bin trivy \
     --platform "${CONDA_SUBDIR}"
   publish_preflight_artifacts plan
+  publish_stage_state "materialize"
 fi
 
 if [[ "${REQUIREMENTS_ONLY_SCAN}" == "true" && "${MATERIALIZE_AFTER_SCAN}" != "true" ]]; then
@@ -402,7 +415,7 @@ else
     rm -f "${RUN_DIR}/checkpoint-python-env.tar.gz"
   fi
 
-  write_state "materialize"
+  publish_stage_state "materialize"
   start_checkpoint_loop
 
   if [[ -d "${ENV_PREFIX}" ]]; then
@@ -438,6 +451,7 @@ PY
 
   # Verify that the built prefix exactly matches a fresh target solve, and
   # scan the installed Conda inventory before it can be delivered.
+  publish_stage_state "preflight-installed"
   "${PYTHON_BIN}" "${SCRIPT_ROOT}/preflight-conda-environment.py" \
     --environment-file "${RUN_DIR}/environment.yml" \
     --out-dir "${RUN_DIR}/preflight-installed" \
@@ -482,7 +496,7 @@ if missing_conda or missing_pip:
 PY
 fi
 
-write_state "analysis"
+publish_stage_state "analysis"
 "${PYTHON_BIN}" -m cyclonedx_py requirements "${RUN_DIR}/requirements.lock.txt" -o "${RUN_DIR}/python-packages.cdx.json" || true
 trivy sbom --format json --output "${RUN_DIR}/trivy-sbom-report.json" "${RUN_DIR}/python-packages.cdx.json" || true
 printf '[]\n' > "${RUN_DIR}/safety-report.json"
@@ -490,14 +504,14 @@ if [[ -n "${SAFETY_API_KEY:-}" ]]; then
   safety --key "${SAFETY_API_KEY}" scan --file "${RUN_DIR}/requirements.lock.txt" --output json > "${RUN_DIR}/safety-report.json" || true
 fi
 GOVERNANCE_EXIT=0
-write_state "governance"
+publish_stage_state "governance"
 "${PYTHON_BIN}" "${SCRIPT_ROOT}/generate-governance-artifacts.py" \
   --run-dir "${RUN_DIR}" \
   --platform "${TARGET_PLATFORM}" \
   --remediate-medium "${REMEDIATE_MEDIUM:-true}" \
   --fail-on-medium "${FAIL_ON_MEDIUM:-false}" || GOVERNANCE_EXIT=$?
 
-write_state "publish"
+publish_stage_state "publish"
 if [[ -d "${ROOT_PREFIX}/pkgs" ]]; then
   "${PYTHON_BIN}" "${SCRIPT_ROOT}/bundle-directory.py" \
     --source-dir "${ROOT_PREFIX}/pkgs" \
@@ -550,8 +564,7 @@ upload_if_exists "${RUN_DIR}/python-env-${TARGET_PLATFORM}-${TS}.tar.gz" "s3://$
 upload_if_exists "${RUN_DIR}/python-env-${TARGET_PLATFORM}-${TS}.tar.gz.sha256" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/python-env-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
 printf '{"platform":"%s","timestamp_utc":"%s","scan_execution_id":"%s","python_version":"%s","input_type":"%s","materialize_after_scan":"%s","ephemeral_prefix":"%s/%s/%s","offline_bundle_prefix":"%s/packages/offline/python/%s/%s","cleanup":"requested"}' "${TARGET_PLATFORM}" "${TS}" "${RUN_ID}" "${PYTHON_VERSION}" "${INPUT_TYPE}" "${MATERIALIZE_AFTER_SCAN}" "${EPHEMERAL_PREFIX}" "${TARGET_PLATFORM}" "${TS}" "${EVIDENCE_PREFIX}" "${TARGET_PLATFORM}" "${EVIDENCE_RUN_SEGMENT}" > "${RUN_DIR}/run-metadata.json"
 aws s3 cp "${RUN_DIR}/run-metadata.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/run-metadata.json" >/dev/null
-write_state "completed"
-aws s3 cp "${RUN_DIR}/stage-state.json" "${CHECKPOINT_PREFIX}/latest/stage-state.json" >/dev/null
+publish_stage_state "completed"
 
 if [[ "${GOVERNANCE_EXIT}" -ne 0 ]]; then
   echo "Governance gate failed with exit ${GOVERNANCE_EXIT}" >&2
