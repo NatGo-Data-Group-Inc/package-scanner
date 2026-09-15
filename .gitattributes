@@ -1,0 +1,14 @@
+# Keep text files consistent across Windows, WSL, and Unix worktrees.
+* text=auto eol=lf
+
+# Preserve binary assets exactly as stored.
+*.png -text
+*.jpg -text
+*.jpeg -text
+*.gif -text
+*.pdf -text
+*.zip -text
+*.gz -text
+*.tar -text
+*.jar -text
+*.whl -text
