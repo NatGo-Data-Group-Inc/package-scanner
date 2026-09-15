@@ -235,6 +235,9 @@ Resources:
                   - ecs:UntagResource
                 Resource: '*'
               - Effect: Allow
+                Action: ecs:DescribeClusters
+                Resource: !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${EnvironmentName}-webapp'
+              - Effect: Allow
                 Action:
                   - elasticloadbalancing:CreateListener
                   - elasticloadbalancing:CreateLoadBalancer
