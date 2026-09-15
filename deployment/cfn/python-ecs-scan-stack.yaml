@@ -803,7 +803,7 @@ Resources:
                     "Resource": "arn:aws:states:::ecs:runTask.sync",
                     "Retry": [
                       {
-                        "ErrorEquals": ["ECS.AmazonECSException", "ECS.ClientException", "States.TaskFailed"],
+                        "ErrorEquals": ["ECS.AmazonECSException", "ECS.ClientException"],
                         "IntervalSeconds": 30,
                         "BackoffRate": 2.0,
                         "MaxAttempts": 6
@@ -866,7 +866,7 @@ Resources:
                     "Resource": "arn:aws:states:::ecs:runTask.sync",
                     "Retry": [
                       {
-                        "ErrorEquals": ["ECS.AmazonECSException", "ECS.ClientException", "States.TaskFailed"],
+                        "ErrorEquals": ["ECS.AmazonECSException", "ECS.ClientException"],
                         "IntervalSeconds": 30,
                         "BackoffRate": 2.0,
                         "MaxAttempts": 6
@@ -929,7 +929,7 @@ Resources:
                     "Resource": "arn:aws:states:::ecs:runTask.sync",
                     "Retry": [
                       {
-                        "ErrorEquals": ["ECS.AmazonECSException", "ECS.ClientException", "States.TaskFailed"],
+                        "ErrorEquals": ["ECS.AmazonECSException", "ECS.ClientException"],
                         "IntervalSeconds": 30,
                         "BackoffRate": 2.0,
                         "MaxAttempts": 6

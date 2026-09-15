@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 TARGET_PLATFORM="${1:?platform argument required}"
 TS="${SCAN_TIMESTAMP:-$(date -u +%Y%m%dT%H%M%SZ)}"
@@ -198,6 +198,9 @@ start_checkpoint_loop() {
 }
 
 publish_failure_diagnostics() {
+  local failure_status=$?
+  # Diagnostic failures must neither recurse nor resume the failed scan.
+  trap - ERR
   set +e
   stop_checkpoint_loop
   local failed_phase="failed"
@@ -210,6 +213,7 @@ publish_failure_diagnostics() {
   publish_preflight_artifacts installed || true
   upload_if_exists "${RUN_DIR}/stage-state.json" "${CHECKPOINT_PREFIX}/failures/stage-state.json"
   publish_stage_state "${failed_phase}"
+  exit "${failure_status}"
 }
 trap publish_failure_diagnostics ERR
 
