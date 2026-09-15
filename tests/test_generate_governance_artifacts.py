@@ -107,6 +107,37 @@ class GovernanceGeneratorTests(unittest.TestCase):
         finally:
             shutil.rmtree(run_dir, ignore_errors=True)
 
+    def test_preflight_resolved_package_envelope_produces_approval_manifest(self):
+        run_dir = self.tmp_root / f"run-{uuid.uuid4().hex}"
+        run_dir.mkdir(parents=True, exist_ok=False)
+        try:
+            (run_dir / "requirements.lock.txt").write_text("pip==24.0\n", encoding="utf-8")
+            (run_dir / "conda-list.json").write_text(
+                json.dumps({
+                    "platform": "linux-64",
+                    "packages": [
+                        {"name": "python", "version": "3.12.1", "build": "h123_0"},
+                        {"name": "numpy", "version": "2.1.0", "build": "py312_0"},
+                    ],
+                }),
+                encoding="utf-8",
+            )
+            (run_dir / "trivy-sbom-report.json").write_text(
+                '{"Results": []}', encoding="utf-8"
+            )
+            (run_dir / "safety-report.json").write_text("[]", encoding="utf-8")
+
+            result = self.mod.main([
+                "--run-dir", str(run_dir),
+                "--platform", "linux-amd64",
+            ])
+            self.assertTrue((run_dir / "approval-candidate-packages.csv").exists())
+            self.assertEqual(self.mod.parse_conda_list(run_dir / "conda-list.json")[0]["package_name"], "python")
+            summary = result["summary"]
+            self.assertEqual(summary["counts"]["approval_candidates"], 3)
+        finally:
+            shutil.rmtree(run_dir, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()

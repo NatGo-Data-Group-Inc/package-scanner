@@ -84,6 +84,8 @@ def parse_conda_list(path: Path) -> List[dict]:
     if not path.exists():
         return []
     data = load_json(path)
+    if isinstance(data, dict):
+        data = data.get("packages", [])
     if not isinstance(data, list):
         return []
     rows = []
