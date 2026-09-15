@@ -17,9 +17,9 @@ class WebappPreflightTests(unittest.TestCase):
         self.assertEqual(
             [(step["name"], step["status"]) for step in steps[:3]],
             [
-                ("Preflight plan", "done"),
+                ("Preflight Plan", "done"),
                 ("Materialize", "done"),
-                ("Installed preflight", "current"),
+                ("Preflight Installed", "current"),
             ],
         )
 
