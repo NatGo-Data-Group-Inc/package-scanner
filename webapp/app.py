@@ -2870,6 +2870,19 @@ def create_app() -> Flask:
             region=app.config["AWS_REGION"],
             profile=app.config["AWS_PROFILE"],
         )
+        return render_template(
+            "candidate_started.html",
+            candidate_name=candidate_name,
+            platform=platform,
+            execution_name=execution_name,
+            execution_arn=start_data.get("executionArn"),
+            input_uri=f"s3://{input_bucket}/{input_object_key}",
+            summary_uri=f"s3://{evidence_bucket}/{app.config['CATALOG_PREFIX']}/orchestration/python/{execution_name}/orchestration-summary.json",
+            auth_error=None,
+            already_running=False,
+            input_kind=input_kind,
+            scan_mode="build-artifacts" if materialize_after_scan and input_kind == "requirements-lock" else input_kind,
+        )
 
     @app.route("/runs/python/<execution_id>/<platform>/approve-preflight", methods=["POST"])
     def approve_python_preflight(execution_id: str, platform: str):
@@ -2887,20 +2900,6 @@ def create_app() -> Flask:
         approval = {"schema_version": 1, "approved": True, "approved_by": approver, "approved_at": datetime.now(timezone.utc).isoformat(), "preflight_execution_id": execution_id, "platform": platform, "input_bucket": record.get("input_bucket"), "input_object_key": record.get("input_object_key"), "approved_input_key": approved_input_key, "input_sha256": hashlib.sha256(input_bytes).hexdigest()}
         s3_put_bytes(record["evidence_bucket"], approval_key, (json.dumps(approval, indent=2) + "\n").encode("utf-8"), region=app.config["AWS_REGION"], profile=app.config["AWS_PROFILE"], content_type="application/json")
         return launch_python_candidate_scan(candidate_name=str(record.get("input_label") or execution_id), candidate_source={"source": "s3", "input_object_key": approved_input_key, "s3_bucket": record["input_bucket"]}, platform=platform, input_kind="environment-yaml", materialize_after_scan=True)
-        return render_template(
-            "candidate_started.html",
-            candidate_name=candidate_name,
-            platform=platform,
-            execution_name=execution_name,
-            execution_arn=start_data.get("executionArn"),
-            input_uri=f"s3://{input_bucket}/{input_object_key}",
-            summary_uri=f"s3://{evidence_bucket}/{app.config['CATALOG_PREFIX']}/orchestration/python/{execution_name}/orchestration-summary.json",
-            auth_error=None,
-            already_running=False,
-            input_kind=input_kind,
-            scan_mode="build-artifacts" if materialize_after_scan and input_kind == "requirements-lock" else input_kind,
-        )
-
     @app.route("/runs/<ecosystem>/<execution_id>")
     def run_detail(ecosystem: str, execution_id: str):
         if ecosystem not in {"r", "python"}:
