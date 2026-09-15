@@ -305,10 +305,13 @@ def generate_governance_artifacts(
     remediate_medium_flag = bool(remediate_medium)
     fail_on_medium_flag = bool(fail_on_medium)
 
+    requirements_path = run_path / "requirements.lock.txt"
     approval = dedupe_approval(
-        parse_requirements_lock(run_path / "requirements.lock.txt")
+        (parse_requirements_lock(requirements_path) if requirements_path.exists() else [])
         + parse_conda_list(run_path / "conda-list.json")
     )
+    if not approval:
+        raise GovernanceError("No resolved package inventory was available for approval.")
     for row in approval:
         row["platform"] = platform
 

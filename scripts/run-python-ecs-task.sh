@@ -21,6 +21,7 @@ PYTHON_CHECKPOINT_INCLUDE_PKGS="${PYTHON_CHECKPOINT_INCLUDE_PKGS:-false}"
 PYTHON_CHECKPOINT_INCLUDE_ENV="${PYTHON_CHECKPOINT_INCLUDE_ENV:-false}"
 INPUT_TYPE="${INPUT_TYPE:-environment-yaml}"
 MATERIALIZE_AFTER_SCAN="${MATERIALIZE_AFTER_SCAN:-true}"
+PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-false}"
 CONDA_SUBDIR=""
 
 if [[ -z "${CONDA_OVERRIDE_GLIBC:-}" ]] && command -v getconf >/dev/null 2>&1; then
@@ -375,6 +376,34 @@ if [[ "${REQUIREMENTS_ONLY_SCAN}" != "true" || "${MATERIALIZE_AFTER_SCAN}" == "t
     --platform "${CONDA_SUBDIR}"
   publish_preflight_artifacts plan
   publish_stage_state "materialize"
+fi
+
+# A preflight review run intentionally stops before any package archive is
+# downloaded or environment is linked.  It publishes the dry-resolved inventory
+# and its vulnerability/governance evidence for Cyber approval.
+if [[ "${PREFLIGHT_ONLY}" == "true" ]]; then
+  cp "${RUN_DIR}/preflight-plan/resolved-packages.json" "${RUN_DIR}/conda-list.json"
+  cp "${RUN_DIR}/preflight-plan/conda-resolved.cdx.json" "${RUN_DIR}/python-packages.cdx.json"
+  cp "${RUN_DIR}/preflight-plan/trivy-sbom-report.json" "${RUN_DIR}/trivy-sbom-report.json"
+  printf '[]\n' > "${RUN_DIR}/safety-report.json"
+  publish_stage_state "governance"
+  "${PYTHON_BIN}" "${SCRIPT_ROOT}/generate-governance-artifacts.py" \
+    --run-dir "${RUN_DIR}" --platform "${TARGET_PLATFORM}" \
+    --remediate-medium "${REMEDIATE_MEDIUM:-true}" --fail-on-medium "${FAIL_ON_MEDIUM:-false}"
+  publish_stage_state "publish"
+  aws s3 cp "${RUN_DIR}/" "s3://${EPHEMERAL_BUCKET}/${EPHEMERAL_PREFIX}/${TARGET_PLATFORM}/${TS}/" --recursive >/dev/null
+  upload_if_exists "${RUN_DIR}/environment.yml" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/environment.yml"
+  upload_if_exists "${RUN_DIR}/conda-list.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/conda-list.json"
+  upload_if_exists "${RUN_DIR}/approval-candidate-packages.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/approval-candidate-packages.csv"
+  upload_if_exists "${RUN_DIR}/trivy-sbom-report.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/model-results/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/trivy-sbom-report.json"
+  for artifact in vulnerability-findings.csv remediation-required.csv remediation-exceptions.csv remediation-spreadsheet.csv; do
+    upload_if_exists "${RUN_DIR}/${artifact}" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/governance/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/${artifact}"
+  done
+  upload_if_exists "${RUN_DIR}/governance-summary.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/governance-summary.json"
+  printf '{"platform":"%s","timestamp_utc":"%s","scan_execution_id":"%s","preflight_only":true,"materialize_after_scan":false}' "${TARGET_PLATFORM}" "${TS}" "${RUN_ID}" > "${RUN_DIR}/run-metadata.json"
+  aws s3 cp "${RUN_DIR}/run-metadata.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/run-metadata.json" >/dev/null
+  publish_stage_state "completed"
+  exit 0
 fi
 
 if [[ "${REQUIREMENTS_ONLY_SCAN}" == "true" && "${MATERIALIZE_AFTER_SCAN}" != "true" ]]; then

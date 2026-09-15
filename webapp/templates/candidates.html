@@ -79,7 +79,7 @@
           <td>
             <strong>Blueprint</strong>
             <div><code>{{ candidate.environment.filename }}</code></div>
-            <div class="muted">Build the environment from this file, then scan and publish artifacts.</div>
+            <div class="muted">Dry-resolve and publish Cyber review artifacts. Materialization begins only after approval.</div>
           </td>
           <td>
             <span class="chip">{{ candidate.environment.source|upper }}</span>
@@ -103,7 +103,6 @@
                 <select name="platform" {% if candidate.environment.start_disabled %}disabled{% endif %}>
                   <option value="linux-amd64" selected>linux-amd64</option>
                   <option value="linux-arm64">linux-arm64</option>
-                  <option value="windows-amd64">windows-amd64</option>
                 </select>
               </label>
               <label>
@@ -121,7 +120,7 @@
                 </select>
               </label>
               <button type="submit" {% if candidate.environment.start_disabled %}disabled{% endif %}>
-                {{ 'Already Running' if candidate.environment.start_disabled else 'Start Build + Scan' }}
+                {{ 'Already Running' if candidate.environment.start_disabled else 'Start Preflight Review' }}
               </button>
             </form>
           </td>

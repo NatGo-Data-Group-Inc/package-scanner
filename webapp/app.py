@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import logging
@@ -2757,15 +2758,16 @@ def create_app() -> Flask:
             abort(404, "Candidate YAML not found")
 
         platform = request.form.get("platform", "linux-amd64")
-        if platform not in {"linux-amd64", "linux-arm64", "windows-amd64"}:
-            abort(400, "Unsupported Python ECS platform")
+        if platform not in {"linux-amd64", "linux-arm64"}:
+            abort(400, "Cyber-gated Conda preflight currently supports linux-amd64 and linux-arm64")
 
         return launch_python_candidate_scan(
             candidate_name=safe_name,
             candidate_source=candidate_source,
             platform=platform,
             input_kind="environment-yaml",
-            materialize_after_scan=True,
+            materialize_after_scan=False,
+            preflight_only=True,
         )
 
     @app.route("/candidates/python/<candidate_name>/start-requirements", methods=["POST"])
@@ -2796,6 +2798,7 @@ def create_app() -> Flask:
         platform: str,
         input_kind: str,
         materialize_after_scan: bool,
+        preflight_only: bool = False,
     ):
         stack = describe_stack(app.config["PYTHON_STACK_NAME"])
         input_bucket = stack_output_value(stack, "InputBucketName")
@@ -2841,6 +2844,7 @@ def create_app() -> Flask:
             "input_object_key": input_object_key,
             "input_type": input_kind,
             "materialize_after_scan": str(materialize_after_scan).lower(),
+            "preflight_only": str(preflight_only).lower(),
             "evidence_bucket": evidence_bucket,
             "evidence_prefix": app.config["CATALOG_PREFIX"],
             "ephemeral_bucket": ephemeral_bucket,
@@ -2866,6 +2870,23 @@ def create_app() -> Flask:
             region=app.config["AWS_REGION"],
             profile=app.config["AWS_PROFILE"],
         )
+
+    @app.route("/runs/python/<execution_id>/<platform>/approve-preflight", methods=["POST"])
+    def approve_python_preflight(execution_id: str, platform: str):
+        approver = str(request.form.get("approved_by") or "").strip()
+        if not approver:
+            abort(400, "Cyber approver name is required")
+        record = enrich_record(load_record("python", execution_id), "python")
+        selected = next((item for item in record.get("platforms", []) if item.get("platform") == platform), None)
+        if not record.get("preflight_only") or not selected or selected.get("status") != "SUCCEEDED" or not selected.get("validated"):
+            abort(409, "Only a successful validated preflight can be approved for materialization")
+        approval_key = f"{app.config['CATALOG_PREFIX'].rstrip('/')}/catalog/python/approvals/{execution_id}/{platform}.json"
+        input_bytes = s3_get_bytes(record["input_bucket"], record["input_object_key"], region=app.config["AWS_REGION"], profile=app.config["AWS_PROFILE"])
+        approved_input_key = f"inputs/python/approved-preflights/{execution_id}/{platform}/environment.yml"
+        s3_put_bytes(record["input_bucket"], approved_input_key, input_bytes, region=app.config["AWS_REGION"], profile=app.config["AWS_PROFILE"], content_type="application/x-yaml")
+        approval = {"schema_version": 1, "approved": True, "approved_by": approver, "approved_at": datetime.now(timezone.utc).isoformat(), "preflight_execution_id": execution_id, "platform": platform, "input_bucket": record.get("input_bucket"), "input_object_key": record.get("input_object_key"), "approved_input_key": approved_input_key, "input_sha256": hashlib.sha256(input_bytes).hexdigest()}
+        s3_put_bytes(record["evidence_bucket"], approval_key, (json.dumps(approval, indent=2) + "\n").encode("utf-8"), region=app.config["AWS_REGION"], profile=app.config["AWS_PROFILE"], content_type="application/json")
+        return launch_python_candidate_scan(candidate_name=str(record.get("input_label") or execution_id), candidate_source={"source": "s3", "input_object_key": approved_input_key, "s3_bucket": record["input_bucket"]}, platform=platform, input_kind="environment-yaml", materialize_after_scan=True)
         return render_template(
             "candidate_started.html",
             candidate_name=candidate_name,

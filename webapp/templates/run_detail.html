@@ -22,6 +22,16 @@
   <h2>{{ platform.platform }}</h2>
   <p>Status: <span class="{{ 'ok' if platform.status == 'SUCCEEDED' else 'bad' }}">{{ platform.status }}</span></p>
   <p>Validated: {{ platform.validated }}</p>
+  {% if ecosystem == 'python' and record.preflight_only and platform.status == 'SUCCEEDED' and platform.validated %}
+  <div class="card">
+    <h3>Cyber approval required</h3>
+    <p class="muted">Approval is recorded before a separate materialization run creates transferable environment bundles.</p>
+    <form method="post" action="/runs/python/{{ record.execution_id }}/{{ platform.platform }}/approve-preflight">
+      <label>Cyber approver name <input type="text" name="approved_by" required></label>
+      <button type="submit">Approve and Start Materialization</button>
+    </form>
+  </div>
+  {% endif %}
   {% if ecosystem == 'python' and platform.preflight %}
   <div class="card">
     <h3>Conda Preflight</h3>

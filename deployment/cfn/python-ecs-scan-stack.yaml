@@ -546,6 +546,7 @@ Resources:
               overall = "SUCCEEDED"
               input_type = str(event.get("input_type") or "environment-yaml")
               materialize_after_scan = str(event.get("materialize_after_scan") or "true").lower() == "true"
+              preflight_only = str(event.get("preflight_only") or "false").lower() == "true"
               for result in event["results"]:
                   platform = result["platform"]
                   status = result["status"]
@@ -562,9 +563,16 @@ Resources:
                           f"{prefix}/traceability/python/{platform}/{run_segment}/materialization-summary.json",
                           f"{prefix}/traceability/python/{platform}/{run_segment}/run-metadata.json",
                       ]
-                      if input_type != "requirements-lock" or materialize_after_scan:
+                      if preflight_only:
+                          required = [
+                              f"{prefix}/requirements/python/{platform}/{run_segment}/environment.yml",
+                              f"{prefix}/traceability/python/{platform}/{run_segment}/preflight-plan-summary.json",
+                              f"{prefix}/traceability/python/{platform}/{run_segment}/governance-summary.json",
+                              f"{prefix}/traceability/python/{platform}/{run_segment}/run-metadata.json",
+                          ]
+                      if not preflight_only and (input_type != "requirements-lock" or materialize_after_scan):
                           required.insert(0, f"{prefix}/requirements/python/{platform}/{run_segment}/environment.yml")
-                      if (input_type != "requirements-lock" or materialize_after_scan) and platform.startswith("linux"):
+                      if not preflight_only and (input_type != "requirements-lock" or materialize_after_scan) and platform.startswith("linux"):
                           required.extend([
                               f"{prefix}/traceability/python/{platform}/{run_segment}/preflight-plan-summary.json",
                               f"{prefix}/traceability/python/{platform}/{run_segment}/preflight-installed-summary.json",
@@ -572,7 +580,7 @@ Resources:
                       missing = [key for key in required if not head_exists(bucket, key)]
                       bundle_prefix = f"{prefix}/packages/offline/python/{platform}/{run_segment}/"
                       bundle_keys = list_keys(bucket, bundle_prefix)
-                      if input_type != "requirements-lock" or materialize_after_scan:
+                      if not preflight_only and (input_type != "requirements-lock" or materialize_after_scan):
                           tarballs = [key for key in bundle_keys if key.endswith(".tar.gz")]
                           checksums = [key for key in bundle_keys if key.endswith(".tar.gz.sha256")]
                           if not tarballs:
@@ -602,6 +610,7 @@ Resources:
                   "input_object_key": event.get("input_object_key"),
                   "input_type": input_type,
                   "materialize_after_scan": materialize_after_scan,
+                  "preflight_only": preflight_only,
                   "input_uri": f"s3://{event['input_bucket']}/{event['input_object_key']}" if event.get("input_bucket") and event.get("input_object_key") else None,
                   "platforms": platforms,
               }
@@ -625,6 +634,7 @@ Resources:
                   "input_object_key": event.get("input_object_key"),
                   "input_type": input_type,
                   "materialize_after_scan": materialize_after_scan,
+                  "preflight_only": preflight_only,
                   "input_uri": f"s3://{event['input_bucket']}/{event['input_object_key']}" if event.get("input_bucket") and event.get("input_object_key") else None,
                   "platforms": [],
                   "platform_count": len(platforms),
@@ -753,6 +763,7 @@ Resources:
                 "input_object_key.$": "$.input_object_key",
                 "input_type.$": "$.input_type",
                 "materialize_after_scan.$": "$.materialize_after_scan",
+                "preflight_only.$": "$.preflight_only",
                 "evidence_bucket.$": "$.evidence_bucket",
                 "evidence_prefix.$": "$.evidence_prefix",
                 "ephemeral_bucket.$": "$.ephemeral_bucket",
@@ -810,6 +821,7 @@ Resources:
                               { "Name": "INPUT_OBJECT_KEY", "Value.$": "$.input_object_key" },
                               { "Name": "INPUT_TYPE", "Value.$": "$.input_type" },
                               { "Name": "MATERIALIZE_AFTER_SCAN", "Value.$": "$.materialize_after_scan" },
+                              { "Name": "PREFLIGHT_ONLY", "Value.$": "$.preflight_only" },
                               { "Name": "EVIDENCE_BUCKET", "Value.$": "$.evidence_bucket" },
                               { "Name": "EVIDENCE_PREFIX", "Value.$": "$.evidence_prefix" },
                               { "Name": "EPHEMERAL_BUCKET", "Value.$": "$.ephemeral_bucket" },
@@ -872,6 +884,7 @@ Resources:
                               { "Name": "INPUT_OBJECT_KEY", "Value.$": "$.input_object_key" },
                               { "Name": "INPUT_TYPE", "Value.$": "$.input_type" },
                               { "Name": "MATERIALIZE_AFTER_SCAN", "Value.$": "$.materialize_after_scan" },
+                              { "Name": "PREFLIGHT_ONLY", "Value.$": "$.preflight_only" },
                               { "Name": "EVIDENCE_BUCKET", "Value.$": "$.evidence_bucket" },
                               { "Name": "EVIDENCE_PREFIX", "Value.$": "$.evidence_prefix" },
                               { "Name": "EPHEMERAL_BUCKET", "Value.$": "$.ephemeral_bucket" },
@@ -934,6 +947,7 @@ Resources:
                               { "Name": "INPUT_OBJECT_KEY", "Value.$": "$.input_object_key" },
                               { "Name": "INPUT_TYPE", "Value.$": "$.input_type" },
                               { "Name": "MATERIALIZE_AFTER_SCAN", "Value.$": "$.materialize_after_scan" },
+                              { "Name": "PREFLIGHT_ONLY", "Value.$": "$.preflight_only" },
                               { "Name": "EVIDENCE_BUCKET", "Value.$": "$.evidence_bucket" },
                               { "Name": "EVIDENCE_PREFIX", "Value.$": "$.evidence_prefix" },
                               { "Name": "EPHEMERAL_BUCKET", "Value.$": "$.ephemeral_bucket" },
@@ -1001,6 +1015,7 @@ Resources:
                   "input_object_key.$": "$.input_object_key",
                   "input_type.$": "$.input_type",
                   "materialize_after_scan.$": "$.materialize_after_scan",
+                  "preflight_only.$": "$.preflight_only",
                   "evidence_bucket.$": "$.evidence_bucket",
                   "evidence_prefix.$": "$.evidence_prefix",
                   "results.$": "$.results"
