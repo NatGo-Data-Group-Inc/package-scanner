@@ -21,7 +21,7 @@ PYTHON_CHECKPOINT_INCLUDE_PKGS="${PYTHON_CHECKPOINT_INCLUDE_PKGS:-false}"
 PYTHON_CHECKPOINT_INCLUDE_ENV="${PYTHON_CHECKPOINT_INCLUDE_ENV:-false}"
 INPUT_TYPE="${INPUT_TYPE:-environment-yaml}"
 MATERIALIZE_AFTER_SCAN="${MATERIALIZE_AFTER_SCAN:-true}"
-PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-false}"
+SCAN_ONLY="${SCAN_ONLY:-false}"
 CONDA_SUBDIR=""
 
 if [[ -z "${CONDA_OVERRIDE_GLIBC:-}" ]] && command -v getconf >/dev/null 2>&1; then
@@ -36,13 +36,17 @@ if [[ "${TARGET_PLATFORM}" == "linux-amd64" && -z "${CONDA_OVERRIDE_ARCHSPEC:-}"
 fi
 
 checkpoint_pid=""
-CURRENT_STAGE="starting"
 
 write_state() {
   local phase="$1"
   cat > "${RUN_DIR}/stage-state.json" <<EOF
 {"platform":"${TARGET_PLATFORM}","scan_execution_id":"${RUN_ID}","scan_timestamp":"${TS}","phase":"${phase}","checkpoint_prefix":"${CHECKPOINT_PREFIX#s3://}"}
 EOF
+  # Publish every transition, not only the restore/completion checkpoints.
+  # The GUI reads this object while Step Functions is still waiting on the
+  # ECS task, so leaving it local makes a running analysis look stuck at
+  # restored.
+  aws s3 cp "${RUN_DIR}/stage-state.json" "${CHECKPOINT_PREFIX}/latest/stage-state.json" >/dev/null || true
 }
 
 upload_if_exists() {
@@ -54,24 +58,25 @@ upload_if_exists() {
   return 0
 }
 
-publish_preflight_artifacts() {
+publish_package_validation_artifacts() {
   local stage="$1"
-  local source_dir="${RUN_DIR}/preflight-${stage}"
+  local source_dir="${RUN_DIR}/package-validation-${stage}"
   local trace_prefix="s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}"
   local env_prefix="s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}"
   local model_prefix="s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/model-results/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}"
   local requirements_prefix="s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}"
-  upload_if_exists "${source_dir}/preflight-summary.json" "${trace_prefix}/preflight-${stage}-summary.json"
-  upload_if_exists "${source_dir}/conda-dry-run.json" "${trace_prefix}/preflight-${stage}-conda-dry-run.json"
-  upload_if_exists "${source_dir}/resolved-packages.json" "${trace_prefix}/preflight-${stage}-resolved-packages.json"
-  upload_if_exists "${source_dir}/installed-packages.json" "${trace_prefix}/preflight-${stage}-installed-packages.json"
-  upload_if_exists "${source_dir}/installed-inventory-difference.json" "${trace_prefix}/preflight-${stage}-inventory-difference.json"
-  upload_if_exists "${source_dir}/conda-resolved.cdx.json" "${env_prefix}/preflight-${stage}-conda-resolved.cdx.json"
-  upload_if_exists "${source_dir}/installed-conda.cdx.json" "${env_prefix}/preflight-${stage}-installed-conda.cdx.json"
-  upload_if_exists "${source_dir}/conda-${CONDA_SUBDIR}.explicit.txt" "${requirements_prefix}/preflight-${stage}-conda-${CONDA_SUBDIR}.explicit.txt"
-  upload_if_exists "${source_dir}/osv-report.json" "${model_prefix}/preflight-${stage}-osv-report.json"
-  upload_if_exists "${source_dir}/trivy-sbom-report.json" "${model_prefix}/preflight-${stage}-trivy-sbom-report.json"
-  upload_if_exists "${source_dir}/installed-trivy-sbom-report.json" "${model_prefix}/preflight-${stage}-trivy-sbom-report.json"
+  upload_if_exists "${source_dir}/package-validation-summary.json" "${trace_prefix}/package-validation-${stage}-summary.json"
+  upload_if_exists "${source_dir}/conda-dry-run.json" "${trace_prefix}/package-validation-${stage}-conda-dry-run.json"
+  upload_if_exists "${source_dir}/resolved-packages.json" "${trace_prefix}/package-validation-${stage}-resolved-packages.json"
+  upload_if_exists "${source_dir}/resolved-environment.yml" "${requirements_prefix}/package-validation-${stage}-resolved-environment.yml"
+  upload_if_exists "${source_dir}/installed-packages.json" "${trace_prefix}/package-validation-${stage}-installed-packages.json"
+  upload_if_exists "${source_dir}/installed-inventory-difference.json" "${trace_prefix}/package-validation-${stage}-inventory-difference.json"
+  upload_if_exists "${source_dir}/conda-resolved.cdx.json" "${env_prefix}/package-validation-${stage}-conda-resolved.cdx.json"
+  upload_if_exists "${source_dir}/installed-conda.cdx.json" "${env_prefix}/package-validation-${stage}-installed-conda.cdx.json"
+  upload_if_exists "${source_dir}/conda-${CONDA_SUBDIR}.explicit.txt" "${requirements_prefix}/package-validation-${stage}-conda-${CONDA_SUBDIR}.explicit.txt"
+  upload_if_exists "${source_dir}/osv-report.json" "${model_prefix}/package-validation-${stage}-osv-report.json"
+  upload_if_exists "${source_dir}/trivy-sbom-report.json" "${model_prefix}/package-validation-${stage}-trivy-sbom-report.json"
+  upload_if_exists "${source_dir}/installed-trivy-sbom-report.json" "${model_prefix}/package-validation-${stage}-trivy-sbom-report.json"
 }
 
 render_requirements_environment() {
@@ -154,7 +159,7 @@ restore_packed_python_env() {
 
 publish_checkpoint() {
   local phase="${1:-materialize}"
-  publish_stage_state "${phase}"
+  write_state "${phase}"
   if [[ "${PYTHON_CHECKPOINT_INCLUDE_PKGS}" == "true" && -d "${ROOT_PREFIX}/pkgs" ]]; then
     "${PYTHON_BIN}" "${SCRIPT_ROOT}/bundle-directory.py" \
       --source-dir "${ROOT_PREFIX}/pkgs" \
@@ -170,12 +175,6 @@ publish_checkpoint() {
     aws s3 cp "${RUN_DIR}/checkpoint-python-env.tar.gz.sha256" "${CHECKPOINT_PREFIX}/latest/python-env.tar.gz.sha256" >/dev/null
     rm -f "${RUN_DIR}/checkpoint-python-env.tar.gz" "${RUN_DIR}/checkpoint-python-env.tar.gz.sha256"
   fi
-}
-
-publish_stage_state() {
-  local phase="$1"
-  CURRENT_STAGE="${phase}"
-  write_state "${phase}"
   aws s3 cp "${RUN_DIR}/stage-state.json" "${CHECKPOINT_PREFIX}/latest/stage-state.json" >/dev/null
 }
 
@@ -203,16 +202,12 @@ publish_failure_diagnostics() {
   trap - ERR
   set +e
   stop_checkpoint_loop
-  local failed_phase="failed"
-  if [[ "${CURRENT_STAGE}" == "preflight-plan" || "${CURRENT_STAGE}" == "preflight-installed" ]]; then
-    failed_phase="${CURRENT_STAGE}-failed"
-  fi
-  write_state "${failed_phase}"
+  write_state "failed"
   upload_if_exists "${RUN_DIR}/restore.log" "${CHECKPOINT_PREFIX}/failures/restore.log"
-  publish_preflight_artifacts plan || true
-  publish_preflight_artifacts installed || true
+  publish_package_validation_artifacts plan || true
+  publish_package_validation_artifacts installed || true
   upload_if_exists "${RUN_DIR}/stage-state.json" "${CHECKPOINT_PREFIX}/failures/stage-state.json"
-  publish_stage_state "${failed_phase}"
+  publish_checkpoint "failed"
   exit "${failure_status}"
 }
 trap publish_failure_diagnostics ERR
@@ -365,54 +360,48 @@ fi
 case "${TARGET_PLATFORM}" in
   linux-amd64) CONDA_SUBDIR="linux-64" ;;
   linux-arm64) CONDA_SUBDIR="linux-aarch64" ;;
-  *) echo "Conda preflight is unsupported for target platform: ${TARGET_PLATFORM}" >&2; exit 2 ;;
+  *) echo "Conda package validation is unsupported for target platform: ${TARGET_PLATFORM}" >&2; exit 2 ;;
 esac
 
-# Gate before package archives are downloaded. This is deliberately skipped
+# Package-validation gate before package archives are downloaded. This is deliberately skipped
 # only for an analysis-only pip requirements scan, which has no Conda plan.
 if [[ "${REQUIREMENTS_ONLY_SCAN}" != "true" || "${MATERIALIZE_AFTER_SCAN}" == "true" ]]; then
-  publish_stage_state "preflight-plan"
+  write_state "package-validation"
   "${PYTHON_BIN}" "${SCRIPT_ROOT}/preflight-conda-environment.py" \
     --environment-file "${RUN_DIR}/environment.yml" \
-    --out-dir "${RUN_DIR}/preflight-plan" \
+    --out-dir "${RUN_DIR}/package-validation-plan" \
     --conda-bin "${MAMBA_BIN}" \
     --trivy-bin trivy \
     --platform "${CONDA_SUBDIR}"
-  publish_preflight_artifacts plan
-  publish_stage_state "materialize"
+  publish_package_validation_artifacts plan
+  # The resolved lock is generated in the validation workspace. Keep a
+  # canonical copy at the run root so the final evidence publisher and GUI
+  # expose the same opt-in artifact for both build and scan-only runs.
+  if [[ -f "${RUN_DIR}/package-validation-plan/resolved-environment.yml" ]]; then
+    cp "${RUN_DIR}/package-validation-plan/resolved-environment.yml" "${RUN_DIR}/resolved-environment.yml"
+  fi
 fi
 
-# A preflight review run intentionally stops before any package archive is
-# downloaded or environment is linked.  It publishes the dry-resolved inventory
-# and its vulnerability/governance evidence for Cyber approval.
-if [[ "${PREFLIGHT_ONLY}" == "true" ]]; then
-  cp "${RUN_DIR}/preflight-plan/resolved-packages.json" "${RUN_DIR}/conda-list.json"
-  cp "${RUN_DIR}/preflight-plan/conda-resolved.cdx.json" "${RUN_DIR}/python-packages.cdx.json"
-  cp "${RUN_DIR}/preflight-plan/trivy-sbom-report.json" "${RUN_DIR}/trivy-sbom-report.json"
-  printf '[]\n' > "${RUN_DIR}/safety-report.json"
-  publish_stage_state "governance"
-  "${PYTHON_BIN}" "${SCRIPT_ROOT}/generate-governance-artifacts.py" \
-    --run-dir "${RUN_DIR}" --platform "${TARGET_PLATFORM}" \
-    --remediate-medium "${REMEDIATE_MEDIUM:-true}" --fail-on-medium "${FAIL_ON_MEDIUM:-false}"
-  publish_stage_state "publish"
-  aws s3 cp "${RUN_DIR}/" "s3://${EPHEMERAL_BUCKET}/${EPHEMERAL_PREFIX}/${TARGET_PLATFORM}/${TS}/" --recursive >/dev/null
-  upload_if_exists "${RUN_DIR}/environment.yml" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/environment.yml"
-  upload_if_exists "${RUN_DIR}/conda-list.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/conda-list.json"
-  upload_if_exists "${RUN_DIR}/approval-candidate-packages.csv" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/approval-candidate-packages.csv"
-  upload_if_exists "${RUN_DIR}/trivy-sbom-report.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/model-results/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/trivy-sbom-report.json"
-  for artifact in vulnerability-findings.csv remediation-required.csv remediation-exceptions.csv remediation-spreadsheet.csv; do
-    upload_if_exists "${RUN_DIR}/${artifact}" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/governance/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/${artifact}"
-  done
-  upload_if_exists "${RUN_DIR}/governance-summary.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/governance-summary.json"
-  printf '{"platform":"%s","timestamp_utc":"%s","scan_execution_id":"%s","preflight_only":true,"materialize_after_scan":false}' "${TARGET_PLATFORM}" "${TS}" "${RUN_ID}" > "${RUN_DIR}/run-metadata.json"
-  aws s3 cp "${RUN_DIR}/run-metadata.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/run-metadata.json" >/dev/null
-  publish_stage_state "completed"
-  exit 0
-fi
-
-if [[ "${REQUIREMENTS_ONLY_SCAN}" == "true" && "${MATERIALIZE_AFTER_SCAN}" != "true" ]]; then
+if [[ "${SCAN_ONLY}" == "true" || "${MATERIALIZE_AFTER_SCAN}" != "true" || ( "${REQUIREMENTS_ONLY_SCAN}" == "true" && "${MATERIALIZE_AFTER_SCAN}" != "true" ) ]]; then
   printf '[]\n' > "${RUN_DIR}/conda-list.json"
   : > "${RUN_DIR}/restore.log"
+  if [[ "${SCAN_ONLY}" == "true" ]]; then
+    "${PYTHON_BIN}" - "${RUN_DIR}/package-validation-plan/resolved-packages.json" "${RUN_DIR}/conda-list.json" "${RUN_DIR}/environment.yml" "${RUN_DIR}/requirements.lock.txt" <<'PY'
+import json
+import sys
+from pathlib import Path
+import yaml
+
+resolved = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+Path(sys.argv[2]).write_text(json.dumps(resolved.get("packages", []), indent=2) + "\n", encoding="utf-8")
+source = yaml.safe_load(Path(sys.argv[3]).read_text(encoding="utf-8")) or {}
+pip = []
+for item in source.get("dependencies", []) or []:
+    if isinstance(item, dict) and "pip" in item:
+        pip.extend(str(value) for value in item.get("pip", []) or [])
+Path(sys.argv[4]).write_text("\n".join(pip) + ("\n" if pip else ""), encoding="utf-8")
+PY
+  fi
   PYTHON_VERSION="$("${PYTHON_BIN}" - <<'PY'
 import sys
 print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
@@ -436,34 +425,32 @@ else
     fi
   done
 
+  EXACT_CONDA_LOCK="${RUN_DIR}/package-validation-plan/conda-${CONDA_SUBDIR}.explicit.txt"
+  if [[ ! -s "${EXACT_CONDA_LOCK}" ]]; then
+    echo "package-validation-error: missing exact Conda lock ${EXACT_CONDA_LOCK}" >&2
+    exit 2
+  fi
+
   if aws s3 ls "${CHECKPOINT_PREFIX}/latest/python-pkgs.tar.gz" >/dev/null 2>&1; then
     aws s3 cp "${CHECKPOINT_PREFIX}/latest/python-pkgs.tar.gz" "${RUN_DIR}/checkpoint-python-pkgs.tar.gz" >/dev/null
     mkdir -p "${ROOT_PREFIX}/pkgs"
     "${PYTHON_BIN}" "${SCRIPT_ROOT}/extract-archive.py" --archive "${RUN_DIR}/checkpoint-python-pkgs.tar.gz" --destination "${ROOT_PREFIX}/pkgs"
     rm -f "${RUN_DIR}/checkpoint-python-pkgs.tar.gz"
   fi
-  if [[ "${PYTHON_RESTORE_ENV_CHECKPOINT}" == "true" ]] && aws s3 ls "${CHECKPOINT_PREFIX}/latest/python-env.tar.gz" >/dev/null 2>&1; then
-    aws s3 cp "${CHECKPOINT_PREFIX}/latest/python-env.tar.gz" "${RUN_DIR}/checkpoint-python-env.tar.gz" >/dev/null
-    restore_packed_python_env "${RUN_DIR}/checkpoint-python-env.tar.gz"
-    rm -f "${RUN_DIR}/checkpoint-python-env.tar.gz"
-  fi
+  # Do not restore a prior target prefix here. The exact package-validation
+  # lock is the source of truth, so reusing an environment would allow old or
+  # newer transitive packages to survive into the delivered artifact.
 
-  publish_stage_state "materialize"
+  write_state "materialize"
   start_checkpoint_loop
 
+  # Install the exact artifacts selected by package validation. The previous
+  # implementation performed three independent solves (core/native/python),
+  # which could select a different transitive graph before validation.
   if [[ -d "${ENV_PREFIX}" ]]; then
-    "${MAMBA_BIN}" env update -r "${ROOT_PREFIX}" -n target -f "${RUN_DIR}/environment.conda-core.yml" > "${RUN_DIR}/restore.log" 2>&1
-  else
-    "${MAMBA_BIN}" create -r "${ROOT_PREFIX}" -y -n target -f "${RUN_DIR}/environment.conda-core.yml" > "${RUN_DIR}/restore.log" 2>&1
+    "${MAMBA_BIN}" env remove -r "${ROOT_PREFIX}" -n target -y > "${RUN_DIR}/restore.log" 2>&1
   fi
-
-  if [[ -s "${RUN_DIR}/environment.conda-native.yml" ]]; then
-    "${MAMBA_BIN}" env update -r "${ROOT_PREFIX}" -n target -f "${RUN_DIR}/environment.conda-native.yml" >> "${RUN_DIR}/restore.log" 2>&1
-  fi
-
-  if [[ -s "${RUN_DIR}/environment.conda-python.yml" ]]; then
-    "${MAMBA_BIN}" env update -r "${ROOT_PREFIX}" -n target -f "${RUN_DIR}/environment.conda-python.yml" >> "${RUN_DIR}/restore.log" 2>&1
-  fi
+  "${MAMBA_BIN}" create -r "${ROOT_PREFIX}" -y -n target -f "${EXACT_CONDA_LOCK}" >> "${RUN_DIR}/restore.log" 2>&1
 
   if [[ -s "${RUN_DIR}/environment.pip.requirements.txt" ]]; then
     "${MAMBA_BIN}" run -r "${ROOT_PREFIX}" -n target python -m pip install --no-cache-dir --no-input -r "${RUN_DIR}/environment.pip.requirements.txt" >> "${RUN_DIR}/restore.log" 2>&1
@@ -484,15 +471,15 @@ PY
 
   # Verify that the built prefix exactly matches a fresh target solve, and
   # scan the installed Conda inventory before it can be delivered.
-  publish_stage_state "preflight-installed"
+  write_state "package-validation"
   "${PYTHON_BIN}" "${SCRIPT_ROOT}/preflight-conda-environment.py" \
     --environment-file "${RUN_DIR}/environment.yml" \
-    --out-dir "${RUN_DIR}/preflight-installed" \
+    --out-dir "${RUN_DIR}/package-validation-installed" \
     --conda-bin "${MAMBA_BIN}" \
     --trivy-bin trivy \
     --platform "${CONDA_SUBDIR}" \
     --installed-prefix "${ENV_PREFIX}"
-  publish_preflight_artifacts installed
+  publish_package_validation_artifacts installed
 fi
 "${PYTHON_BIN}" "${SCRIPT_ROOT}/generate-python-materialization-summary.py" \
   --run-dir "${RUN_DIR}" \
@@ -502,7 +489,7 @@ fi
   --env-prefix "${ENV_PREFIX}" \
   --input-type "${INPUT_TYPE}"
 MATERIALIZATION_VALIDATION_EXIT=0
-if [[ "${REQUIREMENTS_ONLY_SCAN}" != "true" || "${MATERIALIZE_AFTER_SCAN}" == "true" ]]; then
+if [[ "${MATERIALIZE_AFTER_SCAN}" == "true" ]]; then
   "${PYTHON_BIN}" - "${RUN_DIR}/materialization-summary.json" <<'PY' || MATERIALIZATION_VALIDATION_EXIT=$?
 from __future__ import annotations
 
@@ -529,7 +516,7 @@ if missing_conda or missing_pip:
 PY
 fi
 
-publish_stage_state "analysis"
+write_state "analysis"
 "${PYTHON_BIN}" -m cyclonedx_py requirements "${RUN_DIR}/requirements.lock.txt" -o "${RUN_DIR}/python-packages.cdx.json" || true
 trivy sbom --format json --output "${RUN_DIR}/trivy-sbom-report.json" "${RUN_DIR}/python-packages.cdx.json" || true
 printf '[]\n' > "${RUN_DIR}/safety-report.json"
@@ -537,21 +524,21 @@ if [[ -n "${SAFETY_API_KEY:-}" ]]; then
   safety --key "${SAFETY_API_KEY}" scan --file "${RUN_DIR}/requirements.lock.txt" --output json > "${RUN_DIR}/safety-report.json" || true
 fi
 GOVERNANCE_EXIT=0
-publish_stage_state "governance"
+write_state "governance"
 "${PYTHON_BIN}" "${SCRIPT_ROOT}/generate-governance-artifacts.py" \
   --run-dir "${RUN_DIR}" \
   --platform "${TARGET_PLATFORM}" \
   --remediate-medium "${REMEDIATE_MEDIUM:-true}" \
   --fail-on-medium "${FAIL_ON_MEDIUM:-false}" || GOVERNANCE_EXIT=$?
 
-publish_stage_state "publish"
+write_state "publish"
 if [[ -d "${ROOT_PREFIX}/pkgs" ]]; then
   "${PYTHON_BIN}" "${SCRIPT_ROOT}/bundle-directory.py" \
     --source-dir "${ROOT_PREFIX}/pkgs" \
     --output-file "${RUN_DIR}/python-pkgs-${TARGET_PLATFORM}-${TS}.tar.gz" \
     --checksum-file "${RUN_DIR}/python-pkgs-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
 fi
-if [[ "${REQUIREMENTS_ONLY_SCAN}" != "true" || "${MATERIALIZE_AFTER_SCAN}" == "true" ]]; then
+if [[ "${MATERIALIZE_AFTER_SCAN}" == "true" ]]; then
   pack_python_env "${RUN_DIR}/python-env-${TARGET_PLATFORM}-${TS}.tar.gz" "${RUN_DIR}/python-env-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
 fi
 environment_artifacts=(
@@ -574,6 +561,7 @@ tar -czf "${RUN_DIR}/environment-artifacts.tar.gz" -C "${RUN_DIR}" "${environmen
 
 aws s3 cp "${RUN_DIR}/" "s3://${EPHEMERAL_BUCKET}/${EPHEMERAL_PREFIX}/${TARGET_PLATFORM}/${TS}/" --recursive >/dev/null
 upload_if_exists "${RUN_DIR}/environment.yml" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/environment.yml"
+upload_if_exists "${RUN_DIR}/resolved-environment.yml" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/resolved-environment.yml"
 upload_if_exists "${RUN_DIR}/environment.original.yml" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/environment.original.yml"
 upload_if_exists "${RUN_DIR}/environment.cpu-normalization.log" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/environment.cpu-normalization.log"
 upload_if_exists "${RUN_DIR}/requirements.lock.txt" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/requirements/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/requirements.lock.txt"
@@ -595,9 +583,12 @@ upload_if_exists "${RUN_DIR}/python-pkgs-${TARGET_PLATFORM}-${TS}.tar.gz" "s3://
 upload_if_exists "${RUN_DIR}/python-pkgs-${TARGET_PLATFORM}-${TS}.tar.gz.sha256" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/packages/offline/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/python-pkgs-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
 upload_if_exists "${RUN_DIR}/python-env-${TARGET_PLATFORM}-${TS}.tar.gz" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/python-env-${TARGET_PLATFORM}-${TS}.tar.gz"
 upload_if_exists "${RUN_DIR}/python-env-${TARGET_PLATFORM}-${TS}.tar.gz.sha256" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/python-env-${TARGET_PLATFORM}-${TS}.tar.gz.sha256"
-printf '{"platform":"%s","timestamp_utc":"%s","scan_execution_id":"%s","python_version":"%s","input_type":"%s","materialize_after_scan":"%s","ephemeral_prefix":"%s/%s/%s","offline_bundle_prefix":"%s/packages/offline/python/%s/%s","cleanup":"requested"}' "${TARGET_PLATFORM}" "${TS}" "${RUN_ID}" "${PYTHON_VERSION}" "${INPUT_TYPE}" "${MATERIALIZE_AFTER_SCAN}" "${EPHEMERAL_PREFIX}" "${TARGET_PLATFORM}" "${TS}" "${EVIDENCE_PREFIX}" "${TARGET_PLATFORM}" "${EVIDENCE_RUN_SEGMENT}" > "${RUN_DIR}/run-metadata.json"
+resolved_versions_enabled="false"
+if [[ -f "${RUN_DIR}/resolved-environment.yml" ]]; then resolved_versions_enabled="true"; fi
+printf '{"platform":"%s","timestamp_utc":"%s","scan_execution_id":"%s","python_version":"%s","input_type":"%s","materialize_after_scan":"%s","allow_resolved_versions":"%s","ephemeral_prefix":"%s/%s/%s","offline_bundle_prefix":"%s/packages/offline/python/%s/%s","cleanup":"requested"}' "${TARGET_PLATFORM}" "${TS}" "${RUN_ID}" "${PYTHON_VERSION}" "${INPUT_TYPE}" "${MATERIALIZE_AFTER_SCAN}" "${resolved_versions_enabled}" "${EPHEMERAL_PREFIX}" "${TARGET_PLATFORM}" "${TS}" "${EVIDENCE_PREFIX}" "${TARGET_PLATFORM}" "${EVIDENCE_RUN_SEGMENT}" > "${RUN_DIR}/run-metadata.json"
 aws s3 cp "${RUN_DIR}/run-metadata.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/python/${TARGET_PLATFORM}/${EVIDENCE_RUN_SEGMENT}/run-metadata.json" >/dev/null
-publish_stage_state "completed"
+write_state "completed"
+aws s3 cp "${RUN_DIR}/stage-state.json" "${CHECKPOINT_PREFIX}/latest/stage-state.json" >/dev/null
 
 if [[ "${GOVERNANCE_EXIT}" -ne 0 ]]; then
   echo "Governance gate failed with exit ${GOVERNANCE_EXIT}" >&2

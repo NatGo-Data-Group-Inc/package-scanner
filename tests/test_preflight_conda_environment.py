@@ -98,7 +98,7 @@ class PreflightCondaEnvironmentTests(unittest.TestCase):
             with mock.patch.object(self.mod, "dry_solve", return_value=plan), mock.patch.object(self.mod, "osv_assessment", return_value=report):
                 code = self.mod.main(["--environment-file", str(env_file), "--out-dir", str(out_dir), "--skip-trivy"])
             self.assertEqual(code, 0)
-            self.assertEqual(json.loads((out_dir / "preflight-summary.json").read_text())["package_count"], 1)
+            self.assertEqual(json.loads((out_dir / "package-validation-summary.json").read_text())["package_count"], 1)
             self.assertTrue((out_dir / "conda-dry-run.json").exists())
             self.assertTrue((out_dir / "conda-resolved.cdx.json").exists())
 

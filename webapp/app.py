@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import csv
-import hashlib
 import io
 import json
 import logging
@@ -34,6 +33,7 @@ from package_scanner.catalog_awscli import (
     stepfunctions_describe_execution,
     stepfunctions_list_executions,
 )
+from package_scanner.webapp_status import dashboard_attention_kind
 
 
 def architecture_label(platform: str) -> str:
@@ -48,8 +48,6 @@ def artifact_bundle_entries(platform: dict) -> list[tuple[str, str]]:
         ("materialization-summary.json", paths.get("materialization_summary_key")),
         ("governance-summary.json", paths.get("governance_summary_key")),
         ("run-metadata.json", paths.get("run_metadata_key")),
-        ("preflight-plan-summary.json", paths.get("preflight_plan_summary_key")),
-        ("preflight-installed-summary.json", paths.get("preflight_installed_summary_key")),
         (
             "approval-candidate-packages.csv",
             f"{paths.get('requirements_prefix', '')}approval-candidate-packages.csv" if paths.get("requirements_prefix") else None,
@@ -61,10 +59,6 @@ def artifact_bundle_entries(platform: dict) -> list[tuple[str, str]]:
         ("trivy-sbom-report.json", paths.get("trivy_report_key")),
         ("safety-report.json", paths.get("safety_report_key")),
         ("osv-report.json", paths.get("osv_report_key")),
-        ("preflight-plan-osv-report.json", paths.get("preflight_plan_osv_report_key")),
-        ("preflight-installed-osv-report.json", paths.get("preflight_installed_osv_report_key")),
-        ("preflight-plan-trivy-sbom-report.json", paths.get("preflight_plan_trivy_report_key")),
-        ("preflight-installed-trivy-sbom-report.json", paths.get("preflight_installed_trivy_report_key")),
     ]
     return [(filename, key) for filename, key in entries if key]
 
@@ -102,7 +96,6 @@ def posit_handoff_bundle_entries(platform: dict, scan_timestamp: str) -> list[tu
 def python_handoff_bundle_entries(platform: dict, scan_timestamp: str) -> list[tuple[str, str]]:
     paths = platform.get("paths", {})
     platform_name = platform.get("platform")
-    conda_subdir = {"linux-amd64": "linux-64", "linux-arm64": "linux-aarch64"}.get(platform_name)
     entries = [
         ("environment.yml", f"{paths.get('requirements_prefix', '')}environment.yml" if paths.get("requirements_prefix") else None),
         (
@@ -112,30 +105,6 @@ def python_handoff_bundle_entries(platform: dict, scan_timestamp: str) -> list[t
         (
             "conda-list.json",
             f"{paths.get('env_artifacts_prefix', '')}conda-list.json" if paths.get("env_artifacts_prefix") else None,
-        ),
-        ("preflight-plan-summary.json", paths.get("preflight_plan_summary_key")),
-        ("preflight-installed-summary.json", paths.get("preflight_installed_summary_key")),
-        ("preflight-plan-osv-report.json", paths.get("preflight_plan_osv_report_key")),
-        ("preflight-installed-osv-report.json", paths.get("preflight_installed_osv_report_key")),
-        ("preflight-plan-trivy-sbom-report.json", paths.get("preflight_plan_trivy_report_key")),
-        ("preflight-installed-trivy-sbom-report.json", paths.get("preflight_installed_trivy_report_key")),
-        (
-            f"preflight-plan-conda-{conda_subdir}.explicit.txt" if conda_subdir else "",
-            f"{paths.get('requirements_prefix', '')}preflight-plan-conda-{conda_subdir}.explicit.txt"
-            if paths.get("requirements_prefix") and conda_subdir
-            else None,
-        ),
-        (
-            f"preflight-installed-conda-{conda_subdir}.explicit.txt" if conda_subdir else "",
-            f"{paths.get('requirements_prefix', '')}preflight-installed-conda-{conda_subdir}.explicit.txt"
-            if paths.get("requirements_prefix") and conda_subdir
-            else None,
-        ),
-        (
-            "preflight-installed-inventory-difference.json",
-            f"{paths.get('traceability_prefix', '')}preflight-installed-inventory-difference.json"
-            if paths.get("traceability_prefix")
-            else None,
         ),
         ("materialization-summary.json", paths.get("materialization_summary_key")),
         ("run-metadata.json", paths.get("run_metadata_key")),
@@ -347,8 +316,10 @@ def parse_state_machine_arns(configured: str | None, legacy: str | None, default
 
 ACTIVE_RUN_STAGE_ORDER = {
     "r": ["preflight", "restore", "restored", "analysis", "governance", "publish", "completed"],
-    "python": ["preflight-plan", "materialize", "preflight-installed", "restored", "analysis", "governance", "publish", "completed"],
+    "python": ["package-validation", "awaiting-approval", "materialize", "restored", "analysis", "governance", "publish", "completed"],
 }
+
+
 
 
 def stage_display_name(stage: str | None) -> str:
@@ -361,10 +332,6 @@ def stage_display_name(stage: str | None) -> str:
         "retrying": "Retrying",
         "finalizing": "Finalizing",
         "failed": "Failed",
-        "preflight-plan": "Preflight plan",
-        "preflight-installed": "Installed preflight",
-        "preflight-plan-failed": "Preflight plan failed",
-        "preflight-installed-failed": "Installed preflight failed",
     }
     if normalized.lower() in special:
         return special[normalized.lower()]
@@ -392,7 +359,6 @@ def stage_steps_for_run(ecosystem: str, current_stage: str | None, status: str) 
     normalized_stage = str(current_stage or "").strip().lower()
     normalized_status = str(status or "").strip().upper()
     failed = normalized_status in {"FAILED", "TIMED_OUT", "ABORTED"}
-    failed_stage = normalized_stage.removesuffix("-failed") if normalized_stage.endswith("-failed") else normalized_stage
     steps: list[dict[str, str]] = []
     if normalized_status == "RUNNING" and normalized_stage in {"completed", "finalizing"}:
         for index, stage in enumerate(order):
@@ -400,13 +366,13 @@ def stage_steps_for_run(ecosystem: str, current_stage: str | None, status: str) 
             steps.append({"name": stage_display_name(stage), "status": step_status})
         return steps
     for stage in order:
-        if failed and stage == failed_stage:
+        if failed and stage == normalized_stage:
             step_status = "failed"
         elif normalized_status == "SUCCEEDED" and normalized_stage == "completed":
             step_status = "done"
         elif normalized_stage == stage:
             step_status = "current"
-        elif failed_stage in order and order.index(stage) < order.index(failed_stage):
+        elif normalized_stage in order and order.index(stage) < order.index(normalized_stage):
             step_status = "done"
         else:
             step_status = "pending"
@@ -414,24 +380,6 @@ def stage_steps_for_run(ecosystem: str, current_stage: str | None, status: str) 
     if normalized_status == "RUNNING" and normalized_stage in {"queued", "starting", "retrying"} and steps:
         steps[0]["status"] = "current"
     return steps
-
-
-def preflight_summary_view(summary: dict | None) -> dict | None:
-    if not isinstance(summary, dict):
-        return None
-    gate = summary.get("vulnerability_gate") or {}
-    findings = gate.get("findings_by_severity") or {}
-    findings_display = ", ".join(
-        f"{severity.title()}: {count}" for severity, count in sorted(findings.items())
-    ) or "No findings"
-    installed = summary.get("installed_environment") or {}
-    return {
-        "package_count": summary.get("package_count"),
-        "gate_status": str(gate.get("status") or "unknown").upper(),
-        "blocking_findings": gate.get("blocking_findings", 0),
-        "findings_display": findings_display,
-        "inventory_matches": installed.get("inventory_matches_dry_plan"),
-    }
 
 
 def status_class(status: str) -> str:
@@ -1277,6 +1225,7 @@ def create_app() -> Flask:
                 run_metadata = s3_get_json_optional(record["evidence_bucket"], run_metadata_key) or {}
             platform["run_metadata"] = run_metadata
             platform["requirements_only_scan"] = ecosystem == "python" and str(run_metadata.get("input_type") or "").strip() == "requirements-lock"
+            platform["resolved_versions_allowed"] = ecosystem == "python" and str(run_metadata.get("allow_resolved_versions") or "").strip().lower() == "true"
             if platform["requirements_only_scan"]:
                 platform["artifacts_requested"] = str(run_metadata.get("materialize_after_scan") or "").strip().lower() == "true"
             else:
@@ -1300,23 +1249,79 @@ def create_app() -> Flask:
                     paths.setdefault("safety_report_key", f"{model_results_prefix}safety-report.json")
                 if ecosystem == "r":
                     paths.setdefault("osv_report_key", f"{model_results_prefix}osv-report.json")
-            if ecosystem == "python":
-                plan = preflight_summary_view(
-                    s3_get_json_optional(record["evidence_bucket"], paths.get("preflight_plan_summary_key", ""))
-                    if paths.get("preflight_plan_summary_key")
-                    else None
-                )
-                installed = preflight_summary_view(
-                    s3_get_json_optional(record["evidence_bucket"], paths.get("preflight_installed_summary_key", ""))
-                    if paths.get("preflight_installed_summary_key")
-                    else None
-                )
-                platform["preflight"] = {"plan": plan, "installed": installed} if plan or installed else None
             try:
                 platform["unknown_findings_count"] = len(unknown_findings_for_platform(record, platform, ecosystem))
             except Exception:
                 platform["unknown_findings_count"] = None
         return record
+
+    def dashboard_queues(active: list[dict]) -> tuple[list[dict], list[dict]]:
+        """Build concise approval and materialization work queues for the home page."""
+
+        approval: list[dict] = []
+        materialization: list[dict] = []
+        seen: set[tuple[str, str, str]] = set()
+
+        def add(queue: list[dict], ecosystem: str, row: dict, label: str, detail: str) -> None:
+            execution_id = str(row.get("execution_id") or "").strip()
+            if not execution_id:
+                return
+            key = (label, ecosystem, execution_id)
+            if key in seen:
+                return
+            seen.add(key)
+            platforms = [str(item.get("platform") or "") for item in row.get("platforms", []) if item.get("platform")]
+            queue.append(
+                {
+                    "ecosystem": ecosystem,
+                    "execution_id": execution_id,
+                    "input_label": row.get("input_label") or "unknown input",
+                    "platforms": platforms,
+                    "status": row.get("status") or "UNKNOWN",
+                    "phase": row.get("current_phase_display") or stage_display_name(row.get("current_phase")),
+                    "detail": detail,
+                    "href": f"/runs/{ecosystem}/{execution_id}",
+                }
+            )
+
+        for row in active:
+            ecosystem = str(row.get("ecosystem") or "")
+            kind = dashboard_attention_kind(row)
+            if kind == "approval":
+                add(approval, ecosystem, row, kind, "Package validation completed; package approval is required before materialization.")
+            elif kind == "materialization":
+                add(materialization, ecosystem, row, kind, "Approved package set is waiting for environment build/materialization.")
+
+        # Catalog records are the durable queue for completed scans. Keep the
+        # scan bounded so the home page does not walk historical evidence.
+        for ecosystem in ("python", "r"):
+            for key in get_listing_keys(ecosystem)[:50]:
+                try:
+                    row = attach_input_context(ecosystem, load_record_by_key(key))
+                except Exception:
+                    continue
+                execution_id = str(row.get("execution_id") or "").strip()
+                if any(item.get("execution_id") == execution_id and item.get("ecosystem") == ecosystem for item in active):
+                    continue
+                if dashboard_attention_kind(row) == "approval":
+                    add(approval, ecosystem, row, "approval", "Package set is awaiting operator/Cyber approval before use.")
+                    continue
+                if not row.get("approved") or ecosystem != "python":
+                    continue
+                for platform in row.get("platforms", []):
+                    paths = platform.get("paths") or {}
+                    metadata = s3_get_json_optional(row.get("evidence_bucket", ""), paths.get("run_metadata_key", "")) or {}
+                    requirements_only = str(metadata.get("input_type") or "").strip() == "requirements-lock"
+                    artifacts_requested = str(metadata.get("materialize_after_scan") or "").strip().lower() == "true"
+                    if requirements_only and not artifacts_requested and str(platform.get("status") or "").upper() == "SUCCEEDED":
+                        materialization_row = dict(row)
+                        materialization_row["platforms"] = [platform]
+                        materialization_row["awaiting_materialization"] = True
+                        add(materialization, ecosystem, materialization_row, "materialization", "Approved scan is waiting for the relocatable environment build.")
+
+        approval.sort(key=lambda item: (item["ecosystem"], item["execution_id"]), reverse=True)
+        materialization.sort(key=lambda item: (item["ecosystem"], item["execution_id"]), reverse=True)
+        return approval, materialization
 
     def unknown_findings_for_platform(record: dict, platform: dict, ecosystem: str) -> list[dict]:
         findings_rows = s3_get_rows(record["evidence_bucket"], platform["paths"]["vulnerability_findings_key"])
@@ -1736,6 +1741,31 @@ def create_app() -> Flask:
             )
         except Exception:
             return None
+
+    def latest_existing_successful_run(ecosystem: str) -> dict | None:
+        """Return a valid latest-successful record, repairing stale pointers in memory."""
+
+        pointer = load_pointer(ecosystem, "latest-successful")
+        if pointer:
+            execution_id = str(pointer.get("execution_id") or "").strip()
+            if execution_id:
+                try:
+                    record = load_record(ecosystem, execution_id)
+                except Exception:
+                    record = None
+                if record and str(record.get("status") or "").upper() == "SUCCEEDED":
+                    return record
+
+        # A pointer can outlive its catalog object after cleanup or migration.
+        # The catalog listing is the source of truth for the fallback link.
+        for key in get_listing_keys(ecosystem):
+            try:
+                record = load_record_by_key(key)
+            except Exception:
+                continue
+            if str(record.get("status") or "").upper() == "SUCCEEDED":
+                return record
+        return None
 
     def describe_stack(stack_name: str) -> dict:
         data = aws_json(
@@ -2532,8 +2562,8 @@ def create_app() -> Flask:
         stop_status = str(request.args.get("stop_status") or "").strip().lower()
         stop_execution = str(request.args.get("stop_execution") or "").strip()
         try:
-            latest_r = attach_input_context("r", load_pointer("r", "latest-successful"))
-            latest_python = attach_input_context("python", load_pointer("python", "latest-successful"))
+            latest_r = attach_input_context("r", latest_existing_successful_run("r"))
+            latest_python = attach_input_context("python", latest_existing_successful_run("python"))
             approved_r = attach_input_context("r", load_pointer("r", "current-approved"))
             approved_python = attach_input_context("python", load_pointer("python", "current-approved"))
             active = active_runs()
@@ -2561,6 +2591,7 @@ def create_app() -> Flask:
             if failed_python:
                 failed_python = attach_input_context("python", dict(failed_python))
                 failed_python["root_cause"] = latest_root_cause("python", failed_python)
+            approval_queue, materialization_queue = dashboard_queues(active)
         except AwsAuthExpiredError as exc:
             auth_error = str(exc)
             latest_r = None
@@ -2570,6 +2601,8 @@ def create_app() -> Flask:
             active = []
             failed_r = None
             failed_python = None
+            approval_queue = []
+            materialization_queue = []
         return render_template(
             "index.html",
             latest_r=latest_r,
@@ -2579,6 +2612,8 @@ def create_app() -> Flask:
             failed_r=failed_r,
             failed_python=failed_python,
             active_runs=active,
+            approval_queue=approval_queue,
+            materialization_queue=materialization_queue,
             auth_error=auth_error,
             stop_status=stop_status,
             stop_execution=stop_execution,
@@ -2758,16 +2793,19 @@ def create_app() -> Flask:
             abort(404, "Candidate YAML not found")
 
         platform = request.form.get("platform", "linux-amd64")
-        if platform not in {"linux-amd64", "linux-arm64"}:
-            abort(400, "Cyber-gated Conda preflight currently supports linux-amd64 and linux-arm64")
+        if platform not in {"linux-amd64", "linux-arm64", "windows-amd64"}:
+            abort(400, "Unsupported Python ECS platform")
 
         return launch_python_candidate_scan(
             candidate_name=safe_name,
             candidate_source=candidate_source,
             platform=platform,
             input_kind="environment-yaml",
+            # Environment blueprints stop after package validation and
+            # vulnerability analysis. Materialization is an approval-gated
+            # follow-up, not part of the initial candidate scan.
             materialize_after_scan=False,
-            preflight_only=True,
+            scan_only=str(request.form.get("scan_only") or "").lower() == "true",
         )
 
     @app.route("/candidates/python/<candidate_name>/start-requirements", methods=["POST"])
@@ -2789,6 +2827,7 @@ def create_app() -> Flask:
             platform=platform,
             input_kind="requirements-lock",
             materialize_after_scan=False,
+            scan_only=False,
         )
 
     def launch_python_candidate_scan(
@@ -2798,7 +2837,7 @@ def create_app() -> Flask:
         platform: str,
         input_kind: str,
         materialize_after_scan: bool,
-        preflight_only: bool = False,
+        scan_only: bool,
     ):
         stack = describe_stack(app.config["PYTHON_STACK_NAME"])
         input_bucket = stack_output_value(stack, "InputBucketName")
@@ -2844,7 +2883,7 @@ def create_app() -> Flask:
             "input_object_key": input_object_key,
             "input_type": input_kind,
             "materialize_after_scan": str(materialize_after_scan).lower(),
-            "preflight_only": str(preflight_only).lower(),
+            "scan_only": str(scan_only).lower(),
             "evidence_bucket": evidence_bucket,
             "evidence_prefix": app.config["CATALOG_PREFIX"],
             "ephemeral_bucket": ephemeral_bucket,
@@ -2884,22 +2923,6 @@ def create_app() -> Flask:
             scan_mode="build-artifacts" if materialize_after_scan and input_kind == "requirements-lock" else input_kind,
         )
 
-    @app.route("/runs/python/<execution_id>/<platform>/approve-preflight", methods=["POST"])
-    def approve_python_preflight(execution_id: str, platform: str):
-        approver = str(request.form.get("approved_by") or "").strip()
-        if not approver:
-            abort(400, "Cyber approver name is required")
-        record = enrich_record(load_record("python", execution_id), "python")
-        selected = next((item for item in record.get("platforms", []) if item.get("platform") == platform), None)
-        if not record.get("preflight_only") or not selected or selected.get("status") != "SUCCEEDED" or not selected.get("validated"):
-            abort(409, "Only a successful validated preflight can be approved for materialization")
-        approval_key = f"{app.config['CATALOG_PREFIX'].rstrip('/')}/catalog/python/approvals/{execution_id}/{platform}.json"
-        input_bytes = s3_get_bytes(record["input_bucket"], record["input_object_key"], region=app.config["AWS_REGION"], profile=app.config["AWS_PROFILE"])
-        approved_input_key = f"inputs/python/approved-preflights/{execution_id}/{platform}/environment.yml"
-        s3_put_bytes(record["input_bucket"], approved_input_key, input_bytes, region=app.config["AWS_REGION"], profile=app.config["AWS_PROFILE"], content_type="application/x-yaml")
-        approval = {"schema_version": 1, "approved": True, "approved_by": approver, "approved_at": datetime.now(timezone.utc).isoformat(), "preflight_execution_id": execution_id, "platform": platform, "input_bucket": record.get("input_bucket"), "input_object_key": record.get("input_object_key"), "approved_input_key": approved_input_key, "input_sha256": hashlib.sha256(input_bytes).hexdigest()}
-        s3_put_bytes(record["evidence_bucket"], approval_key, (json.dumps(approval, indent=2) + "\n").encode("utf-8"), region=app.config["AWS_REGION"], profile=app.config["AWS_PROFILE"], content_type="application/json")
-        return launch_python_candidate_scan(candidate_name=str(record.get("input_label") or execution_id), candidate_source={"source": "s3", "input_object_key": approved_input_key, "s3_bucket": record["input_bucket"]}, platform=platform, input_kind="environment-yaml", materialize_after_scan=True)
     @app.route("/runs/<ecosystem>/<execution_id>")
     def run_detail(ecosystem: str, execution_id: str):
         if ecosystem not in {"r", "python"}:
@@ -2941,6 +2964,8 @@ def create_app() -> Flask:
         selected_platform = next((item for item in record.get("platforms", []) if item.get("platform") == platform), None)
         if not selected_platform or not selected_platform.get("supports_artifact_build"):
             abort(409, "This run does not support deferred artifact generation")
+        if not bool(record.get("approved")):
+            abort(409, "Package approval is required before deferred artifact generation")
 
         stack = describe_stack(app.config["PYTHON_STACK_NAME"])
         input_bucket = stack_output_value(stack, "InputBucketName")
@@ -2961,6 +2986,7 @@ def create_app() -> Flask:
             "input_object_key": source_input_key,
             "input_type": "requirements-lock",
             "materialize_after_scan": "true",
+            "scan_only": "false",
             "evidence_bucket": evidence_bucket,
             "evidence_prefix": app.config["CATALOG_PREFIX"],
             "ephemeral_bucket": ephemeral_bucket,

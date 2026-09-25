@@ -13,12 +13,11 @@ class PythonFailureGateTests(unittest.TestCase):
                 with self.subTest(status=status, diagnostics_status=diagnostics_status):
                     script = "\n".join([
                         source.splitlines()[1],
-                        'RUN_DIR=/tmp; CHECKPOINT_PREFIX=unused; CURRENT_STAGE=starting',
+                        'RUN_DIR=/tmp; CHECKPOINT_PREFIX=unused',
                         'stop_checkpoint_loop() { :; }',
                         'write_state() { echo "state:$1"; }',
-                        'publish_stage_state() { echo "state:$1"; }',
                         f'upload_if_exists() {{ return {diagnostics_status}; }}',
-                        f'publish_preflight_artifacts() {{ echo "evidence:$1"; return {diagnostics_status}; }}',
+                        f'publish_package_validation_artifacts() {{ echo "evidence:$1"; return {diagnostics_status}; }}',
                         f'publish_checkpoint() {{ return {diagnostics_status}; }}',
                         handler,
                         'trap publish_failure_diagnostics ERR',

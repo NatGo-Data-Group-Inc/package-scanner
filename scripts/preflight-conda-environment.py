@@ -20,6 +20,8 @@ from pathlib import Path
 from urllib.parse import quote
 from urllib import request
 
+import yaml
+
 
 OSV_QUERY_BATCH_URL = "https://api.osv.dev/v1/querybatch"
 OSV_VULNERABILITY_URL = "https://api.osv.dev/v1/vulns"
@@ -32,8 +34,12 @@ SEVERITY_ALIASES = {
 }
 
 
-class PreflightError(RuntimeError):
-    """Raised when a preflight cannot produce reliable evidence."""
+class PackageValidationError(RuntimeError):
+    """Raised when package validation cannot produce reliable evidence."""
+
+
+# Compatibility for callers importing the helper by its historical name.
+PreflightError = PackageValidationError
 
 
 def json_write(path: Path, payload: object) -> None:
@@ -45,7 +51,7 @@ def dry_solve(conda_bin: str, environment_file: Path, platform: str) -> dict:
 
     executable = shutil.which(conda_bin)
     if not executable:
-        raise PreflightError(
+        raise PackageValidationError(
             f"Conda solver not found: {conda_bin}. Install micromamba, mamba, or conda, "
             "then pass it with --conda-bin."
         )
@@ -65,7 +71,7 @@ def dry_solve(conda_bin: str, environment_file: Path, platform: str) -> dict:
     try:
         payload = json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
-        raise PreflightError(
+        raise PackageValidationError(
             f"Conda dry solve did not return JSON (exit {completed.returncode}): "
             f"{completed.stderr.strip() or completed.stdout.strip()}"
         ) from exc
@@ -80,7 +86,7 @@ def dry_solve(conda_bin: str, environment_file: Path, platform: str) -> dict:
             "",
         )
         message = payload.get("message") or payload.get("error") or log_message or completed.stderr.strip()
-        raise PreflightError(f"Conda dry solve failed: {message}")
+        raise PackageValidationError(f"Conda dry solve failed: {message}")
     return payload
 
 
@@ -90,7 +96,7 @@ def resolved_packages(plan: dict) -> list[dict[str, str]]:
     actions = plan.get("actions") or {}
     records = actions.get("FETCH") or actions.get("LINK") or []
     if not isinstance(records, list) or not records:
-        raise PreflightError("Conda dry solve returned no resolved package records.")
+        raise PackageValidationError("Conda dry solve returned no resolved package records.")
 
     packages: dict[tuple[str, str, str], dict[str, str]] = {}
     for record in records:
@@ -111,7 +117,7 @@ def resolved_packages(plan: dict) -> list[dict[str, str]]:
             "url": url,
         }
     if not packages:
-        raise PreflightError("Conda dry solve records did not include package names and versions.")
+        raise PackageValidationError("Conda dry solve records did not include package names and versions.")
     return sorted(packages.values(), key=lambda item: (item["name"].lower(), item["version"]))
 
 
@@ -119,10 +125,10 @@ def installed_packages(conda_bin: str, prefix: Path) -> list[dict[str, str]]:
     """Read the concrete inventory from a materialized Conda prefix."""
 
     if not prefix.is_dir():
-        raise PreflightError(f"materialized environment prefix not found: {prefix}")
+        raise PackageValidationError(f"materialized environment prefix not found: {prefix}")
     executable = shutil.which(conda_bin)
     if not executable:
-        raise PreflightError(f"Conda solver not found: {conda_bin}.")
+        raise PackageValidationError(f"Conda solver not found: {conda_bin}.")
     completed = subprocess.run(
         [executable, "list", "--prefix", str(prefix), "--json"],
         text=True,
@@ -131,10 +137,10 @@ def installed_packages(conda_bin: str, prefix: Path) -> list[dict[str, str]]:
     try:
         payload = json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
-        raise PreflightError(f"Could not read materialized Conda inventory: {completed.stderr.strip()}") from exc
+        raise PackageValidationError(f"Could not read materialized Conda inventory: {completed.stderr.strip()}") from exc
     records = payload.get("packages") if isinstance(payload, dict) else payload
     if completed.returncode != 0 or not isinstance(records, list):
-        raise PreflightError(f"Conda inventory failed: {completed.stderr.strip()}")
+        raise PackageValidationError(f"Conda inventory failed: {completed.stderr.strip()}")
     packages = []
     for record in records:
         name = str(record.get("name") or "").strip()
@@ -186,8 +192,31 @@ def explicit_conda_lock(packages: list[dict[str, str]]) -> str:
 
     urls = [package.get("url", "") for package in packages]
     if not all(urls):
-        raise PreflightError("Cannot render explicit lockfile: a resolved package URL is missing.")
+        raise PackageValidationError("Cannot render explicit lockfile: a resolved package URL is missing.")
     return "@EXPLICIT\n" + "\n".join(urls) + "\n"
+
+
+def resolved_environment_yaml(environment_file: Path, packages: list[dict[str, str]]) -> tuple[str, bool]:
+    """Render an exact Conda environment only when the input opts in."""
+
+    source = yaml.safe_load(environment_file.read_text(encoding="utf-8")) or {}
+    if not bool(source.get("allow_resolved_versions", False)):
+        return "", False
+    resolved = {
+        "name": str(source.get("name") or environment_file.stem),
+        "channels": list(source.get("channels") or []),
+        "dependencies": [
+            f"{package['name']}={package['version']}={package['build']}"
+            if package.get("build")
+            else f"{package['name']}={package['version']}"
+            for package in packages
+        ],
+        "allow_resolved_versions": True,
+    }
+    pip_dependencies = [item for item in source.get("dependencies") or [] if isinstance(item, dict) and "pip" in item]
+    if pip_dependencies:
+        resolved["dependencies"].append({"pip": list(pip_dependencies[0].get("pip") or [])})
+    return yaml.safe_dump(resolved, sort_keys=False), True
 
 
 def cyclonedx_sbom(packages: list[dict[str, str]], platform: str, environment_name: str) -> dict:
@@ -196,7 +225,7 @@ def cyclonedx_sbom(packages: list[dict[str, str]], platform: str, environment_na
     return {
         "bomFormat": "CycloneDX",
         "specVersion": "1.5",
-        "serialNumber": f"urn:uuid:conda-preflight-{environment_name}-{platform}",
+        "serialNumber": f"urn:uuid:conda-package-validation-{environment_name}-{platform}",
         "version": 1,
         "metadata": {
             "component": {
@@ -230,8 +259,8 @@ def trivy_assessment(trivy_bin: str, sbom_path: Path, out_path: Path) -> dict:
 
     executable = shutil.which(trivy_bin)
     if not executable:
-        raise PreflightError(
-            f"Trivy scanner not found: {trivy_bin}. Install Trivy or use --skip-trivy only for an explicitly limited preflight."
+        raise PackageValidationError(
+            f"Trivy scanner not found: {trivy_bin}. Install Trivy or use --skip-trivy only for an explicitly limited package validation."
         )
     completed = subprocess.run(
         [executable, "sbom", "--format", "json", "--output", str(out_path), str(sbom_path)],
@@ -239,11 +268,11 @@ def trivy_assessment(trivy_bin: str, sbom_path: Path, out_path: Path) -> dict:
         capture_output=True,
     )
     if completed.returncode != 0:
-        raise PreflightError(f"Trivy SBOM scan failed: {completed.stderr.strip() or completed.stdout.strip()}")
+        raise PackageValidationError(f"Trivy SBOM scan failed: {completed.stderr.strip() or completed.stdout.strip()}")
     try:
         data = json.loads(out_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise PreflightError(f"Trivy did not produce a valid report: {exc}") from exc
+        raise PackageValidationError(f"Trivy did not produce a valid report: {exc}") from exc
     findings: list[dict[str, str]] = []
     for result in data.get("Results") or []:
         if not isinstance(result, dict):
@@ -329,7 +358,7 @@ def osv_assessment(packages: list[dict[str, str]], timeout_seconds: int, batch_s
         )
         results = response.get("results") or []
         if len(results) != len(batch):
-            raise PreflightError("OSV querybatch response length did not match the package plan.")
+            raise PackageValidationError("OSV querybatch response length did not match the package plan.")
         for package, result in zip(batch, results):
             queried.append(package)
             for summary in result.get("vulns") or []:
@@ -397,6 +426,9 @@ def main(argv: list[str] | None = None) -> int:
         json_write(args.out_dir / "conda-dry-run.json", plan)
         json_write(args.out_dir / "resolved-packages.json", {"platform": args.platform, "packages": packages})
         (args.out_dir / f"conda-{args.platform}.explicit.txt").write_text(explicit_conda_lock(packages), encoding="utf-8")
+        resolved_yaml, resolved_yaml_allowed = resolved_environment_yaml(args.environment_file, packages)
+        if resolved_yaml_allowed:
+            (args.out_dir / "resolved-environment.yml").write_text(resolved_yaml, encoding="utf-8")
         environment_name = str(args.environment_file.stem)
         sbom_path = args.out_dir / "conda-resolved.cdx.json"
         json_write(sbom_path, cyclonedx_sbom(packages, args.platform, environment_name))
@@ -434,11 +466,14 @@ def main(argv: list[str] | None = None) -> int:
             "trivy": gate(list(trivy_report.get("findings") or [])),
             "vulnerability_gate": gate(all_findings),
             "installed_environment": installed_summary,
-            "artifacts": ["conda-dry-run.json", "resolved-packages.json", f"conda-{args.platform}.explicit.txt", "conda-resolved.cdx.json", "osv-report.json", "trivy-sbom-report.json"],
+            "allow_resolved_versions": resolved_yaml_allowed,
+            "artifacts": ["conda-dry-run.json", "resolved-packages.json", f"conda-{args.platform}.explicit.txt", "conda-resolved.cdx.json", "osv-report.json", "trivy-sbom-report.json"] + (["resolved-environment.yml"] if resolved_yaml_allowed else []),
         }
+        json_write(args.out_dir / "package-validation-summary.json", summary)
+        # Keep the old local filename for consumers of already deployed images.
         json_write(args.out_dir / "preflight-summary.json", summary)
-    except PreflightError as exc:
-        print(f"preflight failed: {exc}", file=sys.stderr)
+    except PackageValidationError as exc:
+        print(f"package validation failed: {exc}", file=sys.stderr)
         return 1
     print(json.dumps(summary, indent=2, sort_keys=True))
     if summary["installed_environment"] and not summary["installed_environment"]["inventory_matches_dry_plan"]:

@@ -69,7 +69,11 @@
   {% endif %}
   {% endif %}
   {% if ecosystem == 'python' and platform.status == 'SUCCEEDED' %}
-  {% if platform.supports_artifact_build %}
+  {% if platform.resolved_versions_allowed %}
+  <p><a href="/download?bucket={{ record.evidence_bucket }}&key={{ platform.paths.resolved_environment_key|urlencode }}&name={{ ('resolved-' ~ record.input_label ~ '-' ~ platform.platform ~ '.environment.yml')|urlencode }}">download approved resolved environment.yml</a></p>
+  <p class="muted">This resolved YAML was explicitly authorized by <code>allow_resolved_versions: true</code> in the input blueprint.</p>
+  {% endif %}
+  {% if platform.supports_artifact_build and record.approved %}
   <form method="post" action="/runs/python/{{ record.execution_id }}/{{ platform.platform }}/build-artifacts">
     <button type="submit">Build Python environment artifacts from scanned requirements</button>
   </form>

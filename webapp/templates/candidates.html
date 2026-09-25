@@ -1,17 +1,21 @@
 {% extends "base.html" %}
 {% block body %}
+<div class="page-intro">
 <h1>Python Candidates</h1>
 <p class="muted">
   Treat each candidate as a named package set with up to two attached artifacts:
   a <code>Blueprint</code> <code>environment.yml</code> for materialize-and-scan workflows,
   and a <code>Locked</code> <code>requirements.txt</code> for exact-version scan-first workflows.
 </p>
+</div>
 
 {% if message %}
 <div class="callout">{{ message }}</div>
 {% endif %}
 
 <div class="card">
+  <div class="card-grid">
+  <section class="form-section">
   <h2>Upload Blueprint</h2>
   <form method="post" action="/candidates/python/upload" enctype="multipart/form-data">
     <input type="hidden" name="artifact_name" value="environment">
@@ -30,9 +34,10 @@
       environment.yml
       <input type="file" name="artifact_file" accept=".yml,.yaml" required>
     </label>
-    <button type="submit">Upload Blueprint</button>
+  <button class="button-primary" type="submit">Upload Blueprint</button>
   </form>
-
+  </section>
+  <section class="form-section">
   <h2>Upload Locked Requirements</h2>
   <form method="post" action="/candidates/python/upload" enctype="multipart/form-data">
     <input type="hidden" name="artifact_name" value="requirements">
@@ -51,14 +56,16 @@
       requirements.txt
       <input type="file" name="artifact_file" accept=".txt" required>
     </label>
-    <button type="submit">Upload Locked Requirements</button>
+    <button class="button-primary" type="submit">Upload Locked Requirements</button>
   </form>
+  </section>
+  </div>
 </div>
 
 {% if candidates %}
   {% for candidate in candidates %}
   <div class="card">
-    <h2>{{ candidate.name }}</h2>
+    <div class="card-header"><div><h2>{{ candidate.name }}</h2><p class="card-subtitle">Candidate package sets and scan entry points</p></div></div>
     <div class="chip-row">
       <span class="chip badge-python">PYTHON</span>
       {% if candidate.environment %}
@@ -79,7 +86,7 @@
           <td>
             <strong>Blueprint</strong>
             <div><code>{{ candidate.environment.filename }}</code></div>
-            <div class="muted">Dry-resolve and publish Cyber review artifacts. Materialization begins only after approval.</div>
+            <div class="muted">Build the environment from this file, then scan and publish artifacts.</div>
           </td>
           <td>
             <span class="chip">{{ candidate.environment.source|upper }}</span>
@@ -103,6 +110,7 @@
                 <select name="platform" {% if candidate.environment.start_disabled %}disabled{% endif %}>
                   <option value="linux-amd64" selected>linux-amd64</option>
                   <option value="linux-arm64">linux-arm64</option>
+                  <option value="windows-amd64">windows-amd64</option>
                 </select>
               </label>
               <label>
@@ -119,8 +127,12 @@
                   <option value="true">true</option>
                 </select>
               </label>
+              <label>
+                <input type="checkbox" name="scan_only" value="true">
+                Scan existing solved YAML only (no environment build)
+              </label>
               <button type="submit" {% if candidate.environment.start_disabled %}disabled{% endif %}>
-                {{ 'Already Running' if candidate.environment.start_disabled else 'Start Preflight Review' }}
+                {{ 'Already Running' if candidate.environment.start_disabled else 'Validate + Scan' }}
               </button>
             </form>
           </td>

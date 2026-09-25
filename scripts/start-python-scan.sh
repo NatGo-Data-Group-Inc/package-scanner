@@ -23,7 +23,7 @@ SAFETY_API_KEY=""
 PLATFORM_SET="all"
 INPUT_TYPE="environment-yaml"
 MATERIALIZE_AFTER_SCAN="true"
-PREFLIGHT_ONLY="false"
+SCAN_ONLY="false"
 INPUT_TYPE_EXPLICIT="false"
 MATERIALIZE_AFTER_SCAN_EXPLICIT="false"
 
@@ -56,7 +56,7 @@ Optional:
   --input-type <environment-yaml|requirements-lock>
                                            (default: environment-yaml)
   --materialize-after-scan <true|false>   (default: true)
-  --preflight-only <true|false>           (default: false; Linux Blueprint review only)
+  --scan-only                             scan an existing environment.yml without building it
   --platform-set <all|linux-only|linux-amd64|linux-arm64|windows-only>
                                            (default: all)
 EOF
@@ -85,7 +85,7 @@ while [[ $# -gt 0 ]]; do
     --safety-api-key) SAFETY_API_KEY="$2"; shift 2 ;;
     --input-type) INPUT_TYPE="$2"; INPUT_TYPE_EXPLICIT="true"; shift 2 ;;
     --materialize-after-scan) MATERIALIZE_AFTER_SCAN="$2"; MATERIALIZE_AFTER_SCAN_EXPLICIT="true"; shift 2 ;;
-    --preflight-only) PREFLIGHT_ONLY="$2"; shift 2 ;;
+    --scan-only) SCAN_ONLY="true"; MATERIALIZE_AFTER_SCAN="false"; shift 1 ;;
     --platform-set) PLATFORM_SET="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
@@ -377,7 +377,7 @@ start_ecs_scan() {
       --state-machine-arn "${state_machine_arn}" \
       --name "${execution_name}" \
       --input "$(cat <<EOF
-{"input_bucket":"${INPUT_BUCKET}","input_object_key":"${INPUT_OBJECT_KEY}","input_type":"${INPUT_TYPE}","materialize_after_scan":"${MATERIALIZE_AFTER_SCAN}","preflight_only":"${PREFLIGHT_ONLY}","evidence_bucket":"${EVIDENCE_BUCKET}","evidence_prefix":"${EVIDENCE_PREFIX}","ephemeral_bucket":"${EPHEMERAL_BUCKET}","ephemeral_prefix":"${EPHEMERAL_PREFIX}","remediate_medium":"${REMEDIATE_MEDIUM}","fail_on_medium":"${FAIL_ON_MEDIUM}","safety_api_key":"${SAFETY_API_KEY}","scan_timestamp":"${timestamp}","scan_execution_id":"${execution_name}","platforms":${platforms_json}}
+{"input_bucket":"${INPUT_BUCKET}","input_object_key":"${INPUT_OBJECT_KEY}","input_type":"${INPUT_TYPE}","materialize_after_scan":"${MATERIALIZE_AFTER_SCAN}","scan_only":"${SCAN_ONLY}","evidence_bucket":"${EVIDENCE_BUCKET}","evidence_prefix":"${EVIDENCE_PREFIX}","ephemeral_bucket":"${EPHEMERAL_BUCKET}","ephemeral_prefix":"${EPHEMERAL_PREFIX}","remediate_medium":"${REMEDIATE_MEDIUM}","fail_on_medium":"${FAIL_ON_MEDIUM}","safety_api_key":"${SAFETY_API_KEY}","scan_timestamp":"${timestamp}","scan_execution_id":"${execution_name}","platforms":${platforms_json}}
 EOF
 )" \
       --query "executionArn" \
