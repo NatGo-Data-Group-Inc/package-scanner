@@ -163,7 +163,12 @@ def inventory_difference(expected: list[dict[str, str]], installed: list[dict[st
         return (item["name"].lower(), item["version"], item.get("build", ""))
 
     expected_by_key = {key(item): item for item in expected}
-    installed_by_key = {key(item): item for item in installed}
+    installed_by_key = {
+        key(item): item
+        for item in installed
+        if (item.get("channel") or "").lower() != "pypi"
+    }
+
     return {
         "missing_from_installed": [expected_by_key[item] for item in sorted(expected_by_key.keys() - installed_by_key.keys())],
         "unexpected_in_installed": [installed_by_key[item] for item in sorted(installed_by_key.keys() - expected_by_key.keys())],
