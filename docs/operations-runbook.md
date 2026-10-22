@@ -63,11 +63,13 @@ python3 scripts/build-candidate-from-env-artifacts.py \
 - The webapp `Candidates` page now groups Python candidates by name and
   distinguishes:
   - `Blueprint`: `environment.yml`
+  - `Requested packages`: unversioned `requested-packages.txt`; always
+    resolves and temporarily materializes before the final scan
   - `Locked`: `requirements.txt`
 - Candidate artifacts can come from:
   - local repo files under `candidates/`
   - S3 input objects under `inputs/python/candidates/<candidate-name>/...`
-- The page supports view/edit and upload for both artifact types, and can start
+- The page supports view/edit and upload for all three artifact types, and can start
   either scan mode without manually pre-populating checkpoint or ephemeral
   paths.
 - The candidate-start GUI path resolves the input, evidence, ephemeral buckets,
@@ -115,7 +117,8 @@ Input semantics:
     entries and the input should not be treated as a true locked set
 
 Current Python Linux runtime expectations:
-- The active Linux scanner image is built on `ubuntu:24.04`, not Amazon Linux.
+- The active Linux scanner image is built on Rocky Linux 8, an EL8/RHEL 8-compatible base.
+- The utility runtime uses Python 3.11 from the EL8 image.
 - The runtime exports `CONDA_OVERRIDE_GLIBC` from the live host glibc version.
 - On `linux-amd64`, the runtime also exports
   `CONDA_OVERRIDE_ARCHSPEC=x86_64_v3` so Conda virtual-package resolution

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>{{ display_name }}</h1>
+<p class="muted">CSV view · <code>{{ key }}</code></p>
+<p><a href="/download?bucket={{ request.args.get('bucket', '')|urlencode }}&key={{ key|urlencode }}&name={{ display_name|urlencode }}">download CSV</a></p>
+{% if truncated %}
+<p class="warn">This view is limited to the first 5 MiB. Download the CSV for the complete file.</p>
+{% endif %}
+{% if headers %}
+<div class="table-scroll">
+  <table>
+    <thead><tr>{% for header in headers %}<th>{{ header }}</th>{% endfor %}</tr></thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<p class="muted">The CSV has no rows.</p>
+{% endif %}
+{% endblock %}

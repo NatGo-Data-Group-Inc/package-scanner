@@ -9,6 +9,8 @@
   <p><strong>Candidate:</strong> <code>{{ candidate_name }}</code></p>
   {% if scan_mode == 'build-artifacts' %}
   <p><strong>Mode:</strong> Build deferred environment artifacts from the previously scanned requirements set.</p>
+  {% elif scan_mode == 'resolve-and-scan' %}
+  <p><strong>Mode:</strong> Resolve the requested package list, temporarily materialize it, and scan the resolved inventory. A deployable environment bundle is not required.</p>
   {% elif input_kind == 'requirements-lock' %}
   <p><strong>Mode:</strong> Scan existing pinned <code>requirements.txt</code> without building environment artifacts.</p>
   {% else %}

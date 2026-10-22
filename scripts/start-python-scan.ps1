@@ -15,6 +15,9 @@ param(
   [string]$SourceRequirementsFile = "",
 
   [Parameter(Mandatory = $false)]
+  [string]$SourceRequestedFile = "",
+
+  [Parameter(Mandatory = $false)]
   [string]$EvidenceBucket = "",
 
   [Parameter(Mandatory = $false)]
@@ -57,7 +60,7 @@ param(
   [string]$SafetyApiKey = "",
 
   [Parameter(Mandatory = $false)]
-  [ValidateSet("environment-yaml", "requirements-lock")]
+  [ValidateSet("environment-yaml", "requirements-lock", "requested-packages")]
   [string]$InputType = "environment-yaml",
 
   [Parameter(Mandatory = $false)]
@@ -192,6 +195,7 @@ $bashArgs = @(
 
 if ($SourceEnvironmentFile -ne "") { $bashArgs += @("--source-environment-file", $SourceEnvironmentFile) }
 if ($SourceRequirementsFile -ne "") { $bashArgs += @("--source-requirements-file", $SourceRequirementsFile) }
+if ($SourceRequestedFile -ne "") { $bashArgs += @("--source-requested-file", $SourceRequestedFile) }
 if ($Profile -ne "") { $bashArgs += @("--profile", $Profile) }
 if ($AllowDefaultProfile) { $bashArgs += "--allow-default-profile" }
 if ($ExpectedAccountId -ne "") { $bashArgs += @("--expected-account-id", $ExpectedAccountId) }

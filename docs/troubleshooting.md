@@ -233,7 +233,8 @@ Fix:
 
 Operator note:
 
-- The current Linux runtime is `ubuntu:24.04`.
+- The current Linux runtime is Rocky Linux 8, an EL8/RHEL 8-compatible base.
+- The utility runtime uses Python 3.11 from the EL8 image.
 - The worker exports `CONDA_OVERRIDE_GLIBC` dynamically from the host.
 - On `linux-amd64`, it also exports `CONDA_OVERRIDE_ARCHSPEC=x86_64_v3`.
 

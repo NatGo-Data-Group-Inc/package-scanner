@@ -6,6 +6,7 @@ INPUT_BUCKET=""
 INPUT_OBJECT_KEY="inputs/python/environment.yml"
 SOURCE_ENVIRONMENT_FILE=""
 SOURCE_REQUIREMENTS_FILE=""
+SOURCE_REQUESTED_FILE=""
 EVIDENCE_BUCKET=""
 EVIDENCE_PREFIX="evidence"
 EPHEMERAL_BUCKET=""
@@ -39,6 +40,7 @@ Optional:
   --input-object-key <key>                (default: inputs/python/environment.yml)
   --source-environment-file <path>        (default: no upload; use existing S3 object)
   --source-requirements-file <path>       (default: no upload; use existing S3 object)
+  --source-requested-file <path>         (default: no upload; use existing S3 object)
   --evidence-bucket <bucket>              (default: auto from stack output)
   --evidence-prefix <prefix>              (default: evidence)
   --ephemeral-bucket <bucket>             (default: auto from stack output)
@@ -53,7 +55,7 @@ Optional:
   --remediate-medium <true|false>         (default: true)
   --fail-on-medium <true|false>           (default: false)
   --safety-api-key <key>                  (default: empty/unauthenticated)
-  --input-type <environment-yaml|requirements-lock>
+  --input-type <environment-yaml|requirements-lock|requested-packages>
                                            (default: environment-yaml)
   --materialize-after-scan <true|false>   (default: true)
   --scan-only                             scan an existing environment.yml without building it
@@ -69,6 +71,7 @@ while [[ $# -gt 0 ]]; do
     --input-object-key) INPUT_OBJECT_KEY="$2"; shift 2 ;;
     --source-environment-file) SOURCE_ENVIRONMENT_FILE="$2"; shift 2 ;;
     --source-requirements-file) SOURCE_REQUIREMENTS_FILE="$2"; shift 2 ;;
+    --source-requested-file) SOURCE_REQUESTED_FILE="$2"; shift 2 ;;
     --evidence-bucket) EVIDENCE_BUCKET="$2"; shift 2 ;;
     --evidence-prefix) EVIDENCE_PREFIX="$2"; shift 2 ;;
     --ephemeral-bucket) EPHEMERAL_BUCKET="$2"; shift 2 ;;
@@ -109,16 +112,16 @@ if [[ "${PLATFORM_SET}" != "all" && "${PLATFORM_SET}" != "linux-only" && "${PLAT
   echo "Guardrail: --platform-set must be one of: all, linux-only, linux-amd64, linux-arm64, windows-only" >&2
   exit 1
 fi
-if [[ "${INPUT_TYPE}" != "environment-yaml" && "${INPUT_TYPE}" != "requirements-lock" ]]; then
-  echo "Guardrail: --input-type must be one of: environment-yaml, requirements-lock" >&2
+if [[ "${INPUT_TYPE}" != "environment-yaml" && "${INPUT_TYPE}" != "requirements-lock" && "${INPUT_TYPE}" != "requested-packages" ]]; then
+  echo "Guardrail: --input-type must be one of: environment-yaml, requirements-lock, requested-packages" >&2
   exit 1
 fi
 if [[ "${MATERIALIZE_AFTER_SCAN}" != "true" && "${MATERIALIZE_AFTER_SCAN}" != "false" ]]; then
   echo "Guardrail: --materialize-after-scan must be true or false" >&2
   exit 1
 fi
-if [[ -n "${SOURCE_ENVIRONMENT_FILE}" && -n "${SOURCE_REQUIREMENTS_FILE}" ]]; then
-  echo "Guardrail: --source-environment-file and --source-requirements-file are mutually exclusive." >&2
+if [[ -n "${SOURCE_ENVIRONMENT_FILE}" && ( -n "${SOURCE_REQUIREMENTS_FILE}" || -n "${SOURCE_REQUESTED_FILE}" ) ]] || [[ -n "${SOURCE_REQUIREMENTS_FILE}" && -n "${SOURCE_REQUESTED_FILE}" ]]; then
+  echo "Guardrail: source environment, locked requirements, and requested package files are mutually exclusive." >&2
   exit 1
 fi
 if [[ -n "${SOURCE_ENVIRONMENT_FILE}" && ! -f "${SOURCE_ENVIRONMENT_FILE}" ]]; then
@@ -127,6 +130,10 @@ if [[ -n "${SOURCE_ENVIRONMENT_FILE}" && ! -f "${SOURCE_ENVIRONMENT_FILE}" ]]; t
 fi
 if [[ -n "${SOURCE_REQUIREMENTS_FILE}" && ! -f "${SOURCE_REQUIREMENTS_FILE}" ]]; then
   echo "Source requirements file not found: ${SOURCE_REQUIREMENTS_FILE}" >&2
+  exit 1
+fi
+if [[ -n "${SOURCE_REQUESTED_FILE}" && ! -f "${SOURCE_REQUESTED_FILE}" ]]; then
+  echo "Source requested package file not found: ${SOURCE_REQUESTED_FILE}" >&2
   exit 1
 fi
 if [[ -n "${SOURCE_REQUIREMENTS_FILE}" ]]; then
@@ -141,6 +148,17 @@ if [[ -n "${SOURCE_REQUIREMENTS_FILE}" ]]; then
   if [[ "${MATERIALIZE_AFTER_SCAN_EXPLICIT}" != "true" ]]; then
     MATERIALIZE_AFTER_SCAN="false"
   fi
+fi
+if [[ -n "${SOURCE_REQUESTED_FILE}" ]]; then
+  if [[ "${INPUT_TYPE_EXPLICIT}" == "true" && "${INPUT_TYPE}" != "requested-packages" ]]; then
+    echo "Guardrail: --source-requested-file requires --input-type requested-packages." >&2
+    exit 1
+  fi
+  INPUT_TYPE="requested-packages"
+  if [[ "${INPUT_OBJECT_KEY}" == "inputs/python/environment.yml" ]]; then
+    INPUT_OBJECT_KEY="inputs/python/requested-packages.txt"
+  fi
+  MATERIALIZE_AFTER_SCAN="true"
 fi
 
 AWS_ARGS=(--region "${REGION}")
@@ -275,6 +293,10 @@ fi
 if [[ -n "${SOURCE_REQUIREMENTS_FILE}" ]]; then
   echo "Uploading ${SOURCE_REQUIREMENTS_FILE} to s3://${INPUT_BUCKET}/${INPUT_OBJECT_KEY}"
   aws s3 cp "${SOURCE_REQUIREMENTS_FILE}" "s3://${INPUT_BUCKET}/${INPUT_OBJECT_KEY}" "${AWS_ARGS[@]}" >/dev/null
+fi
+if [[ -n "${SOURCE_REQUESTED_FILE}" ]]; then
+  echo "Uploading ${SOURCE_REQUESTED_FILE} to s3://${INPUT_BUCKET}/${INPUT_OBJECT_KEY}"
+  aws s3 cp "${SOURCE_REQUESTED_FILE}" "s3://${INPUT_BUCKET}/${INPUT_OBJECT_KEY}" "${AWS_ARGS[@]}" >/dev/null
 fi
 
 if [[ -z "${EVIDENCE_BUCKET}" ]]; then

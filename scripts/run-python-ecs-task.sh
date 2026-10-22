@@ -22,6 +22,12 @@ PYTHON_CHECKPOINT_INCLUDE_ENV="${PYTHON_CHECKPOINT_INCLUDE_ENV:-false}"
 INPUT_TYPE="${INPUT_TYPE:-environment-yaml}"
 MATERIALIZE_AFTER_SCAN="${MATERIALIZE_AFTER_SCAN:-true}"
 SCAN_ONLY="${SCAN_ONLY:-false}"
+if [[ "${INPUT_TYPE}" == "requested-packages" ]]; then
+  # Requested package manifests must be resolved and materialized before the
+  # final pinned inventory and governance scan can be produced.
+  MATERIALIZE_AFTER_SCAN="true"
+  SCAN_ONLY="false"
+fi
 CONDA_SUBDIR=""
 
 if [[ -z "${CONDA_OVERRIDE_GLIBC:-}" ]] && command -v getconf >/dev/null 2>&1; then
@@ -102,7 +108,10 @@ payload = {
     "name": "target",
     "channels": ["conda-forge"],
     "dependencies": [
-        "python",
+        # Keep the generated environment within the compatibility range of
+        # the locked pip set: networkx 3.7 requires Python >=3.12 while
+        # dynaconf 3.3.5 requires Python <3.15.
+        "python=3.13",
         "pip",
         {
             "pip": packages,
@@ -216,7 +225,7 @@ mkdir -p "${RUN_DIR}" "${ROOT_PREFIX}" /tmp/scan-input
 input_basename="$(basename "${INPUT_OBJECT_KEY}")"
 aws s3 cp "s3://${INPUT_BUCKET}/${INPUT_OBJECT_KEY}" "/tmp/scan-input/${input_basename}" >/dev/null
 REQUIREMENTS_ONLY_SCAN="false"
-if [[ "${INPUT_TYPE}" == "requirements-lock" || "${INPUT_OBJECT_KEY}" == *.requirements.txt ]]; then
+if [[ "${INPUT_TYPE}" == "requirements-lock" || "${INPUT_TYPE}" == "requested-packages" ]]; then
   REQUIREMENTS_ONLY_SCAN="true"
   cp "/tmp/scan-input/${input_basename}" "${RUN_DIR}/requirements.lock.txt"
   render_requirements_environment "${RUN_DIR}/requirements.lock.txt" "${RUN_DIR}/environment.yml"

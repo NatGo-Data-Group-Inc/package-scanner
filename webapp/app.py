@@ -1224,7 +1224,7 @@ def create_app() -> Flask:
             if run_metadata_key:
                 run_metadata = s3_get_json_optional(record["evidence_bucket"], run_metadata_key) or {}
             platform["run_metadata"] = run_metadata
-            platform["requirements_only_scan"] = ecosystem == "python" and str(run_metadata.get("input_type") or "").strip() == "requirements-lock"
+            platform["requirements_only_scan"] = ecosystem == "python" and str(run_metadata.get("input_type") or "").strip() in {"requirements-lock", "requested-packages"}
             platform["resolved_versions_allowed"] = ecosystem == "python" and str(run_metadata.get("allow_resolved_versions") or "").strip().lower() == "true"
             if platform["requirements_only_scan"]:
                 platform["artifacts_requested"] = str(run_metadata.get("materialize_after_scan") or "").strip().lower() == "true"
@@ -1233,6 +1233,7 @@ def create_app() -> Flask:
             platform["supports_artifact_build"] = bool(
                 ecosystem == "python"
                 and platform["requirements_only_scan"]
+                and str(run_metadata.get("input_type") or "").strip() == "requirements-lock"
                 and not platform["artifacts_requested"]
                 and str(platform.get("status") or "").upper() == "SUCCEEDED"
             )
@@ -1311,9 +1312,9 @@ def create_app() -> Flask:
                 for platform in row.get("platforms", []):
                     paths = platform.get("paths") or {}
                     metadata = s3_get_json_optional(row.get("evidence_bucket", ""), paths.get("run_metadata_key", "")) or {}
-                    requirements_only = str(metadata.get("input_type") or "").strip() == "requirements-lock"
+                    requirements_only = str(metadata.get("input_type") or "").strip() in {"requirements-lock", "requested-packages"}
                     artifacts_requested = str(metadata.get("materialize_after_scan") or "").strip().lower() == "true"
-                    if requirements_only and not artifacts_requested and str(platform.get("status") or "").upper() == "SUCCEEDED":
+                    if requirements_only and str(metadata.get("input_type") or "").strip() == "requirements-lock" and not artifacts_requested and str(platform.get("status") or "").upper() == "SUCCEEDED":
                         materialization_row = dict(row)
                         materialization_row["platforms"] = [platform]
                         materialization_row["awaiting_materialization"] = True
@@ -1838,6 +1839,23 @@ def create_app() -> Flask:
                         "source": "local",
                     },
                 )
+            for path in sorted(candidates_dir.glob("*.requested.txt")):
+                name = path.name[: -len(".requested.txt")]
+                register_candidate(
+                    rows,
+                    {
+                        "name": name,
+                        "filename": path.name,
+                        "size": path.stat().st_size,
+                        "ecosystem": "python",
+                        "input_kind": "requested-packages",
+                        "scan_action": "requested-package-scan",
+                        "start_path": f"/candidates/python/{name}/start-requested",
+                        "start_button_label": "Resolve + Scan Package List",
+                        "description": "Resolve this unversioned package list, temporarily materialize it, and scan the resolved inventory.",
+                        "source": "local",
+                    },
+                )
 
         if include_remote:
             try:
@@ -1895,6 +1913,25 @@ def create_app() -> Flask:
                                         "s3_key": key,
                                     },
                                 )
+                            elif key.endswith("/requested-packages.txt"):
+                                name = key[len(prefix):].split("/", 1)[0]
+                                register_candidate(
+                                    rows,
+                                    {
+                                        "name": name,
+                                        "filename": key.rsplit("/", 1)[-1],
+                                        "size": None,
+                                        "ecosystem": "python",
+                                        "input_kind": "requested-packages",
+                                        "scan_action": "requested-package-scan",
+                                        "start_path": f"/candidates/python/{name}/start-requested",
+                                        "start_button_label": "Resolve + Scan Package List",
+                                        "description": "Resolve this unversioned package list, temporarily materialize it, and scan the resolved inventory.",
+                                        "source": "s3",
+                                        "s3_bucket": input_bucket,
+                                        "s3_key": key,
+                                    },
+                                )
                         if not page["is_truncated"]:
                             break
                         token = page["next_continuation_token"]
@@ -1915,12 +1952,15 @@ def create_app() -> Flask:
                     "ecosystem": "python",
                     "environment": None,
                     "requirements": None,
+                    "requested": None,
                 },
             )
             if artifact["input_kind"] == "environment-yaml":
                 group["environment"] = artifact
             elif artifact["input_kind"] == "requirements-lock":
                 group["requirements"] = artifact
+            elif artifact["input_kind"] == "requested-packages":
+                group["requested"] = artifact
         return sorted(groups.values(), key=lambda row: row["name"])
 
     def resolve_python_candidate_source(candidate_name: str, input_kind: str, preferred_source: str | None = None) -> dict | None:
@@ -1932,6 +1972,10 @@ def create_app() -> Flask:
             local_path = repo_root() / "candidates" / f"{safe_name}.requirements.txt"
             if local_path.exists():
                 local_candidate = {"source": "local", "path": local_path, "input_object_key": f"inputs/python/candidates/{safe_name}/requirements.lock.requirements.txt"}
+        elif input_kind == "requested-packages":
+            local_path = repo_root() / "candidates" / f"{safe_name}.requested.txt"
+            if local_path.exists():
+                local_candidate = {"source": "local", "path": local_path, "input_object_key": f"inputs/python/candidates/{safe_name}/requested-packages.txt"}
         else:
             local_path = repo_root() / "candidates" / f"{safe_name}.yml"
             if not local_path.exists():
@@ -1969,7 +2013,12 @@ def create_app() -> Flask:
             candidate_name = remainder.split("/", 1)[0]
             if not candidate_name:
                 continue
-            input_kind = "requirements-lock" if input_key.endswith(".requirements.txt") else "environment-yaml"
+            if input_key.endswith("/requested-packages.txt"):
+                input_kind = "requested-packages"
+            elif input_key.endswith(".requirements.txt"):
+                input_kind = "requirements-lock"
+            else:
+                input_kind = "environment-yaml"
             active_by_candidate[(candidate_name, input_kind)] = {
                 "execution_id": execution.get("name"),
                 "execution_arn": execution_arn,
@@ -1986,7 +2035,7 @@ def create_app() -> Flask:
         groups = []
         for candidate in candidate_groups():
             row = dict(candidate)
-            for field_name in ("environment", "requirements"):
+            for field_name in ("environment", "requirements", "requested"):
                 artifact = row.get(field_name)
                 if not artifact:
                     continue
@@ -2003,6 +2052,7 @@ def create_app() -> Flask:
         artifact_map = {
             "environment": "environment-yaml",
             "requirements": "requirements-lock",
+            "requested": "requested-packages",
         }
         input_kind = artifact_map.get(artifact_name)
         if not input_kind:
@@ -2035,7 +2085,7 @@ def create_app() -> Flask:
             return
         bucket = str(candidate_source.get("s3_bucket") or "").strip() or python_input_bucket_name()
         key = str(candidate_source.get("input_object_key") or "").strip()
-        content_type = "text/plain" if input_kind == "requirements-lock" else "application/x-yaml"
+        content_type = "text/plain" if input_kind in {"requirements-lock", "requested-packages"} else "application/x-yaml"
         s3_put_bytes(
             bucket,
             key,
@@ -2247,6 +2297,8 @@ def create_app() -> Flask:
         for candidate in candidate_files():
             if candidate.get("input_kind") == "requirements-lock":
                 key = f"inputs/python/candidates/{candidate['name']}/requirements.lock.requirements.txt"
+            elif candidate.get("input_kind") == "requested-packages":
+                key = f"inputs/python/candidates/{candidate['name']}/requested-packages.txt"
             else:
                 key = f"inputs/python/candidates/{candidate['name']}/environment.yml"
             group = ensure_group("python", "", key)
@@ -2743,7 +2795,7 @@ def create_app() -> Flask:
         upload = request.files.get("artifact_file")
         if not candidate_name or "/" in candidate_name or "\\" in candidate_name:
             abort(400, "A valid candidate name is required")
-        if artifact_name not in {"environment", "requirements"}:
+        if artifact_name not in {"environment", "requirements", "requested"}:
             abort(400, "Unsupported candidate artifact type")
         if destination not in {"local", "s3"}:
             abort(400, "Unsupported upload destination")
@@ -2759,10 +2811,15 @@ def create_app() -> Flask:
             local_path = repo_root() / "candidates" / f"{candidate_name}.yml"
             input_object_key = f"inputs/python/candidates/{candidate_name}/environment.yml"
             content_type = "application/x-yaml"
-        else:
+        elif artifact_name == "requirements":
             input_kind = "requirements-lock"
             local_path = repo_root() / "candidates" / f"{candidate_name}.requirements.txt"
             input_object_key = f"inputs/python/candidates/{candidate_name}/requirements.lock.requirements.txt"
+            content_type = "text/plain"
+        else:
+            input_kind = "requested-packages"
+            local_path = repo_root() / "candidates" / f"{candidate_name}.requested.txt"
+            input_object_key = f"inputs/python/candidates/{candidate_name}/requested-packages.txt"
             content_type = "text/plain"
 
         if destination == "local":
@@ -2830,6 +2887,73 @@ def create_app() -> Flask:
             scan_only=False,
         )
 
+    @app.route("/candidates/python/<candidate_name>/start-requested", methods=["POST"])
+    def start_python_requested_candidate(candidate_name: str):
+        safe_name = candidate_name.strip()
+        if not safe_name or "/" in safe_name or "\\" in safe_name:
+            abort(400, "Invalid candidate name")
+        candidate_source = resolve_python_candidate_source(safe_name, "requested-packages")
+        if not candidate_source:
+            abort(404, "Requested package list not found")
+
+        platform = request.form.get("platform", "linux-amd64")
+        if platform not in {"linux-amd64", "linux-arm64"}:
+            abort(400, "Requested Python package scans currently support linux-amd64 and linux-arm64")
+
+        return launch_python_candidate_scan(
+            candidate_name=safe_name,
+            candidate_source=candidate_source,
+            platform=platform,
+            input_kind="requested-packages",
+            materialize_after_scan=True,
+            scan_only=False,
+        )
+
+    @app.route("/candidates/python/start-existing-requirements", methods=["POST"])
+    def start_existing_python_requirements():
+        input_object_key = str(request.form.get("input_object_key") or "").strip()
+        if not input_object_key or input_object_key.startswith("/") or ".." in input_object_key.split("/"):
+            abort(400, "A valid S3 object key is required")
+        if not input_object_key.endswith(".txt"):
+            abort(400, "The existing Python input must be a requirements .txt file")
+
+        platform = request.form.get("platform", "linux-amd64")
+        if platform not in {"linux-amd64", "linux-arm64"}:
+            abort(400, "Requirements-only Python scans currently support linux-amd64 and linux-arm64")
+
+        input_bucket = python_input_bucket_name()
+        if not input_bucket:
+            abort(500, "Python input bucket could not be resolved")
+        try:
+            s3_head_object(
+                input_bucket,
+                input_object_key,
+                region=app.config["AWS_REGION"],
+                profile=app.config["AWS_PROFILE"],
+            )
+        except AwsAuthExpiredError:
+            raise
+        except Exception:
+            abort(404, f"S3 input object was not found: s3://{input_bucket}/{input_object_key}")
+
+        filename = input_object_key.rsplit("/", 1)[-1]
+        candidate_name = filename[: -len(".requirements.txt")] if filename.endswith(".requirements.txt") else Path(filename).stem
+        candidate_name = candidate_name or "existing-requirements"
+        input_kind = "requested-packages" if input_object_key.endswith("/requested-packages.txt") else "requirements-lock"
+        materialize_after_scan = input_kind == "requested-packages" or str(request.form.get("materialize_after_scan") or "").lower() == "true"
+        return launch_python_candidate_scan(
+            candidate_name=candidate_name,
+            candidate_source={
+                "source": "s3",
+                "s3_bucket": input_bucket,
+                "input_object_key": input_object_key,
+            },
+            platform=platform,
+            input_kind=input_kind,
+            materialize_after_scan=materialize_after_scan,
+            scan_only=False,
+        )
+
     def launch_python_candidate_scan(
         *,
         candidate_name: str,
@@ -2863,13 +2987,13 @@ def create_app() -> Flask:
                 auth_error=None,
                 already_running=True,
                 input_kind=input_kind,
-                scan_mode="build-artifacts" if materialize_after_scan and input_kind == "requirements-lock" else input_kind,
+                scan_mode="resolve-and-scan" if input_kind == "requested-packages" else ("build-artifacts" if materialize_after_scan and input_kind == "requirements-lock" else input_kind),
             ), 409
 
         timestamp = utc_compact_timestamp()
         execution_name = f"python-scan-{timestamp}-{uuid.uuid4().hex[:8]}"
         if candidate_source.get("source") == "local":
-            content_type = "text/plain" if input_kind == "requirements-lock" else "application/x-yaml"
+            content_type = "text/plain" if input_kind in {"requirements-lock", "requested-packages"} else "application/x-yaml"
             s3_put_bytes(
                 input_bucket,
                 input_object_key,
@@ -2920,7 +3044,7 @@ def create_app() -> Flask:
             auth_error=None,
             already_running=False,
             input_kind=input_kind,
-            scan_mode="build-artifacts" if materialize_after_scan and input_kind == "requirements-lock" else input_kind,
+            scan_mode="resolve-and-scan" if input_kind == "requested-packages" else ("build-artifacts" if materialize_after_scan and input_kind == "requirements-lock" else input_kind),
         )
 
     @app.route("/runs/<ecosystem>/<execution_id>")
@@ -3689,6 +3813,7 @@ def create_app() -> Flask:
         bucket = request.args.get("bucket") or app.config["CATALOG_BUCKET"]
         key = request.args.get("key")
         download_name = str(request.args.get("name") or "").strip()
+        inline = str(request.args.get("inline") or "").strip().lower() == "true"
         if not key:
             abort(400)
         if download_name:
@@ -3706,9 +3831,9 @@ def create_app() -> Flask:
                 abort(500)
             return send_file(
                 io.BytesIO(payload),
-                as_attachment=True,
+                as_attachment=not inline,
                 download_name=download_name,
-                mimetype="application/octet-stream",
+                mimetype="text/csv" if download_name.lower().endswith(".csv") else "application/octet-stream",
             )
         try:
             url = s3_presign(
@@ -3722,6 +3847,43 @@ def create_app() -> Flask:
         except Exception:
             abort(500)
         return redirect(url, code=302)
+
+    @app.route("/view-csv")
+    def view_csv():
+        """Render a CSV as HTML so browsers do not need to display text/csv."""
+        bucket = request.args.get("bucket") or app.config["CATALOG_BUCKET"]
+        key = request.args.get("key")
+        display_name = str(request.args.get("name") or Path(key or "csv").name).strip()
+        if not key:
+            abort(400)
+        try:
+            payload = s3_get_bytes(
+                bucket,
+                key,
+                region=app.config["AWS_REGION"],
+                profile=app.config["AWS_PROFILE"],
+                timeout=600,
+            )
+        except AwsAuthExpiredError as exc:
+            return render_template("download_error.html", auth_error=str(exc), key=key), 401
+        except Exception:
+            abort(500)
+
+        # Keep the browser view bounded while leaving the original download intact.
+        truncated = len(payload) > 5 * 1024 * 1024
+        text = payload[: 5 * 1024 * 1024].decode("utf-8-sig", errors="replace")
+        rows = list(csv.reader(io.StringIO(text)))
+        headers = rows[0] if rows else []
+        data_rows = rows[1:] if rows else []
+        return render_template(
+            "csv_view.html",
+            auth_error=None,
+            display_name=display_name,
+            key=key,
+            headers=headers,
+            rows=data_rows,
+            truncated=truncated,
+        )
 
     return app
 

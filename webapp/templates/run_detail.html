@@ -21,6 +21,14 @@
 {% for platform in record.platforms %}
   <h2>{{ platform.platform }}</h2>
   <p>Status: <span class="{{ 'ok' if platform.status == 'SUCCEEDED' else 'bad' }}">{{ platform.status }}</span></p>
+  {% if ecosystem == 'python' %}
+  {% set input_type = platform.run_metadata.input_type|default('') %}
+  <p>Input mode:
+    {% if input_type == 'requested-packages' %}<strong>Requested packages — resolved and temporarily materialized before scanning</strong>
+    {% elif input_type == 'requirements-lock' %}<strong>Locked requirements — supplied package versions</strong>
+    {% else %}<strong>{{ input_type or 'environment blueprint' }}</strong>{% endif %}
+  </p>
+  {% endif %}
   <p>Validated: {{ platform.validated }}</p>
   {% if ecosystem == 'python' and record.preflight_only and platform.status == 'SUCCEEDED' and platform.validated %}
   <div class="card">
@@ -103,10 +111,10 @@
   </ul>
   <p>Findings and Reports:</p>
   <ul>
-    <li><a href="/download?bucket={{ record.evidence_bucket }}&key={{ platform.paths.vulnerability_findings_key|urlencode }}">vulnerability findings</a></li>
-    <li><a href="/download?bucket={{ record.evidence_bucket }}&key={{ platform.paths.remediation_required_key|urlencode }}">remediation required</a></li>
-    <li><a href="/download?bucket={{ record.evidence_bucket }}&key={{ platform.paths.remediation_exceptions_key|urlencode }}">remediation exceptions</a></li>
-    <li><a href="/download?bucket={{ record.evidence_bucket }}&key={{ platform.paths.remediation_spreadsheet_key|urlencode }}">remediation spreadsheet</a></li>
+    <li><a href="/view-csv?bucket={{ record.evidence_bucket }}&key={{ platform.paths.vulnerability_findings_key|urlencode }}&name=vulnerability-findings.csv" target="_blank" rel="noopener">view</a> / <a download="vulnerability-findings.csv" href="/download?bucket={{ record.evidence_bucket }}&key={{ platform.paths.vulnerability_findings_key|urlencode }}&name=vulnerability-findings.csv">download vulnerability findings CSV</a></li>
+    <li><a href="/view-csv?bucket={{ record.evidence_bucket }}&key={{ platform.paths.remediation_required_key|urlencode }}&name=remediation-required.csv" target="_blank" rel="noopener">view</a> / <a download="remediation-required.csv" href="/download?bucket={{ record.evidence_bucket }}&key={{ platform.paths.remediation_required_key|urlencode }}&name=remediation-required.csv">download remediation-required CSV</a></li>
+    <li><a href="/view-csv?bucket={{ record.evidence_bucket }}&key={{ platform.paths.remediation_exceptions_key|urlencode }}&name=remediation-exceptions.csv" target="_blank" rel="noopener">view</a> / <a download="remediation-exceptions.csv" href="/download?bucket={{ record.evidence_bucket }}&key={{ platform.paths.remediation_exceptions_key|urlencode }}&name=remediation-exceptions.csv">download remediation-exceptions CSV</a></li>
+    <li><a href="/view-csv?bucket={{ record.evidence_bucket }}&key={{ platform.paths.remediation_spreadsheet_key|urlencode }}&name=remediation-spreadsheet.csv" target="_blank" rel="noopener">view</a> / <a download="remediation-spreadsheet.csv" href="/download?bucket={{ record.evidence_bucket }}&key={{ platform.paths.remediation_spreadsheet_key|urlencode }}&name=remediation-spreadsheet.csv">download remediation spreadsheet CSV</a></li>
     <li><a href="/download?bucket={{ record.evidence_bucket }}&key={{ platform.paths.trivy_report_key|urlencode }}">trivy report</a></li>
     {% if platform.paths.safety_report_key %}
     <li><a href="/download?bucket={{ record.evidence_bucket }}&key={{ platform.paths.safety_report_key|urlencode }}">safety report</a></li>

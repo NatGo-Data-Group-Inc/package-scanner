@@ -138,6 +138,20 @@ path; in S3 it should live under:
 inputs/python/candidates/<candidate-name>/requirements.txt
 ```
 
+If you have a package request without versions, use a `Requested packages`
+candidate instead. Put one package name per line in:
+
+```text
+inputs/python/candidates/<candidate-name>/requested-packages.txt
+```
+
+The requested-package path resolves compatible versions for the target platform
+and Python runtime, temporarily materializes the environment, and then runs
+the same final inventory, SBOM, vulnerability, remediation, and governance
+steps as a locked run. The temporary environment captures transitive pip
+dependencies and authoritative installed versions; a deployable environment
+bundle is optional.
+
 Input semantics:
 
 - `Blueprint` / `environment.yml`:
@@ -152,6 +166,11 @@ Input semantics:
   - non-comment lines should use `package==version`
   - if versions are omitted, downstream governance parsing may skip those lines
     and treat the input as not fully locked
+- `Requested packages` / `requested-packages.txt`:
+  - contains unversioned package names, one per line
+  - always resolves and temporarily materializes before final governance
+  - produces a generated pinned inventory for governance; pip packages remain
+    included in the final Python SBOM and vulnerability scan
 
 ### Step B: upload input
 
@@ -163,6 +182,24 @@ aws s3 cp ./environment.yml \
 ```
 
 ### Step C: start scan (all Python platforms)
+
+For an unversioned package request, use `requested-packages.txt` and select
+`requested-packages`. This mode forces temporary materialization so governance
+uses the generated pinned inventory:
+
+```bash
+./scripts/start-python-scan.sh \
+  --stack-name package-scanner-dev \
+  --input-bucket <input-bucket> \
+  --source-requested-file ./requested-packages.txt \
+  --input-type requested-packages \
+  --materialize-after-scan true \
+  --platform-set linux-amd64 \
+  --region us-east-1 \
+  --profile <aws-profile> \
+  --expected-account-id <12-digit-account-id> \
+  --deployment-lock-token <env-lock-token>
+```
 
 ```bash
 ./scripts/start-python-scan.sh \

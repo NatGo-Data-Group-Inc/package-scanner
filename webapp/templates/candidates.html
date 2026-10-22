@@ -3,9 +3,10 @@
 <div class="page-intro">
 <h1>Python Candidates</h1>
 <p class="muted">
-  Treat each candidate as a named package set with up to two attached artifacts:
-  a <code>Blueprint</code> <code>environment.yml</code> for materialize-and-scan workflows,
-  and a <code>Locked</code> <code>requirements.txt</code> for exact-version scan-first workflows.
+  Treat each candidate as a named package set with up to three input modes:
+  <code>Blueprint</code> for an environment definition, <code>Requested packages</code>
+  for an unversioned package list that will be resolved and temporarily materialized,
+  or <code>Locked requirements</code> for an already-pinned package set.
 </p>
 </div>
 
@@ -38,6 +39,29 @@
   </form>
   </section>
   <section class="form-section">
+  <h2>Upload Requested Package List</h2>
+  <p class="muted">Use one package name per line without versions. The scan resolves Python 3.13-compatible versions, temporarily materializes the environment, and then scans the resolved inventory.</p>
+  <form method="post" action="/candidates/python/upload" enctype="multipart/form-data">
+    <input type="hidden" name="artifact_name" value="requested">
+    <label>
+      Candidate name
+      <input type="text" name="candidate_name" placeholder="dlmc_102226_glibc2.28" required>
+    </label>
+    <label>
+      Destination
+      <select name="destination">
+        <option value="s3" selected>S3 input bucket</option>
+        <option value="local">local candidates directory</option>
+      </select>
+    </label>
+    <label>
+      requested-packages.txt
+      <input type="file" name="artifact_file" accept=".txt" required>
+    </label>
+    <button class="button-primary" type="submit">Upload Requested Package List</button>
+  </form>
+  </section>
+  <section class="form-section">
   <h2>Upload Locked Requirements</h2>
   <form method="post" action="/candidates/python/upload" enctype="multipart/form-data">
     <input type="hidden" name="artifact_name" value="requirements">
@@ -62,6 +86,32 @@
   </div>
 </div>
 
+<div class="card">
+  <h2>Submit Existing S3 Requirements</h2>
+  <p class="muted">
+    Use this for a requirements file already uploaded to the Python input bucket,
+    including objects outside the <code>inputs/python/candidates/</code> prefix.
+  </p>
+  <form method="post" action="/candidates/python/start-existing-requirements">
+    <label>
+      S3 object key
+      <input type="text" name="input_object_key" value="inputs/python/requirements.lock.requirements.txt" required>
+    </label>
+    <label>
+      Platform
+      <select name="platform">
+        <option value="linux-amd64" selected>linux-amd64</option>
+        <option value="linux-arm64">linux-arm64</option>
+      </select>
+    </label>
+    <label>
+      <input type="checkbox" name="materialize_after_scan" value="true" checked>
+      Build the Python environment artifacts after the requirements scan
+    </label>
+    <button class="button-primary" type="submit">Submit Existing Requirements</button>
+  </form>
+</div>
+
 {% if candidates %}
   {% for candidate in candidates %}
   <div class="card">
@@ -73,6 +123,9 @@
       {% endif %}
       {% if candidate.requirements %}
       <span class="chip">Locked</span>
+      {% endif %}
+      {% if candidate.requested %}
+      <span class="chip">Requested packages</span>
       {% endif %}
     </div>
 
@@ -191,6 +244,56 @@
             </form>
           </td>
           <td><a href="{{ candidate.requirements.edit_path }}">view / edit</a></td>
+        </tr>
+        {% endif %}
+
+        {% if candidate.requested %}
+        <tr>
+          <td>
+            <strong>Requested packages</strong>
+            <div><code>{{ candidate.requested.filename }}</code></div>
+            <div class="muted">Resolve compatible versions, temporarily materialize the environment, and scan the resolved pip inventory.</div>
+          </td>
+          <td>
+            <span class="chip">{{ candidate.requested.source|upper }}</span>
+            {% if candidate.requested.source == 's3' %}
+            <div class="muted"><code>{{ candidate.requested.s3_key }}</code></div>
+            {% else %}
+            <div class="muted">{{ candidate.requested.size }} bytes</div>
+            {% endif %}
+          </td>
+          <td>
+            {% if candidate.requested.active_run %}
+            <p class="muted">Active scan already running: <code>{{ candidate.requested.active_run.execution_id }}</code></p>
+            {% endif %}
+            <form method="post" action="{{ candidate.requested.start_path }}">
+              <label>
+                Platform
+                <select name="platform" {% if candidate.requested.start_disabled %}disabled{% endif %}>
+                  <option value="linux-amd64" selected>linux-amd64</option>
+                  <option value="linux-arm64">linux-arm64</option>
+                </select>
+              </label>
+              <label>
+                Remediate medium
+                <select name="remediate_medium" {% if candidate.requested.start_disabled %}disabled{% endif %}>
+                  <option value="true" selected>true</option>
+                  <option value="false">false</option>
+                </select>
+              </label>
+              <label>
+                Fail on medium
+                <select name="fail_on_medium" {% if candidate.requested.start_disabled %}disabled{% endif %}>
+                  <option value="false" selected>false</option>
+                  <option value="true">true</option>
+                </select>
+              </label>
+              <button type="submit" {% if candidate.requested.start_disabled %}disabled{% endif %}>
+                {{ 'Already Running' if candidate.requested.start_disabled else 'Resolve + Scan' }}
+              </button>
+            </form>
+          </td>
+          <td><a href="{{ candidate.requested.edit_path }}">view / edit</a></td>
         </tr>
         {% endif %}
       </tbody>

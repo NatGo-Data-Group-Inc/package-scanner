@@ -150,7 +150,7 @@ def main() -> int:
     requirements_path = run_dir / "requirements.lock.txt"
     conda_list_path = run_dir / "conda-list.json"
     environment_path = run_dir / "environment.yml"
-    if args.input_type == "requirements-lock":
+    if args.input_type in {"requirements-lock", "requested-packages"}:
         requested_conda_packages = []
         requested_pip_packages = load_requested_requirements(requirements_path)
     else:

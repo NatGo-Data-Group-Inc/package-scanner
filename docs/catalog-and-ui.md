@@ -64,19 +64,25 @@ cleanly.
 Python `Candidates` page behavior:
 
 - Python candidates are grouped by candidate name.
-- Each candidate can have up to two attached artifact types:
+- Each candidate can have up to three attached artifact types:
   - `Blueprint`: `environment.yml`
+  - `Requested packages`: `requested-packages.txt`
   - `Locked`: `requirements.txt`
 - `Blueprint` is the build/materialize + scan path.
-- `Locked` is the scan-first path for exact pinned pip versions. It does not
-  require environment artifact generation during the initial scan.
+- `Requested packages` is the resolve-and-scan path for one package name per
+  line without versions. It always temporarily materializes the target
+  environment so the final pinned inventory and pip SBOM are authoritative.
+- `Locked` is the exact-version path. It can scan a supplied pinned inventory
+  without materializing, or materialize when a deployable environment is
+  explicitly requested.
 - Candidate artifacts can be discovered from either:
   - local repo files under `candidates/`
   - S3 inputs under `inputs/python/candidates/<candidate-name>/...`
 - The page supports:
   - viewing/editing local and S3-backed candidate artifacts
-  - uploading `environment.yml` or `requirements.txt` artifacts to local or S3
+  - uploading `environment.yml`, `requested-packages.txt`, or `requirements.txt` artifacts to local or S3
   - starting either scan mode from the browser
+  - submitting an existing requirements `.txt` object directly from the Python input bucket, including objects outside the candidate prefix
 - For successful `Locked` scans, the Python run detail page can trigger a
   separate follow-up build to generate relocatable environment artifacts later.
 
@@ -94,6 +100,15 @@ Input semantics:
   - non-comment lines should use `package==version`
   - unpinned lines are not a valid substitute for a locked package set and may
     be skipped by downstream parsing/governance logic
+- `Requested packages` / `requested-packages.txt`:
+  - contains unversioned package names
+  - is resolved for the target platform and Python runtime, then temporarily
+    installed before final governance
+  - the generated pinned `requirements.lock.txt`, installed inventory, Python
+    SBOM, vulnerability findings, and remediation CSVs are the governed outputs
+  - pip packages are excluded only from the Conda plan-versus-installed
+    equality comparison; they remain included in the final Python SBOM and
+    vulnerability scan
 
 AWS-hosted deployment is now scaffolded separately from the scanner workers:
 

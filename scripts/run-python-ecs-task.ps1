@@ -24,7 +24,10 @@ $pythonCheckpointIncludePkgs = if ($env:PYTHON_CHECKPOINT_INCLUDE_PKGS) { $env:P
 $pythonCheckpointIncludeEnv = if ($env:PYTHON_CHECKPOINT_INCLUDE_ENV) { $env:PYTHON_CHECKPOINT_INCLUDE_ENV } else { 'false' }
 $inputType = if ($env:INPUT_TYPE) { $env:INPUT_TYPE } else { 'environment-yaml' }
 $materializeAfterScan = if ($env:MATERIALIZE_AFTER_SCAN) { $env:MATERIALIZE_AFTER_SCAN } else { 'true' }
-$requirementsOnlyScan = ($inputType -eq 'requirements-lock')
+$requirementsOnlyScan = ($inputType -eq 'requirements-lock' -or $inputType -eq 'requested-packages')
+if ($inputType -eq 'requested-packages') {
+  $materializeAfterScan = 'true'
+}
 $checkpointJob = $null
 
 function Write-State {

@@ -1,26 +1,33 @@
-FROM ubuntu:24.04
+FROM rockylinux:8
 
 ARG TRIVY_VERSION=0.69.3
 ARG TARGETARCH
 
-RUN apt-get update && \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y \
+RUN dnf install -y \
     bzip2 \
     ca-certificates \
     curl \
     file \
     findutils \
+    gcc \
+    gcc-c++ \
     git \
     gzip \
     jq \
-    python3 \
-    python3-pip \
+    krb5-devel \
+    make \
+    pkgconf-pkg-config \
+    postgresql-devel \
+    python3.11 \
+    python3.11-pip \
     tar \
     unzip \
+    unixODBC-devel \
     which \
-    xz-utils \
+    xz \
     zip && \
-    rm -rf /var/lib/apt/lists/*
+    dnf clean all && \
+    rm -rf /var/cache/dnf
 
 RUN case "${TARGETARCH}" in \
       amd64) MAMBA_ARCH="linux-64" ;; \
@@ -31,7 +38,7 @@ RUN case "${TARGETARCH}" in \
       | tar -xvj -C /usr/local/bin --strip-components=1 bin/micromamba && \
     chmod +x /usr/local/bin/micromamba
 
-RUN python3 -m pip install --break-system-packages --no-cache-dir --ignore-installed awscli boto3 conda-pack cyclonedx-bom pyyaml safety && \
+RUN /usr/bin/python3.11 -m pip install --no-cache-dir --ignore-installed awscli boto3 conda-pack cyclonedx-bom pyyaml safety && \
     case "${TARGETARCH}" in \
       amd64) TRIVY_ARCH="64bit" ;; \
       arm64) TRIVY_ARCH="ARM64" ;; \
@@ -41,7 +48,7 @@ RUN python3 -m pip install --break-system-packages --no-cache-dir --ignore-insta
     tar -xzf /tmp/trivy.tar.gz -C /usr/local/bin trivy
 
 ENV SCRIPT_ROOT=/opt/package-scanner/scripts
-ENV PYTHON_BIN=/usr/bin/python3
+ENV PYTHON_BIN=/usr/bin/python3.11
 ENV MAMBA_BIN=/usr/local/bin/micromamba
 
 COPY scripts/bundle-directory.py /opt/package-scanner/scripts/bundle-directory.py

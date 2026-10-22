@@ -221,6 +221,19 @@ Locked:
   -DeploymentLockToken <env-lock-token>
 ```
 
+Requested packages:
+
+```powershell
+.\scripts\start-python-scan.ps1 `
+  -StackName package-scanner-dev `
+  -InputBucket <input-bucket> `
+  -SourceRequestedFile .\requested-packages.txt `
+  -InputType requested-packages `
+  -MaterializeAfterScan $true `
+  -PlatformSet linux-amd64 `
+  -DeploymentLockToken <env-lock-token>
+```
+
 ### `scripts/start-r-scan.ps1` parameters
 
 - `-StackName` (mandatory)
