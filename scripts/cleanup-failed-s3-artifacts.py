@@ -8,6 +8,8 @@ import subprocess
 import sys
 from typing import Iterable
 
+from botocore.exceptions import ClientError
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from package_scanner.catalog import ecosystem_paths
@@ -23,6 +25,10 @@ DEFAULT_FAILURE_STATUSES = ("ABORTED", "FAILED", "TIMED_OUT")
 
 
 def _is_missing_s3_object(exc: Exception) -> bool:
+    if isinstance(exc, ClientError):
+        error = exc.response.get("Error", {})
+        if error.get("Code") in {"404", "NoSuchKey", "NotFound"}:
+            return True
     message = str(exc)
     stderr = getattr(exc, "stderr", "") or ""
     if stderr:
@@ -70,7 +76,7 @@ def load_summary(
         return s3_get_json(evidence_bucket, key, region=region, profile=profile)
     except AwsAuthExpiredError:
         raise
-    except (subprocess.CalledProcessError, RuntimeError) as exc:
+    except (ClientError, subprocess.CalledProcessError, RuntimeError) as exc:
         if _is_missing_s3_object(exc):
             return None
         raise
@@ -90,7 +96,7 @@ def load_catalog_record(
         return s3_get_json(evidence_bucket, key, region=region, profile=profile)
     except AwsAuthExpiredError:
         raise
-    except (subprocess.CalledProcessError, RuntimeError) as exc:
+    except (ClientError, subprocess.CalledProcessError, RuntimeError) as exc:
         if _is_missing_s3_object(exc):
             return None
         raise
@@ -125,7 +131,7 @@ def discover_run_metadata_matches(
                 payload = s3_get_json(evidence_bucket, key, region=region, profile=profile)
             except AwsAuthExpiredError:
                 raise
-            except (subprocess.CalledProcessError, RuntimeError) as exc:
+            except (ClientError, subprocess.CalledProcessError, RuntimeError) as exc:
                 if _is_missing_s3_object(exc):
                     continue
                 continue
