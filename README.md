@@ -37,7 +37,7 @@ Project policies:
   - windows/amd64
 - Scanners:
   - `trivy` (SBOM scan)
-  - `safety` (Python package vuln scan)
+  - `safety` (Python package vuln scan; runs only when a licensed Safety API key is supplied, which no Python ECS run has done, so in practice Python findings come from Trivy and OSV)
   - `osv.dev` (R package vuln scan via CRAN/Bioconductor ecosystem matching)
   - `fortify` (optional command hook)
 - Governance artifacts generated per run:

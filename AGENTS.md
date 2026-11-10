@@ -267,6 +267,30 @@ Verify before relying on any of these; they are as of commit `cd27b79`.
 
 ---
 
+## Scanners, and what is not built yet
+
+**Python findings come from Trivy and OSV, not Safety.** The container runs
+Safety only when a key arrives in the execution input (`safety_api_key`), and
+no Python ECS run has supplied one: every run writes an empty `[]`
+`safety-report.json`. The last real Safety scan was on the old CodeBuild path
+in March 2026. Do not describe ECS evidence as including a Safety scan. If
+Safety is wanted again it needs an organisation-owned key held in AWS Secrets
+Manager: passing it as execution input stores it in plaintext in Step
+Functions history, and a key was once committed to this public repository and
+had to be revoked.
+
+**Not built yet:**
+
+- **Periodic re-scanning.** Approved environments need re-checking roughly
+  every 60 days, and nothing schedules that; the only scheduled rule is the
+  webapp's idle controller. Keep each environment's pinned input at its own
+  stable S3 key (`inputs/python/candidates/<name>/`), never only at the
+  shared fixed key, so a scheduled scan-only re-run is possible later.
+- **Reference-file scanning** (non-package data files of mixed types). Earlier
+  work was not completed and is not in this repository.
+
+---
+
 ## Running the tests
 
 ```bash

@@ -16,7 +16,9 @@ PY_ENV_FILE="./.tmp-tests/smoke-python-environment.yml"
 PY_INPUT_S3_KEY="package-scanner/inputs/python/smoke-python-environment.yml"  # S3 object key (remote path)
 R_ENV_FILE="/home/tjansto/github/natgo/package-scanner/artifacts/renv.lock"
 R_INPUT_KEY="inputs/r/renv.lock"
-SAFETY_API_KEY="8c73d240-2e0d3f4a-f9544793-670187fa"
+# Never commit a key here; this repository is public. Supply it from the
+# environment only if a Safety scan is wanted.
+SAFETY_API_KEY="${SAFETY_API_KEY:-}"
 
 # -----------------------------------------------------------------------------
 
