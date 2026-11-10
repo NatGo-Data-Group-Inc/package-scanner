@@ -120,7 +120,7 @@ that its `.sha256` is alongside it.
 | `governance/.../remediation-exceptions.csv` | Documented exceptions |
 | `governance/.../vulnerability-findings.csv` | Everything, including LOW |
 | `env-artifacts/.../python-packages.cdx.json` | SBOM |
-| `model-results/.../` | Trivy, OSV, safety |
+| `model-results/.../` | Trivy and OSV. `safety-report.json` is an empty placeholder unless a Safety key was supplied, which no ECS run has done; do not describe the evidence as including a Safety scan |
 
 Not the file under `packages/offline/`.
 
