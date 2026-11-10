@@ -19,16 +19,41 @@ def count_packages(requirements_path: Path) -> int:
     return count
 
 
-def load_conda_packages(conda_list_path: Path) -> int:
+class SummaryInputError(Exception):
+    """An input file exists but cannot be read as expected.
+
+    Raised instead of returning an empty result: an empty inventory or an empty
+    request list makes the validator's answer meaningless (it reports good runs
+    as missing everything, or bad runs as missing nothing).
+    """
+
+
+def read_conda_list(conda_list_path: Path) -> list[dict]:
+    """Return the package records from `micromamba list --json` output.
+
+    Older micromamba writes a bare list of records. Newer micromamba (2.x)
+    writes {"log_history": [...], "packages": [...]}. Both are accepted.
+    A missing file means no Conda inventory was produced (scan-only paths).
+    """
     if not conda_list_path.exists():
-        return 0
+        return []
     try:
         data = json.loads(conda_list_path.read_text(encoding="utf-8"))
-    except Exception:
-        return 0
-    if isinstance(data, list):
-        return len(data)
-    return 0
+    except (OSError, ValueError) as error:
+        raise SummaryInputError(f"{conda_list_path.name} is not valid JSON: {error}") from error
+    if isinstance(data, dict) and isinstance(data.get("packages"), list):
+        data = data["packages"]
+    if not isinstance(data, list):
+        shape = sorted(data) if isinstance(data, dict) else type(data).__name__
+        raise SummaryInputError(
+            f"{conda_list_path.name} has an unrecognised shape ({shape}); expected a list of "
+            "package records or an object with a 'packages' list"
+        )
+    return [item for item in data if isinstance(item, dict)]
+
+
+def load_conda_packages(conda_list_path: Path) -> int:
+    return len(read_conda_list(conda_list_path))
 
 
 NAME_RE = re.compile(r"[=<>!~\s]")
@@ -62,14 +87,18 @@ def is_package_satisfied(requested_name: str, realized_names: set[str]) -> bool:
 
 def load_requested_packages(environment_path: Path) -> tuple[list[str], list[str]]:
     if not environment_path.exists():
-        return [], []
+        raise SummaryInputError(f"{environment_path.name} not found; cannot tell what was requested")
     try:
         import yaml
-
+    except ImportError as error:
+        raise SummaryInputError("PyYAML is not installed; cannot read the environment file") from error
+    try:
         data = yaml.safe_load(environment_path.read_text(encoding="utf-8"))
-    except Exception:
-        return [], []
-    dependencies = list((data or {}).get("dependencies", []))
+    except (OSError, yaml.YAMLError) as error:
+        raise SummaryInputError(f"{environment_path.name} cannot be parsed: {error}") from error
+    if not isinstance(data, dict) or not isinstance(data.get("dependencies"), list):
+        raise SummaryInputError(f"{environment_path.name} has no 'dependencies' list")
+    dependencies = data["dependencies"]
     conda_requested: list[str] = []
     pip_requested: list[str] = []
     for item in dependencies:
@@ -94,18 +123,8 @@ def load_requested_requirements(requirements_path: Path) -> list[str]:
 
 
 def load_conda_package_names(conda_list_path: Path) -> list[str]:
-    if not conda_list_path.exists():
-        return []
-    try:
-        data = json.loads(conda_list_path.read_text(encoding="utf-8"))
-    except Exception:
-        return []
-    if not isinstance(data, list):
-        return []
     names = []
-    for item in data:
-        if not isinstance(item, dict):
-            continue
+    for item in read_conda_list(conda_list_path):
         name = str(item.get("name") or "").strip()
         if name:
             names.append(normalize_name(name))
@@ -188,4 +207,10 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except SummaryInputError as error:
+        import sys
+
+        print(f"materialization-summary-error: {error}", file=sys.stderr)
+        raise SystemExit(5)

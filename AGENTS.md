@@ -187,7 +187,8 @@ What the messages mean:
 |---|---|
 | `Conda dry solve failed` | Genuine unsatisfiable solve. The input is the problem. |
 | `requirements.lock.txt` not found | The solve succeeded. Artifact of a conda-only input in scan-only mode. |
-| `Materialization validation failed with exit 4` | Usually the `conda_package_count` defect. Artifacts are present and valid. |
+| `Materialization validation failed with exit 4` | Requested packages are missing from the built environment; `materialization-validation-error.txt` lists them. On task revisions up to 40 this was usually defect 2 instead, with artifacts present and valid. |
+| `materialization-summary-error: ...` (exit 5) | The summary could not read `environment.yml` or `conda-list.json`. The message names the file and the problem. |
 
 The container logs a one-line summary and discards the solver's actual conflict
 output, so a failed solve cannot be diagnosed from the log alone.
@@ -218,10 +219,14 @@ Verify before relying on any of these; they are as of commit `cd27b79`.
    does not prove they import on the host that will run them. A bundle has
    scanned clean and then failed to load on the target because of a glibc
    mismatch.
-2. **`conda_package_count: 0` fails good runs.** `load_conda_packages` in
-   `scripts/generate-python-materialization-summary.py` returns 0 when the JSON
-   is not a list, and the validator then reports requested packages missing.
-   Good runs report FAILED with every artifact present.
+2. **`conda_package_count: 0` failed good runs.** micromamba 2.x writes
+   `conda-list.json` as `{"log_history": [...], "packages": [...]}`, and the
+   summary only understood the older bare list, so it saw zero packages and the
+   validator reported `python` missing. Every materialize run on the current
+   image hit this; the 27 Oct DLMC rebuild was a good run labelled FAILED.
+   **Fixed in code**: both shapes are read, and anything else stops the run
+   with exit 5. Replayed against the 5 Nov and 27 Oct runs: 26 and 324
+   packages, nothing missing. Live once deployed to the scan container.
 3. **`packages/offline/` is not the offline bundle.** It is the micromamba conda
    cache. The installable environment is the tarball under `env-artifacts/`.
 4. **Container logs truncate on failure**, discarding the detail that would
@@ -238,11 +243,12 @@ Verify before relying on any of these; they are as of commit `cd27b79`.
    every `requirements-lock` input, including files already in S3 (the GUI
    path, or the CLI with `--input-object-key`). Live from task revision 40,
    verified 10 Nov 2026 with one rejected and one passing test scan.
-7. **An unreadable `environment.yml` passes materialization validation.**
-   `load_requested_packages` in
-   `scripts/generate-python-materialization-summary.py` catches every exception
-   (including a missing PyYAML or a malformed file) and returns "nothing
-   requested", so the validator reports nothing missing.
+7. **An unreadable `environment.yml` passed materialization validation.**
+   `load_requested_packages` caught every exception (including a missing
+   PyYAML or a malformed file) and returned "nothing requested", so the
+   validator reported nothing missing. **Fixed in code**: a missing,
+   unparseable or dependency-less `environment.yml` now stops the run with
+   exit 5. Live once deployed to the scan container.
 
 ---
 
