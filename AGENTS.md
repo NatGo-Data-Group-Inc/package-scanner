@@ -225,6 +225,27 @@ Verify before relying on any of these; they are as of commit `cd27b79`.
    Python Linux image has been rebuilt and a new task-definition revision
    registered. Until then, files already in S3 (the GUI path, or the CLI with
    `--input-object-key`) are not checked.
+7. **An unreadable `environment.yml` passes materialization validation.**
+   `load_requested_packages` in
+   `scripts/generate-python-materialization-summary.py` catches every exception
+   (including a missing PyYAML or a malformed file) and returns "nothing
+   requested", so the validator reports nothing missing.
+
+---
+
+## Running the tests
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/python -m unittest discover -s tests
+```
+
+The suite should be fully green. One test in `test_python_failure_gate.py`
+needs bash 4 or later, matching the scan container (bash 4.4 on Rocky Linux 8),
+and skips itself on the bash 3.2 that macOS ships. `brew install bash` runs it.
+There is no CI on this repository, so run the suite before every pull request
+that touches code.
 
 ---
 
