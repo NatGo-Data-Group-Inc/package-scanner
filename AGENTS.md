@@ -34,10 +34,24 @@ It runs in the NatGo dev AWS account, not in the MIP itself.
 | Ephemeral bucket | `package-scanner-dev-scan-ephemeral-807497180525-us-east-1` |
 | Linux worker image | Rocky Linux 8, glibc 2.28, utility Python 3.11 |
 | Task family | `package-scanner-dev-python-linux-amd64` |
+| Task revision (10 Nov 2026) | 40, image tag `rhel8-py313-requested-pincheck-5b1c0f1` |
 
 Always verify the live image digest and task-definition revision before
 trusting these. A rebuilt image is not active until the running ECS task shows
 the new revision.
+
+**How revision 40 was built.** It is the 22 October image
+`rhel8-py313-requested` (every copied script byte-identical to commit
+`d3143af`) with one appended layer carrying `check-requirements-pinned.py` and
+`run-python-ecs-task.sh` from `5b1c0f1`, built with `crane append` instead of
+`build-python-ecs-images.sh`. That kept every tool version exactly as tested.
+Roll back with
+`scripts/register-python-task-def.sh --image <repo>:rhel8-py313-requested`.
+
+A full rebuild from `docker/python-linux.Dockerfile` will not reproduce the
+tested image: the base image, `dnf` packages, micromamba and the `pip install`
+tools are unpinned and will move. Treat a full rebuild as a toolchain change
+and validate it with a test scan before relying on it.
 
 ---
 
@@ -221,10 +235,9 @@ Verify before relying on any of these; they are as of commit `cd27b79`.
    **Guarded by `scripts/check-requirements-pinned.py`**, which rejects any
    line that is not an exact pin. `start-python-scan.sh` runs it before
    uploading a `--source-requirements-file`; the scan container runs it for
-   every `requirements-lock` input. The container check is live only once the
-   Python Linux image has been rebuilt and a new task-definition revision
-   registered. Until then, files already in S3 (the GUI path, or the CLI with
-   `--input-object-key`) are not checked.
+   every `requirements-lock` input, including files already in S3 (the GUI
+   path, or the CLI with `--input-object-key`). Live from task revision 40,
+   verified 10 Nov 2026 with one rejected and one passing test scan.
 7. **An unreadable `environment.yml` passes materialization validation.**
    `load_requested_packages` in
    `scripts/generate-python-materialization-summary.py` catches every exception
