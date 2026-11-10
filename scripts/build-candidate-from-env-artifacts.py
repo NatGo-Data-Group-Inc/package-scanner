@@ -177,6 +177,8 @@ def load_channels(environment_path: Path) -> list[str]:
 
 def load_conda_inventory(conda_list_path: Path) -> list[dict]:
     data = json.loads(conda_list_path.read_text(encoding="utf-8"))
+    if isinstance(data, dict) and isinstance(data.get("packages"), list):
+        data = data["packages"]  # micromamba 2.x shape
     if not isinstance(data, list):
         raise ValueError(f"{conda_list_path} does not contain a conda package list")
     return [row for row in data if isinstance(row, dict)]
@@ -260,6 +262,110 @@ def collect_additional_pip_requirements(
     return pip_names
 
 
+class PinError(Exception):
+    """The candidate cannot faithfully reproduce the captured environment."""
+
+
+def load_requirement_versions(requirements_path: Path) -> dict[str, str]:
+    versions: dict[str, str] = {}
+    for raw in requirements_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if "==" not in line:
+            continue
+        name, version = line.split("==", 1)
+        versions[normalize_name(name.split("[", 1)[0])] = version.split(";", 1)[0].strip()
+    return versions
+
+
+def pin_payload(payload: dict, conda_inventory: list[dict], requirements_path: Path) -> dict:
+    """Pin every entry to the installed version and restore any installed package left out.
+
+    Without pins a candidate is solved to whatever is newest, so the scan would
+    report on an environment nobody runs. Conda entries are pinned to the exact
+    version with no build string (name==version; see docs/troubleshooting.md).
+    Note conda's single '=' is a prefix match: name=0.4 also accepts 0.4.2. Pip entries
+    are pinned name==version, preferring the installed distribution version.
+    Raises PinError if any entry cannot be pinned or any installed package
+    would be missing from the candidate.
+    """
+    conda_versions: dict[str, tuple[str, str]] = {}
+    pypi_versions: dict[str, str] = {}
+    for row in conda_inventory:
+        name = str(row.get("name") or "").strip()
+        version = str(row.get("version") or "").strip()
+        if not name or not version:
+            continue
+        if str(row.get("channel") or "").strip().lower() == "pypi":
+            pypi_versions[normalize_name(name)] = version
+        else:
+            conda_versions[normalize_name(name)] = (name, version)
+    dist_versions = load_requirement_versions(requirements_path)
+
+    conda_entries = [item for item in payload["dependencies"] if isinstance(item, str)]
+    pip_entries: list[str] = []
+    for item in payload["dependencies"]:
+        if isinstance(item, dict):
+            pip_entries.extend(item.get("pip", []))
+
+    unpinnable: list[str] = []
+    pinned_conda: list[str] = []
+    seen_conda: set[str] = set()
+    for name in conda_entries:
+        key = normalize_name(name)
+        if key in seen_conda:
+            continue
+        seen_conda.add(key)
+        if key not in conda_versions:
+            unpinnable.append(f"conda:{name}")
+            continue
+        pinned_conda.append(f"{conda_versions[key][0]}=={conda_versions[key][1]}")
+
+    pinned_pip: list[str] = []
+    seen_pip: set[str] = set()
+    for name in pip_entries:
+        key = normalize_name(name)
+        if key in seen_pip:
+            continue
+        seen_pip.add(key)
+        version = dist_versions.get(key) or pypi_versions.get(key)
+        if version is None:
+            # A conda package moved to pip under its pip name (e.g. pytorch -> torch).
+            for conda_key, (conda_name, conda_version) in conda_versions.items():
+                if normalize_name(pip_requirement_name(conda_name)) == key:
+                    version = conda_version
+                    break
+        if version is None:
+            unpinnable.append(f"pip:{name}")
+            continue
+        pinned_pip.append(f"{name}=={version}")
+
+    # Restore installed conda packages the split leaves to the solver
+    # (core runtime libraries such as openssl, zlib, libgcc, setuptools).
+    represented = seen_conda | seen_pip | {
+        normalize_name(pip_requirement_name(conda_versions[k][0])) for k in seen_conda if k in conda_versions
+    }
+    for key, (name, version) in conda_versions.items():
+        if key in seen_conda:
+            continue
+        if key in seen_pip or normalize_name(pip_requirement_name(name)) in seen_pip:
+            continue
+        pinned_conda.append(f"{name}=={version}")
+        seen_conda.add(key)
+        represented.add(key)
+
+    missing_pypi = sorted(name for name in pypi_versions if name not in seen_pip and name not in seen_conda)
+    if unpinnable or missing_pypi:
+        problems = [f"cannot pin: {', '.join(unpinnable)}"] if unpinnable else []
+        if missing_pypi:
+            problems.append(f"pip-installed packages missing from the candidate: {', '.join(missing_pypi)}")
+        raise PinError("; ".join(problems))
+
+    return {
+        **payload,
+        "dependencies": [*pinned_conda, {"pip": pinned_pip}] if pinned_pip else pinned_conda,
+    }
+
+
 def build_candidate_payload(
     name: str,
     environment_path: Path,
@@ -269,6 +375,7 @@ def build_candidate_payload(
     conda_bin: str,
     prefer_conda_available: bool,
     target_subdir: str | None,
+    pin_versions: bool = False,
 ) -> dict:
     channels = load_channels(environment_path)
     conda_inventory = load_conda_inventory(conda_list_path)
@@ -290,6 +397,8 @@ def build_candidate_payload(
             {"pip": unique_ordered(pip_names)},
         ],
     }
+    if pin_versions:
+        payload = pin_payload(payload, conda_inventory, requirements_path)
     return payload
 
 
@@ -314,6 +423,15 @@ def parse_args() -> argparse.Namespace:
         "--prefer-conda-available",
         action="store_true",
         help="Keep Python-level conda packages in conda when the package is available in the configured channels.",
+    )
+    parser.add_argument(
+        "--pin-versions",
+        action="store_true",
+        help=(
+            "Pin every package to its installed version and restore core packages the split omits, so the "
+            "candidate reproduces the captured environment. Use this whenever scanning an existing environment "
+            "as is. Fails if any installed package cannot be represented."
+        ),
     )
     return parser.parse_args()
 
@@ -358,6 +476,7 @@ def main() -> int:
         conda_bin=args.conda_bin,
         prefer_conda_available=args.prefer_conda_available,
         target_subdir=args.target_subdir,
+        pin_versions=args.pin_versions,
     )
     output_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
     print(output_path)
@@ -365,4 +484,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except PinError as error:
+        print(f"candidate-pin-error: {error}", file=sys.stderr)
+        raise SystemExit(2)

@@ -113,33 +113,54 @@ fidelity wrinkle worth disclosing in anything handed to Cyber.
 ## Capturing an environment that already exists
 
 Do **not** hand-build a candidate from `conda-meta` filenames or a plain
-`conda env export`. Use the script built for it:
+`conda env export`. Capture three files where the environment lives, then build
+the candidate with **`--pin-versions`**:
 
 ```bash
 python3 scripts/build-candidate-from-env-artifacts.py \
   --name <candidate-name> \
-  --env-prefix <conda-env-prefix> \
+  --environment-yml <env>.environment.yml \
+  --conda-list-json <env>.conda-list.json \
+  --requirements-txt <env>.requirements.txt \
   --conda-bin <path-to-conda> \
-  --prefer-conda-available \
-  --target-subdir linux-64 \
-  --output candidates/<candidate-name>.yml \
-  --artifacts-dir artifacts/<candidate-name> \
-  --artifacts-zip artifacts/<candidate-name>.zip
+  --prefer-conda-available --target-subdir linux-64 \
+  --pin-versions \
+  --output <candidate-name>.yml
 ```
 
-`--prefer-conda-available` probes the configured channels and keeps a package on
-the conda side only when conda can actually satisfy it, falling back to pip
-otherwise. Skipping this probe is how you get an unsatisfiable solve from an
-environment that demonstrably works on disk.
+**Without `--pin-versions` the script emits bare package names** and leaves
+core packages (openssl, zlib, libgcc, setuptools ...) to the solver, so a scan
+reports on the newest versions instead of the installed environment. The flag
+pins every package to its installed version (`name==version`) and refuses to
+write a candidate if any installed package cannot be represented.
 
-`--target-subdir linux-64` matters whenever you capture on a platform other
-than the scan target.
+`--prefer-conda-available` probes the channels (needs conda proper, not
+micromamba, and internet access) and keeps a package on conda only when conda
+can supply it. `--env-prefix` mode also exists but calls `pip freeze`, which
+fails in environments with a broken pip.
 
-**Do not pin exact conda build strings by hand.** Prefer `idna=3.15` over
-`idna=3.15=<build>`. A build string that no longer exists in the channel makes
-the solve unsatisfiable even though the environment runs fine. See
-`docs/troubleshooting.md`, "Python candidate pin exists by version but not by
-exact build."
+**Capturing on the MIP** (no conda on the host, pip broken in many
+environments): `$ENV/bin/conda` is a launcher that needs `python` on PATH, so
+run `$ENV/bin/python $ENV/bin/conda env export -p $ENV` and
+`... conda list -p $ENV --json`. Build the Python list with
+`$ENV/bin/python -I` and `importlib.metadata` (`-I` keeps the user's
+`~/.local` packages out), including pip, setuptools and wheel. Bring files out
+with gzip and base64 in chunks small enough to fit the terminal window, and
+check the md5 on both sides.
+
+**Exact pins, no build strings.** In conda, `name=0.4` is a prefix match that
+also accepts 0.4.2; `name==0.4` is exact. A build string that no longer exists
+in the channel makes the solve unsatisfiable. See `docs/troubleshooting.md`,
+"Python candidate pin exists by version but not by exact build."
+
+**Old environments may not re-solve exactly.** conda-forge patches the
+dependency metadata of published packages; an environment installed months ago
+can become impossible to co-solve at its installed versions (seen in Nov 2026:
+mamba 2.2.0 and conda-libmamba-solver 25.4.0 later required newer
+certifi/ca-certificates). Reproduce the solve locally to see the conflict:
+`CONDA_SUBDIR=linux-64 CONDA_OVERRIDE_GLIBC=2.28 CONDA_OVERRIDE_LINUX=5.10
+micromamba env create --file <candidate>.yml --dry-run -n test`; the container
+discards the solver's explanation (defect 4).
 
 ---
 
@@ -264,6 +285,17 @@ Verify before relying on any of these; they are as of commit `cd27b79`.
    validator reported nothing missing. **Fixed in code**: a missing,
    unparseable or dependency-less `environment.yml` now stops the run with
    exit 5. Live from task revision 41.
+8. **Native conda packages are not vulnerability-checked.** OSV has no conda
+   ecosystem (the preflight matches conda names against PyPI advisories) and
+   Trivy reports nothing for conda packages. Packages such as openssl, curl,
+   libxml2, krb5 and the compiler runtimes are inventoried but not checked: 435
+   of 1,093 packages in the first EFS environment scanned. A scan of a
+   conda-based environment is therefore Python-layer only; say so in any
+   report. Proposed fix: Grype with CPE matching against NVD.
+9. **The CPU-only filter removes GPU packages from conda scans.**
+   `run-python-ecs-task.sh` strips `cuda*`/`cudnn*` entries from
+   `environment.yml` when `PYTHON_CPU_ONLY=true` (the default), so packages
+   such as `cudatoolkit` are neither solved nor scanned.
 
 ---
 
