@@ -48,10 +48,15 @@ the new revision.
 Roll back with
 `scripts/register-python-task-def.sh --image <repo>:rhel8-py313-requested`.
 
-A full rebuild from `docker/python-linux.Dockerfile` will not reproduce the
-tested image: the base image, `dnf` packages, micromamba and the `pip install`
-tools are unpinned and will move. Treat a full rebuild as a toolchain change
-and validate it with a test scan before relying on it.
+**The Python Linux image's toolchain is pinned** to the versions in that tested
+image, read from its layers: the base image by digest, 117 RPMs in
+`docker/python-linux.rpm-lock.txt`, micromamba 2.9.0-0 with a checksum, 84
+Python packages in `docker/python-tools.constraints.txt`, and Trivy 0.69.3.
+`tests/test_python_image_pins.py` fails if any of these float again. Changing a
+pin is a toolchain change: do it deliberately and validate with a test scan.
+The pinned Dockerfile has not yet been built end to end (no Docker on the
+machine that wrote it); the first full rebuild is its real test. Only x86_64
+has been checked; arm64 is unused (its ASG max is 0).
 
 ---
 
