@@ -34,7 +34,7 @@ It runs in the NatGo dev AWS account, not in the MIP itself.
 | Ephemeral bucket | `package-scanner-dev-scan-ephemeral-807497180525-us-east-1` |
 | Linux worker image | Rocky Linux 8, glibc 2.28, utility Python 3.11 |
 | Task family | `package-scanner-dev-python-linux-amd64` |
-| Task revision (10 Nov 2026) | 40, image tag `rhel8-py313-requested-pincheck-5b1c0f1` |
+| Task revision (10 Nov 2026) | 41, image tag `rhel8-py313-requested-summaryfix-16130da` |
 
 Always verify the live image digest and task-definition revision before
 trusting these. A rebuilt image is not active until the running ECS task shows
@@ -45,8 +45,17 @@ the new revision.
 `d3143af`) with one appended layer carrying `check-requirements-pinned.py` and
 `run-python-ecs-task.sh` from `5b1c0f1`, built with `crane append` instead of
 `build-python-ecs-images.sh`. That kept every tool version exactly as tested.
-Roll back with
-`scripts/register-python-task-def.sh --image <repo>:rhel8-py313-requested`.
+
+**Revision 41** is revision 40 plus one more appended layer carrying
+`generate-python-materialization-summary.py` from `16130da` (defects 2 and 7).
+Every other baked-in file was checked unchanged against `16130da`. Verified
+with a materialize test scan (`python-scan-20261110T182111Z-f0d70886`):
+SUCCEEDED, 26 conda packages, nothing missing.
+
+Roll back one step by re-registering
+`<repo>:rhel8-py313-requested-pincheck-5b1c0f1` (revision 40), or to the
+22 October image with `<repo>:rhel8-py313-requested`, using
+`scripts/register-python-task-def.sh --image ...`.
 
 **The Python Linux image's toolchain is pinned** to the versions in that tested
 image, read from its layers: the base image by digest, 117 RPMs in
@@ -231,7 +240,8 @@ Verify before relying on any of these; they are as of commit `cd27b79`.
    image hit this; the 27 Oct DLMC rebuild was a good run labelled FAILED.
    **Fixed in code**: both shapes are read, and anything else stops the run
    with exit 5. Replayed against the 5 Nov and 27 Oct runs: 26 and 324
-   packages, nothing missing. Live once deployed to the scan container.
+   packages, nothing missing. Live from task revision 41, verified 10 Nov 2026
+   with a materialize test scan that succeeded with 26 packages.
 3. **`packages/offline/` is not the offline bundle.** It is the micromamba conda
    cache. The installable environment is the tarball under `env-artifacts/`.
 4. **Container logs truncate on failure**, discarding the detail that would
@@ -253,7 +263,7 @@ Verify before relying on any of these; they are as of commit `cd27b79`.
    PyYAML or a malformed file) and returned "nothing requested", so the
    validator reported nothing missing. **Fixed in code**: a missing,
    unparseable or dependency-less `environment.yml` now stops the run with
-   exit 5. Live once deployed to the scan container.
+   exit 5. Live from task revision 41.
 
 ---
 
