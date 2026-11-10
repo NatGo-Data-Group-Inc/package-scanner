@@ -228,6 +228,11 @@ REQUIREMENTS_ONLY_SCAN="false"
 if [[ "${INPUT_TYPE}" == "requirements-lock" || "${INPUT_TYPE}" == "requested-packages" ]]; then
   REQUIREMENTS_ONLY_SCAN="true"
   cp "/tmp/scan-input/${input_basename}" "${RUN_DIR}/requirements.lock.txt"
+  if [[ "${INPUT_TYPE}" == "requirements-lock" ]]; then
+    # A lock is scanned as supplied. Refuse one with unpinned lines rather than
+    # silently resolving them to latest and approving a different environment.
+    "${PYTHON_BIN}" "${SCRIPT_ROOT}/check-requirements-pinned.py" "${RUN_DIR}/requirements.lock.txt"
+  fi
   render_requirements_environment "${RUN_DIR}/requirements.lock.txt" "${RUN_DIR}/environment.yml"
 else
   cp "/tmp/scan-input/${input_basename}" "${RUN_DIR}/environment.yml"

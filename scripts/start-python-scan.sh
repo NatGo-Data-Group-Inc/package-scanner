@@ -148,6 +148,9 @@ if [[ -n "${SOURCE_REQUIREMENTS_FILE}" ]]; then
   if [[ "${MATERIALIZE_AFTER_SCAN_EXPLICIT}" != "true" ]]; then
     MATERIALIZE_AFTER_SCAN="false"
   fi
+  # Fail here, before anything is uploaded, if the lock has unpinned lines.
+  # The scan container repeats this check for inputs that do not come through this script.
+  "${PYTHON_BIN:-python3}" "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/check-requirements-pinned.py" "${SOURCE_REQUIREMENTS_FILE}"
 fi
 if [[ -n "${SOURCE_REQUESTED_FILE}" ]]; then
   if [[ "${INPUT_TYPE_EXPLICIT}" == "true" && "${INPUT_TYPE}" != "requested-packages" ]]; then

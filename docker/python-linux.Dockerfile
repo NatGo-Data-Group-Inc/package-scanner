@@ -52,6 +52,7 @@ ENV PYTHON_BIN=/usr/bin/python3.11
 ENV MAMBA_BIN=/usr/local/bin/micromamba
 
 COPY scripts/bundle-directory.py /opt/package-scanner/scripts/bundle-directory.py
+COPY scripts/check-requirements-pinned.py /opt/package-scanner/scripts/check-requirements-pinned.py
 COPY scripts/extract-archive.py /opt/package-scanner/scripts/extract-archive.py
 COPY scripts/generate-governance-artifacts.py /opt/package-scanner/scripts/generate-governance-artifacts.py
 COPY scripts/generate-python-materialization-summary.py /opt/package-scanner/scripts/generate-python-materialization-summary.py

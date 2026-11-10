@@ -213,12 +213,18 @@ Verify before relying on any of these; they are as of commit `cd27b79`.
 4. **Container logs truncate on failure**, discarding the detail that would
    explain it.
 5. **Fixed input key** prevents concurrent CLI scans, as above.
-6. **`requirements-lock` does not check for pins.** `run-python-ecs-task.sh`
+6. **`requirements-lock` did not check for pins.** `run-python-ecs-task.sh`
    sends `requirements-lock` and `requested-packages` down the same branch. A
-   "lock" file with no `==` versions is accepted without warning, resolves
-   every package to latest, and materializes on the hardcoded `python=3.13`.
-   The scan comes back clean for an environment nobody runs. Confirm every line
-   of a lock input carries `==` before submitting.
+   "lock" file with no `==` versions was accepted without warning, resolved
+   every package to latest, and materialized on the hardcoded `python=3.13`.
+   The scan came back clean for an environment nobody runs.
+   **Guarded by `scripts/check-requirements-pinned.py`**, which rejects any
+   line that is not an exact pin. `start-python-scan.sh` runs it before
+   uploading a `--source-requirements-file`; the scan container runs it for
+   every `requirements-lock` input. The container check is live only once the
+   Python Linux image has been rebuilt and a new task-definition revision
+   registered. Until then, files already in S3 (the GUI path, or the CLI with
+   `--input-object-key`) are not checked.
 
 ---
 

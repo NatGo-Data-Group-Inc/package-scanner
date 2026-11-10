@@ -50,6 +50,27 @@ Fix:
 
 - Redeploy stack with `scripts/deploy-cfn.sh` including `--deployment-lock-token`.
 
+### Error: `requirements-lock input ... without an exact '==' pin`
+
+Cause:
+
+- A `requirements-lock` input contains lines that are not exact pins: bare
+  names (`numpy`), ranges (`numpy>=1.26`), wildcards (`numpy==1.*`), or
+  `-r`/`-c`/`-e` includes. A lock is scanned exactly as supplied, so unpinned
+  lines would resolve to whatever is current and the environment approved would
+  not be the one submitted.
+- Raised by `scripts/check-requirements-pinned.py`, from `start-python-scan.sh`
+  before upload (exit `2`) and from the scan container before anything is
+  installed.
+
+Fix:
+
+1. Pin every listed line as `name==version`, using the versions the source
+   environment actually runs.
+2. If current versions are genuinely intended, submit with
+   `--input-type requested-packages` instead, and say so in anything handed to
+   Cyber.
+
 ## 2) Deployment Failures
 
 ### Error: `Template not found`
