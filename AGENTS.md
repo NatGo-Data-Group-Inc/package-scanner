@@ -219,8 +219,10 @@ Verify before relying on any of these; they are as of commit `cd27b79`.
 ## Rules for agents working here
 
 - Never commit to `main`. Branch, push, open a pull request.
-- `feature/conda-preflight-aws` is the current baseline, twelve commits ahead of
-  `main`. Treat it as trunk until that is reconciled.
+- `feature/conda-preflight-aws` is the current baseline and is ahead of `main`;
+  check by how much with
+  `git rev-list --count origin/main..origin/feature/conda-preflight-aws`.
+  Treat it as trunk until that is reconciled.
 - **This repository is public.** No credentials, no tokens, no personal
   information, no internal correspondence.
 - Never `git add .`. Add named files. Scratch output, downloaded evidence and
