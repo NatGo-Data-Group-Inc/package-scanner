@@ -354,8 +354,14 @@ had to be revoked.
   webapp's idle controller. Keep each environment's pinned input at its own
   stable S3 key (`inputs/python/candidates/<name>/`), never only at the
   shared fixed key, so a scheduled scan-only re-run is possible later.
-- **Reference-file scanning** (non-package data files of mixed types). Earlier
-  work was not completed and is not in this repository.
+- **Reference-file scanning in the pipeline.** The engine exists
+  (`package_scanner/reference_files/`, `scripts/scan-reference-files.py`,
+  `docs/reference-file-scanning.md`) and runs locally: content-based
+  identification, safe recursive unpacking, per-format checks, a policy file,
+  and a coverage report. Not yet in a container or the AWS pipeline, and its
+  default policy is provisional until Cyber's acceptance criteria are agreed.
+  Requirements known so far: no PHI/PII, monthly loads, files typically 10 GB
+  and up to 170 GB, many formats.
 
 ---
 
@@ -407,3 +413,4 @@ that touches code.
 | `docs/lead-handoff-prompt.md` | Tom Jansto's handoff context. |
 | `PIPELINE-STATE.local.md` | Current state and the status of every known issue. **Local only, not committed.** Ask the operator if it is missing. |
 | `docs/verifying-a-python-artifact.md` | The six checks to run before handing an artifact to Cyber. |
+| `docs/reference-file-scanning.md` | Scanning data files bound for the MIP: checks, policy, evidence, limits. |
