@@ -21,7 +21,9 @@ and the md5 plus the chunk commands to copy it out are printed.
 
 The archive contains the three files build-candidate-from-env-artifacts.py
 reads (environment.yml, conda-list.json, requirements.txt) plus
-conda-meta-records.json (dependency graph), history and capture-info.json.
+conda-meta-records.json (dependency graph), python-distributions.json (where
+each distribution lives, and whether the environment can import it), history
+and capture-info.json.
 """
 import argparse
 import base64
@@ -37,7 +39,7 @@ import re
 import sys
 import tarfile
 
-TOOL_VERSION = "1"
+TOOL_VERSION = "2"
 CHANNEL_URL_PREFIXES = ("https://conda.anaconda.org/", "http://conda.anaconda.org/",
                         "https://repo.anaconda.com/", "http://repo.anaconda.com/")
 
@@ -111,6 +113,26 @@ def build_capture(prefix, name):
     dists = read_distributions(prefix)
     owned = conda_owned_dist_dirs(records)
     warnings = []
+    python = next((r for r in records if r["name"] == "python"), None)
+    python_minor = ".".join((python.get("version") or "").split(".")[:2]) if python else None
+
+    # A site-packages directory for a different Python (e.g. lib/python3.13 in
+    # a 3.11 environment) holds packages the environment cannot import: stray
+    # installs made with the wrong interpreter or a mistyped path.
+    dist_rows = []
+    stray = {}
+    for rel, dist_name, version in dists:
+        match = re.search(r"python(\d+\.\d+)[/\\]site-packages", rel)
+        dir_minor = match.group(1) if match else None
+        importable = python_minor is None or dir_minor is None or dir_minor == python_minor
+        site_dir = os.path.dirname(rel)
+        dist_rows.append({"name": dist_name, "version": version, "site_packages": site_dir,
+                          "conda_owned": os.path.basename(rel) in owned, "importable": importable})
+        if not importable:
+            stray.setdefault(site_dir, []).append(dist_name)
+    for site_dir, names in sorted(stray.items()):
+        warnings.append("{}: {} distribution(s) not importable by python {}: {}".format(
+            site_dir, len(names), python_minor, ", ".join(sorted(names)[:10]) + (" ..." if len(names) > 10 else "")))
 
     conda_list = []
     channel_counts = {}
@@ -129,11 +151,13 @@ def build_capture(prefix, name):
         })
     conda_names = {normalize(r["name"]) for r in records}
     pip_only = []
+    pip_seen = set()
     for rel, dist_name, version in dists:
         if os.path.basename(rel) in owned:
             continue
-        if normalize(dist_name) in conda_names:
+        if normalize(dist_name) in conda_names or normalize(dist_name) in pip_seen:
             continue
+        pip_seen.add(normalize(dist_name))
         pip_only.append((dist_name, version))
         conda_list.append({"base_url": "https://pypi.org/", "build_number": 0, "build_string": "pypi_0",
                            "channel": "pypi", "dist_name": "{}-{}-pypi_0".format(dist_name, version),
@@ -164,12 +188,12 @@ def build_capture(prefix, name):
               "depends": r.get("depends") or [], "requested_spec": r.get("requested_spec")}
              for r in sorted(records, key=lambda x: x["name"])]
 
-    python = next((r for r in records if r["name"] == "python"), None)
     files = {
         "conda-list.json": json.dumps(conda_list, indent=1, sort_keys=True) + "\n",
         "environment.yml": "\n".join(env_lines) + "\n",
         "requirements.txt": requirements,
         "conda-meta-records.json": json.dumps(graph, indent=1, sort_keys=True) + "\n",
+        "python-distributions.json": json.dumps(dist_rows, indent=1, sort_keys=True) + "\n",
     }
     history = os.path.join(prefix, "conda-meta", "history")
     if os.path.isfile(history):
@@ -183,7 +207,9 @@ def build_capture(prefix, name):
         "name": name, "prefix": prefix,
         "python_version": python.get("version") if python else None,
         "counts": {"conda_packages": len(records), "pip_only_packages": len(pip_only),
-                   "python_distributions": len(seen), "channels": channel_counts},
+                   "python_distributions": len(seen),
+                   "not_importable_distributions": sum(len(v) for v in stray.values()),
+                   "channels": channel_counts},
         "warnings": warnings,
         "sha256": {k: hashlib.sha256(v.encode("utf-8")).hexdigest() for k, v in sorted(files.items())},
     }

@@ -64,6 +64,15 @@ def make_env(root: Path) -> Path:
     return prefix
 
 
+def add_stray_site_packages(prefix: Path):
+    """The 0326 layout: a duplicate in a mistyped lib/python3.1 and a py313 package in lib/python3.13."""
+    for minor, dirname, name, version in [("3.1", "dbt_core-0.21.0.dist-info", "dbt-core", "0.21.0"),
+                                          ("3.13", "mmhash3-3.0.1.dist-info", "mmhash3", "3.0.1")]:
+        d = prefix / "lib" / f"python{minor}" / "site-packages" / dirname
+        d.mkdir(parents=True)
+        (d / "METADATA").write_text(f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n")
+
+
 class Capture(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="capture-"))
@@ -84,7 +93,24 @@ class Capture(unittest.TestCase):
         self.assertEqual(by_name["dbt-core"]["channel"], "pypi")
         self.assertNotIn("torch", by_name)              # owned by the pytorch conda package
         self.assertEqual(info["counts"], {"conda_packages": 5, "pip_only_packages": 2, "python_distributions": 4,
+                                          "not_importable_distributions": 0,
                                           "channels": {"conda-forge": 4, "pkgs/main": 1}})
+        self.assertEqual(info["warnings"], [])
+
+    def test_stray_site_packages_are_flagged_and_pip_only_is_deduplicated(self):
+        add_stray_site_packages(self.prefix)
+        files, info = capture.build_capture(str(self.prefix), "test-env")
+        pip_only = [p["name"] for p in json.loads(files["conda-list.json"]) if p["channel"] == "pypi"]
+        self.assertEqual(sorted(pip_only), ["dbt-core", "mmhash3", "old-thing"])   # dbt-core once, not twice
+        self.assertEqual(info["counts"]["not_importable_distributions"], 2)
+        self.assertEqual(len(info["warnings"]), 2)
+        self.assertTrue(any("lib/python3.13/site-packages: 1 distribution(s) not importable by python 3.11: mmhash3" in w
+                            for w in info["warnings"]))
+        self.assertTrue(any("lib/python3.1/site-packages" in w and "dbt-core" in w for w in info["warnings"]))
+        rows = json.loads(files["python-distributions.json"])
+        stray = {(r["name"], r["site_packages"]) for r in rows if not r["importable"]}
+        self.assertEqual(stray, {("dbt-core", "lib/python3.1/site-packages"), ("mmhash3", "lib/python3.13/site-packages")})
+        self.assertIn("mmhash3==3.0.1", files["requirements.txt"])   # still inventoried: it is on disk
 
     def test_requirements_include_every_distribution_with_pip_itself(self):
         files, _ = capture.build_capture(str(self.prefix), "test-env")
@@ -147,7 +173,7 @@ class RoundTrip(unittest.TestCase):
         self.assertIn("--pin-versions", result.stdout)
         self.assertEqual(sorted(p.name for p in out.iterdir()),
                          ["capture-info.json", "conda-list.json", "conda-meta-records.json",
-                          "environment.yml", "history", "requirements.txt"])
+                          "environment.yml", "history", "python-distributions.json", "requirements.txt"])
 
     def test_missing_chunk_is_rejected(self):
         lines = self.b64.read_text().splitlines()
