@@ -159,9 +159,26 @@ micromamba, and internet access) and keeps a package on conda only when conda
 can supply it. `--env-prefix` mode also exists but calls `pip freeze`, which
 fails in environments with a broken pip.
 
-**Copying through a terminal** (no file transfer off the MIP): use chunks small
-enough to fit the window; 40-line chunks overflowed a PuTTY window and lost
-lines, 30 fitted. `capture-environment.py --chunk-lines N` changes the size.
+**Copying through a terminal** (no file transfer off the MIP). MIP sessions run
+inside tmux, which is why PuTTY's scrollback only ever holds one screen. Copy
+the whole file in one go instead of in chunks: detach from tmux (`Ctrl+B`, then
+`D`), right-click PuTTY's title bar and choose Clear Scrollback, `cat` the
+`.b64` file, then title bar, Copy All to Clipboard. Paste into a file here and
+run the receiver; non-base64 lines (prompts, the `cat` command) are harmless
+because the md5 check proves the content. `tmux attach` returns to the session.
+PuTTY keeps 2,000 lines of scrollback by default; a 1,093-package environment
+was 1,459 lines. Getting a script *onto* the MIP works the same way in
+reverse: `cat > file.b64 <<'EOF'`, paste, `EOF`, `base64 -d file.b64 | gunzip >
+script.py`, and compare `md5sum` with the md5 computed here. RHEL 8 hosts have
+Python 3.6 at `/usr/libexec/platform-python`.
+
+**Stray `site-packages` folders.** `capture-environment.py` reads every
+`lib/python*/site-packages` folder and warns about any that do not match the
+environment's Python version: packages there cannot be imported (installs made
+with the wrong interpreter or a mistyped path). The first EFS environment had
+`lib/python3.13` and `lib/python3.1` folders beside `lib/python3.11`. They stay
+in the inventory because they are on disk; report them as clean-up items.
+
 If a capture must be done by hand instead: `$ENV/bin/conda` is a launcher that
 needs `python` on PATH, so run `$ENV/bin/python $ENV/bin/conda ...`, and build
 the Python list with `$ENV/bin/python -I` (`-I` keeps the user's `~/.local`
