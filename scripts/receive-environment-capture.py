@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+"""Verify and unpack a capture made by capture-environment.py.
+
+    python3 scripts/receive-environment-capture.py <name>-capture.b64 --md5 <md5 printed on the host> --out <dir>
+
+Decodes the base64 text (copied out of a terminal in chunks), checks the md5
+against the one capture-environment.py printed, refuses anything that does not
+match, unpacks safely, re-checks every file against capture-info.json, and
+prints the build-candidate command to run next.
+"""
+import argparse
+import base64
+import binascii
+import hashlib
+import io
+import json
+import sys
+import tarfile
+from pathlib import Path
+
+EXPECTED = {"capture-info.json", "conda-list.json", "environment.yml", "requirements.txt", "conda-meta-records.json"}
+
+
+class ReceiveError(Exception):
+    pass
+
+
+def receive(b64_path: Path, expected_md5: str, out_dir: Path) -> dict:
+    text = "".join(b64_path.read_text(encoding="ascii", errors="strict").split())
+    try:
+        blob = base64.b64decode(text, validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise ReceiveError(f"not valid base64 ({error}); a chunk was probably cut or doubled") from error
+    actual = hashlib.md5(blob).hexdigest()
+    if actual != expected_md5.strip().lower():
+        lines = sum(1 for line in b64_path.read_text().splitlines() if line.strip())
+        raise ReceiveError(
+            f"md5 mismatch: got {actual}, expected {expected_md5}. {lines} non-empty lines received; "
+            "compare with the line count the host printed to find the missing or doubled chunk"
+        )
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tar:
+        members = tar.getmembers()
+        for member in members:
+            if not member.isfile() or "/" in member.name or member.name.startswith(".."):
+                raise ReceiveError(f"unexpected archive member {member.name!r}")
+        contents = {m.name: tar.extractfile(m).read() for m in members}
+    missing = EXPECTED - set(contents)
+    if missing:
+        raise ReceiveError(f"capture is missing {sorted(missing)}")
+    info = json.loads(contents["capture-info.json"])
+    for name, digest in info["sha256"].items():
+        if hashlib.sha256(contents[name]).hexdigest() != digest:
+            raise ReceiveError(f"{name} does not match its checksum in capture-info.json")
+    for name, data in contents.items():
+        (out_dir / name).write_bytes(data)
+    return info
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("b64", type=Path)
+    parser.add_argument("--md5", required=True, help="md5 printed by capture-environment.py on the host")
+    parser.add_argument("--out", type=Path, required=True)
+    args = parser.parse_args(argv)
+    try:
+        info = receive(args.b64, args.md5, args.out)
+    except (ReceiveError, OSError) as error:
+        print(f"receive-error: {error}", file=sys.stderr)
+        return 2
+    c = info["counts"]
+    print(f"verified {info['name']} (captured {info['captured_at']}): python {info['python_version']}, "
+          f"{c['conda_packages']} conda packages, {c['pip_only_packages']} pip-only, "
+          f"{c['python_distributions']} Python distributions")
+    for warning in info.get("warnings", []):
+        print(f"warning: {warning}")
+    out = args.out
+    print("next:\n  python3 scripts/build-candidate-from-env-artifacts.py --name {n} \\\n"
+          "    --environment-yml {o}/environment.yml --conda-list-json {o}/conda-list.json \\\n"
+          "    --requirements-txt {o}/requirements.txt --conda-bin <conda> \\\n"
+          "    --prefer-conda-available --target-subdir linux-64 --pin-versions --output {o}/{n}.yml".format(
+              n=info["name"], o=out))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
