@@ -113,15 +113,35 @@ fidelity wrinkle worth disclosing in anything handed to Cyber.
 ## Capturing an environment that already exists
 
 Do **not** hand-build a candidate from `conda-meta` filenames or a plain
-`conda env export`. Capture three files where the environment lives, then build
-the candidate with **`--pin-versions`**:
+`conda env export`. Capture the environment where it lives with
+`scripts/capture-environment.py`, verify it here with
+`scripts/receive-environment-capture.py`, then build the candidate with
+**`--pin-versions`**.
+
+```bash
+# On the host (e.g. the MIP). Standard library only, Python 3.6+, so the
+# RHEL 8 system Python works; no conda or pip needed.
+/usr/libexec/platform-python capture-environment.py <env-prefix> --name <name>
+# -> <name>-capture.tar.gz and .b64, plus the md5 and the chunk commands
+
+# Here, after copying the .b64 out:
+python3 scripts/receive-environment-capture.py <name>-capture.b64 --md5 <md5> --out <dir>
+```
+
+`capture-environment.py` reads `conda-meta/*.json` and the `.dist-info` /
+`.egg-info` metadata directly, so it works when the environment's `conda`
+launcher or `pip` is broken. It captures the conda list, channels, every
+Python distribution (including pip, setuptools and wheel), the dependency
+graph (`conda-meta-records.json`) and `conda-meta/history`. Checked against
+`conda list --json` and `importlib.metadata` on a real environment: identical.
+The receiver rejects a copy whose md5 or per-file checksums do not match.
 
 ```bash
 python3 scripts/build-candidate-from-env-artifacts.py \
   --name <candidate-name> \
-  --environment-yml <env>.environment.yml \
-  --conda-list-json <env>.conda-list.json \
-  --requirements-txt <env>.requirements.txt \
+  --environment-yml <dir>/environment.yml \
+  --conda-list-json <dir>/conda-list.json \
+  --requirements-txt <dir>/requirements.txt \
   --conda-bin <path-to-conda> \
   --prefer-conda-available --target-subdir linux-64 \
   --pin-versions \
@@ -139,14 +159,13 @@ micromamba, and internet access) and keeps a package on conda only when conda
 can supply it. `--env-prefix` mode also exists but calls `pip freeze`, which
 fails in environments with a broken pip.
 
-**Capturing on the MIP** (no conda on the host, pip broken in many
-environments): `$ENV/bin/conda` is a launcher that needs `python` on PATH, so
-run `$ENV/bin/python $ENV/bin/conda env export -p $ENV` and
-`... conda list -p $ENV --json`. Build the Python list with
-`$ENV/bin/python -I` and `importlib.metadata` (`-I` keeps the user's
-`~/.local` packages out), including pip, setuptools and wheel. Bring files out
-with gzip and base64 in chunks small enough to fit the terminal window, and
-check the md5 on both sides.
+**Copying through a terminal** (no file transfer off the MIP): use chunks small
+enough to fit the window; 40-line chunks overflowed a PuTTY window and lost
+lines, 30 fitted. `capture-environment.py --chunk-lines N` changes the size.
+If a capture must be done by hand instead: `$ENV/bin/conda` is a launcher that
+needs `python` on PATH, so run `$ENV/bin/python $ENV/bin/conda ...`, and build
+the Python list with `$ENV/bin/python -I` (`-I` keeps the user's `~/.local`
+packages out).
 
 **Exact pins, no build strings.** In conda, `name=0.4` is a prefix match that
 also accepts 0.4.2; `name==0.4` is exact. A build string that no longer exists
