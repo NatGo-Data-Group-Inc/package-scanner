@@ -17,7 +17,7 @@ Standard library only.
 Output in the current directory (or --output-dir):
   <name>-capture.tar.gz   the capture
   <name>-capture.b64      the same, base64 text for copying through a terminal
-and the md5 plus the chunk commands to copy it out are printed.
+and the sha256 plus the chunk commands to copy it out are printed.
 
 The archive contains the three files build-candidate-from-env-artifacts.py
 reads (environment.yml, conda-list.json, requirements.txt) plus
@@ -39,7 +39,7 @@ import re
 import sys
 import tarfile
 
-TOOL_VERSION = "2"
+TOOL_VERSION = "3"
 CHANNEL_URL_PREFIXES = ("https://conda.anaconda.org/", "http://conda.anaconda.org/",
                         "https://repo.anaconda.com/", "http://repo.anaconda.com/")
 
@@ -218,7 +218,7 @@ def build_capture(prefix, name):
 
 
 def write_archive(files, path):
-    """Deterministic tar.gz: fixed mtimes and owners, so the md5 depends only on content."""
+    """Deterministic tar.gz: fixed mtimes and owners, so the fingerprint depends only on content."""
     raw = io.BytesIO()
     with tarfile.open(fileobj=raw, mode="w", format=tarfile.USTAR_FORMAT) as tar:
         for name in sorted(files):
@@ -259,7 +259,8 @@ def main(argv=None):
         args.name, info["python_version"], c["conda_packages"], c["pip_only_packages"], c["python_distributions"]))
     for warning in info["warnings"]:
         print("warning: " + warning)
-    print("md5 {}  {}".format(hashlib.md5(blob).hexdigest(), os.path.basename(archive)))
+    # sha256, not md5: FIPS-mode hosts (such as MIP RHEL 8) refuse md5 in Python
+    print("sha256 {}  {}".format(hashlib.sha256(blob).hexdigest(), os.path.basename(archive)))
     print("{} lines in {}; copy them out in {} chunks:".format(
         len(lines), os.path.basename(b64), (len(lines) + args.chunk_lines - 1) // args.chunk_lines))
     for start in range(1, len(lines) + 1, args.chunk_lines):

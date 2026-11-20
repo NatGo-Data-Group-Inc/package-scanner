@@ -12,7 +12,7 @@ Give library paths in .libPaths() order: when a package is in several, the
 first one wins, as it does in R.
 
 Output in the current directory (or --output-dir):
-  <name>-capture.tar.gz / .b64, plus the md5 and the chunk commands.
+  <name>-capture.tar.gz / .b64, plus its sha256.
 The archive contains:
   renv.lock            the effective library as an renv lockfile (the R pipeline's input)
   r-packages.csv       every package in every library, including shadowed copies
@@ -33,7 +33,7 @@ import re
 import sys
 import tarfile
 
-TOOL_VERSION = "1"
+TOOL_VERSION = "2"
 DEP_FIELDS = ("Depends", "Imports", "LinkingTo")
 KEEP_FIELDS = ("Package", "Version", "Priority", "Repository", "NeedsCompilation", "Built", "License", "Title",
                "biocViews", "RemoteType", "RemoteHost", "RemoteRepo", "RemoteUsername", "RemoteRef", "RemoteSha",
@@ -96,7 +96,14 @@ def read_library(libpath):
     except OSError as error:
         return packages, ["cannot read library {}: {}".format(libpath, error)]
     warnings = []
+    hidden = [e for e in entries if e.startswith(".")]
+    if hidden:
+        # renv keeps backups such as .renv-backup-42-jsonlite... inside the library;
+        # R never loads hidden folders, so neither does the capture.
+        warnings.append("{}: skipped {} hidden folder(s), e.g. {}".format(libpath, len(hidden), ", ".join(hidden[:3])))
     for entry in entries:
+        if entry.startswith("."):
+            continue
         desc_path = os.path.join(libpath, entry, "DESCRIPTION")
         if not os.path.isfile(desc_path):
             continue
@@ -242,7 +249,7 @@ BASE_PACKAGES = {"base", "compiler", "datasets", "graphics", "grDevices", "grid"
 
 
 def write_archive(files, path):
-    """Deterministic tar.gz: fixed mtimes and owners, so the md5 depends only on content."""
+    """Deterministic tar.gz: fixed mtimes and owners, so the fingerprint depends only on content."""
     raw = io.BytesIO()
     with tarfile.open(fileobj=raw, mode="w", format=tarfile.USTAR_FORMAT) as tar:
         for name in sorted(files):
@@ -285,7 +292,8 @@ def main(argv=None):
     print("build skew vs R {}: {} packages, {} with compiled code".format(args.r_version, c["build_skew"], c["build_skew_compiled"]))
     for warning in info["warnings"]:
         print("warning: " + warning[:300])
-    print("md5 {}  {}".format(hashlib.md5(blob).hexdigest(), os.path.basename(archive)))
+    # sha256, not md5: FIPS-mode hosts (such as MIP RHEL 8) refuse md5 in Python
+    print("sha256 {}  {}".format(hashlib.sha256(blob).hexdigest(), os.path.basename(archive)))
     print("{} lines in {}".format(len(lines), os.path.basename(b64)))
     return 0
 
