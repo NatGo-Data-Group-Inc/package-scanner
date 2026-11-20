@@ -18,7 +18,10 @@ import sys
 import tarfile
 from pathlib import Path
 
-EXPECTED = {"capture-info.json", "conda-list.json", "environment.yml", "requirements.txt", "conda-meta-records.json"}
+EXPECTED = {
+    "capture-environment.py": {"capture-info.json", "conda-list.json", "environment.yml", "requirements.txt", "conda-meta-records.json"},
+    "capture-r-library.py": {"capture-info.json", "renv.lock", "r-packages.csv", "build-skew.csv", "installed-packages.csv"},
+}
 
 
 class ReceiveError(Exception):
@@ -45,10 +48,15 @@ def receive(b64_path: Path, expected_md5: str, out_dir: Path) -> dict:
             if not member.isfile() or "/" in member.name or member.name.startswith(".."):
                 raise ReceiveError(f"unexpected archive member {member.name!r}")
         contents = {m.name: tar.extractfile(m).read() for m in members}
-    missing = EXPECTED - set(contents)
+    if "capture-info.json" not in contents:
+        raise ReceiveError("capture is missing capture-info.json")
+    info = json.loads(contents["capture-info.json"])
+    expected = EXPECTED.get(info.get("tool"))
+    if expected is None:
+        raise ReceiveError(f"unrecognised capture tool {info.get('tool')!r}")
+    missing = expected - set(contents)
     if missing:
         raise ReceiveError(f"capture is missing {sorted(missing)}")
-    info = json.loads(contents["capture-info.json"])
     for name, digest in info["sha256"].items():
         if hashlib.sha256(contents[name]).hexdigest() != digest:
             raise ReceiveError(f"{name} does not match its checksum in capture-info.json")
@@ -69,6 +77,15 @@ def main(argv=None) -> int:
         print(f"receive-error: {error}", file=sys.stderr)
         return 2
     c = info["counts"]
+    if info["tool"] == "capture-r-library.py":
+        print(f"verified {info['name']} (captured {info['captured_at']}): R {info['running_r_version']}, "
+              f"{c['effective_packages']} effective packages, {c['locked_packages']} in renv.lock, "
+              f"build skew {c['build_skew']} ({c['build_skew_compiled']} with compiled code)")
+        for warning in info.get("warnings", []):
+            print(f"warning: {warning[:300]}")
+        print(f"next (as-is scan): python3 scripts/scan-r-vulnerabilities.py --installed-packages-file {args.out}/installed-packages.csv "
+              f"--lock-file {args.out}/renv.lock --out-file {args.out}/osv-report.json")
+        return 0
     print(f"verified {info['name']} (captured {info['captured_at']}): python {info['python_version']}, "
           f"{c['conda_packages']} conda packages, {c['pip_only_packages']} pip-only, "
           f"{c['python_distributions']} Python distributions")
