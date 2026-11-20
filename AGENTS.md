@@ -346,11 +346,12 @@ Verify before relying on any of these; they are as of commit `cd27b79`.
    `run-python-ecs-task.sh` strips `cuda*`/`cudnn*` entries from
    `environment.yml` when `PYTHON_CPU_ONLY=true` (the default), so packages
    such as `cudatoolkit` are neither solved nor scanned.
-10. **The R scan skips "recommended" packages.** `scan-r-vulnerabilities.py`
-   (`SKIP_PRIORITIES`) skips both `base` and `recommended`. Base packages are
-   part of R, but recommended ones (`Matrix`, `MASS`, `survival`, `nlme`,
-   `mgcv` ...) are ordinary CRAN packages that are updated independently and
-   can carry advisories. Not yet fixed.
+10. **The R scan skipped "recommended" packages.** `scan-r-vulnerabilities.py`
+   skipped both `base` and `recommended`. Recommended packages (`Matrix`,
+   `MASS`, `survival`, `nlme`, `mgcv` ...) are ordinary CRAN packages updated
+   independently of R. **Fixed in code:** only `base` is skipped now (on a
+   real library, 123 packages queried instead of 108). Takes effect in the R
+   container once its image is updated; the as-is path runs it directly.
 
 ---
 
