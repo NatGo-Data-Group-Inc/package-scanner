@@ -82,9 +82,13 @@ def source_of(desc):
     remote = (desc.get("RemoteType") or "").lower()
     if remote in ("github", "gitlab", "bitbucket", "git", "url", "local"):
         return remote.capitalize() if remote != "url" else "URL"
-    if desc.get("biocViews") or (desc.get("Repository") or "").lower().startswith("bioc"):
+    repository = (desc.get("Repository") or "").strip()
+    # Some CRAN packages (e.g. recipes) carry a biocViews field; an explicit
+    # CRAN repository wins. Bioconductor needs a Bioconductor repository, or a
+    # non-empty biocViews with no repository at all.
+    if repository.lower().startswith("bioc") or (not repository and (desc.get("biocViews") or "").strip()):
         return "Bioconductor"
-    if desc.get("Repository"):
+    if repository:
         return "Repository"
     return "Unknown"
 

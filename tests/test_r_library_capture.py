@@ -40,6 +40,8 @@ def make_libraries(root: Path):
     package(shared, "glue", "1.7.0", built_r="4.1.3", compiled="no", Repository="CRAN")     # pure R, built for 4.1
     package(shared, "aws.s3", "0.3.22", built_r="4.1.3", Repository="CRAN", Imports="httr, xml2")
     package(shared, "limma", "3.58.1", built_r="4.1.3", compiled="yes", biocViews="Software")
+    package(project, "recipes", "1.3.2", Repository="CRAN", biocViews="")      # CRAN package with an empty biocViews field
+    package(project, "tagged", "1.0.0", Repository="CRAN", biocViews="Software")  # CRAN repository wins over biocViews
     package(shared, "mytool", "0.1.0", RemoteType="github", RemoteUsername="someone", RemoteRepo="mytool", RemoteSha="abc123")
     package(system, "stats", "4.4.0", Priority="base", compiled=None)
     package(system, "MASS", "7.3-60", Priority="recommended", Repository="CRAN", compiled="yes")
@@ -84,6 +86,8 @@ class CaptureR(unittest.TestCase):
         self.assertNotIn("stats", pkgs)                       # base ships with R
         self.assertEqual(pkgs["MASS"]["Source"], "Repository")
         self.assertEqual(pkgs["limma"]["Source"], "Bioconductor")
+        self.assertEqual(pkgs["recipes"]["Source"], "Repository")
+        self.assertEqual(pkgs["tagged"]["Source"], "Repository")
         self.assertEqual(pkgs["mytool"]["Source"], "Github")
         self.assertEqual(pkgs["mytool"]["RemoteSha"], "abc123")
         self.assertEqual(pkgs["dplyr"]["Imports"], ["rlang (>= 1.1.7)", "vctrs (>= 0.6.4)", "glue"])
