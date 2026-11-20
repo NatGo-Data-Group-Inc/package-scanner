@@ -96,6 +96,21 @@ class CaptureR(unittest.TestCase):
         self.assertEqual(next(r["Repository"] for r in rows if r["Package"] == "limma"), "Bioconductor")
         self.assertEqual(len(rows), self.info["counts"]["distinct_package_versions"])
 
+    def test_hidden_backup_folders_are_skipped_and_cannot_shadow(self):
+        backup = self.libs[0] / ".renv-backup-42-jsonlite2a1dcad059"
+        backup.mkdir()
+        (backup / "DESCRIPTION").write_text("Package: jsonlite\nVersion: 0.0.1\nBuilt: R 4.1.3; x; 2020-01-01; unix\n")
+        package(self.libs[1], "jsonlite", "1.8.8", built_r="4.1.3", compiled="yes", Repository="CRAN")
+        files, info = capture.build_capture([str(p) for p in self.libs], "posit-test", "4.4.0")
+        lock = json.loads(files["renv.lock"])
+        self.assertEqual(lock["Packages"]["jsonlite"]["Version"], "1.8.8")
+        self.assertTrue(any("skipped 1 hidden folder" in w for w in info["warnings"]))
+
+    def test_no_md5_anywhere_in_the_capture_scripts(self):
+        # MIP hosts run in FIPS mode, where hashlib.md5 raises in the system Python.
+        for script in ("capture-r-library.py", "capture-environment.py"):
+            self.assertNotIn("hashlib.md5", (ROOT / "scripts" / script).read_text())
+
     def test_non_packages_are_skipped(self):
         self.assertNotIn("translations", {r["package"] for r in self.rows})
 
@@ -115,8 +130,8 @@ class CaptureR(unittest.TestCase):
         result = subprocess.run([sys.executable, str(CAPTURE), *map(str, self.libs), "--name", "rt", "--r-version", "4.4.0",
                                  "--output-dir", str(self.tmp)], capture_output=True, text=True, check=True)
         self.assertIn("build skew vs R 4.4.0: 4 packages, 2 with compiled code", result.stdout)
-        md5 = next(l.split()[1] for l in result.stdout.splitlines() if l.startswith("md5 "))
-        received = subprocess.run([sys.executable, str(RECEIVE), str(self.tmp / "rt-capture.b64"), "--md5", md5, "--out", str(out)],
+        md5 = next(l.split()[1] for l in result.stdout.splitlines() if l.startswith("sha256 "))
+        received = subprocess.run([sys.executable, str(RECEIVE), str(self.tmp / "rt-capture.b64"), "--sha256", md5, "--out", str(out)],
                                   capture_output=True, text=True)
         self.assertEqual(received.returncode, 0, received.stderr)
         self.assertIn("verified rt", received.stdout)

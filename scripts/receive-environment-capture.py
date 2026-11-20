@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Verify and unpack a capture made by capture-environment.py.
 
-    python3 scripts/receive-environment-capture.py <name>-capture.b64 --md5 <md5 printed on the host> --out <dir>
+    python3 scripts/receive-environment-capture.py <name>-capture.b64 --sha256 <sha256 printed on the host> --out <dir>
 
-Decodes the base64 text (copied out of a terminal in chunks), checks the md5
+Decodes the base64 text (copied out of a terminal), checks the sha256 (or md5)
 against the one capture-environment.py printed, refuses anything that does not
 match, unpacks safely, re-checks every file against capture-info.json, and
 prints the build-candidate command to run next.
@@ -28,17 +28,17 @@ class ReceiveError(Exception):
     pass
 
 
-def receive(b64_path: Path, expected_md5: str, out_dir: Path) -> dict:
+def receive(b64_path: Path, expected_digest: str, out_dir: Path, algorithm: str = "sha256") -> dict:
     text = "".join(b64_path.read_text(encoding="ascii", errors="strict").split())
     try:
         blob = base64.b64decode(text, validate=True)
     except (binascii.Error, ValueError) as error:
         raise ReceiveError(f"not valid base64 ({error}); a chunk was probably cut or doubled") from error
-    actual = hashlib.md5(blob).hexdigest()
-    if actual != expected_md5.strip().lower():
+    actual = hashlib.new(algorithm, blob).hexdigest()
+    if actual != expected_digest.strip().lower():
         lines = sum(1 for line in b64_path.read_text().splitlines() if line.strip())
         raise ReceiveError(
-            f"md5 mismatch: got {actual}, expected {expected_md5}. {lines} non-empty lines received; "
+            f"{algorithm} mismatch: got {actual}, expected {expected_digest}. {lines} non-empty lines received; "
             "compare with the line count the host printed to find the missing or doubled chunk"
         )
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -68,11 +68,13 @@ def receive(b64_path: Path, expected_md5: str, out_dir: Path) -> dict:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("b64", type=Path)
-    parser.add_argument("--md5", required=True, help="md5 printed by capture-environment.py on the host")
+    digest = parser.add_mutually_exclusive_group(required=True)
+    digest.add_argument("--sha256", help="sha256 printed by the capture script on the host")
+    digest.add_argument("--md5", help="md5, for captures made by older versions of the capture scripts")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
-        info = receive(args.b64, args.md5, args.out)
+        info = receive(args.b64, args.sha256 or args.md5, args.out, "sha256" if args.sha256 else "md5")
     except (ReceiveError, OSError) as error:
         print(f"receive-error: {error}", file=sys.stderr)
         return 2

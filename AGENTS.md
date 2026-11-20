@@ -122,10 +122,10 @@ Do **not** hand-build a candidate from `conda-meta` filenames or a plain
 # On the host (e.g. the MIP). Standard library only, Python 3.6+, so the
 # RHEL 8 system Python works; no conda or pip needed.
 /usr/libexec/platform-python capture-environment.py <env-prefix> --name <name>
-# -> <name>-capture.tar.gz and .b64, plus the md5 and the chunk commands
+# -> <name>-capture.tar.gz and .b64, plus its sha256
 
 # Here, after copying the .b64 out:
-python3 scripts/receive-environment-capture.py <name>-capture.b64 --md5 <md5> --out <dir>
+python3 scripts/receive-environment-capture.py <name>-capture.b64 --sha256 <sha256> --out <dir>
 ```
 
 `capture-environment.py` reads `conda-meta/*.json` and the `.dist-info` /
@@ -134,7 +134,7 @@ launcher or `pip` is broken. It captures the conda list, channels, every
 Python distribution (including pip, setuptools and wheel), the dependency
 graph (`conda-meta-records.json`) and `conda-meta/history`. Checked against
 `conda list --json` and `importlib.metadata` on a real environment: identical.
-The receiver rejects a copy whose md5 or per-file checksums do not match.
+The receiver rejects a copy whose sha256 or per-file checksums do not match.
 
 ```bash
 python3 scripts/build-candidate-from-env-artifacts.py \
@@ -165,12 +165,18 @@ the whole file in one go instead of in chunks: detach from tmux (`Ctrl+B`, then
 `D`), right-click PuTTY's title bar and choose Clear Scrollback, `cat` the
 `.b64` file, then title bar, Copy All to Clipboard. Paste into a file here and
 run the receiver; non-base64 lines (prompts, the `cat` command) are harmless
-because the md5 check proves the content. `tmux attach` returns to the session.
+because the sha256 check proves the content (the receiver keeps only the
+unbroken run of base64 lines). `tmux attach` returns to the session.
 PuTTY keeps 2,000 lines of scrollback by default; a 1,093-package environment
 was 1,459 lines. Getting a script *onto* the MIP works the same way in
 reverse: `cat > file.b64 <<'EOF'`, paste, `EOF`, `base64 -d file.b64 | gunzip >
-script.py`, and compare `md5sum` with the md5 computed here. RHEL 8 hosts have
-Python 3.6 at `/usr/libexec/platform-python`.
+script.py`, and compare `sha256sum` with the sha256 computed here. Give the
+heredoc start line, the block and `EOF` as one paste; pasting the start line
+twice puts it inside the file. RHEL 8 hosts have Python 3.6 at
+`/usr/libexec/platform-python`. **MIP hosts run in FIPS mode**: `hashlib.md5`
+raises in that Python, so the capture scripts use sha256 (the `md5sum`
+command still works). R libraries contain renv's hidden `.renv` and
+`.renv-backup-*` folders; the R capture skips them, as R does.
 
 **Stray `site-packages` folders.** `capture-environment.py` reads every
 `lib/python*/site-packages` folder and warns about any that do not match the

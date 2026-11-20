@@ -151,7 +151,7 @@ class RoundTrip(unittest.TestCase):
         prefix = make_env(self.tmp)
         result = subprocess.run([sys.executable, str(CAPTURE), str(prefix), "--name", "rt", "--output-dir", str(self.tmp)],
                                 capture_output=True, text=True, check=True)
-        self.md5 = next(l.split()[1] for l in result.stdout.splitlines() if l.startswith("md5 "))
+        self.md5 = next(l.split()[1] for l in result.stdout.splitlines() if l.startswith("sha256 "))
         self.stdout = result.stdout
         self.b64 = self.tmp / "rt-capture.b64"
 
@@ -159,14 +159,14 @@ class RoundTrip(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_host_output_gives_md5_and_chunk_commands(self):
-        self.assertRegex(self.md5, r"^[0-9a-f]{32}$")
+        self.assertRegex(self.md5, r"^[0-9a-f]{64}$")
         self.assertRegex(self.stdout, r"clear; sed -n '1,\d+p' rt-capture\.b64")
         lines = len(self.b64.read_text().splitlines())
         self.assertIn(f"{lines} lines in rt-capture.b64", self.stdout)
 
     def test_receive_verifies_and_unpacks(self):
         out = self.tmp / "out"
-        result = subprocess.run([sys.executable, str(RECEIVE), str(self.b64), "--md5", self.md5, "--out", str(out)],
+        result = subprocess.run([sys.executable, str(RECEIVE), str(self.b64), "--sha256", self.md5, "--out", str(out)],
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("verified rt", result.stdout)
@@ -178,7 +178,7 @@ class RoundTrip(unittest.TestCase):
     def test_missing_chunk_is_rejected(self):
         lines = self.b64.read_text().splitlines()
         self.b64.write_text("\n".join(lines[:-1]) + "\n")
-        result = subprocess.run([sys.executable, str(RECEIVE), str(self.b64), "--md5", self.md5, "--out", str(self.tmp / "o")],
+        result = subprocess.run([sys.executable, str(RECEIVE), str(self.b64), "--sha256", self.md5, "--out", str(self.tmp / "o")],
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 2)
         self.assertIn("receive-error", result.stderr)
@@ -193,7 +193,7 @@ class RoundTrip(unittest.TestCase):
         bad = self.tmp / "bad.b64"
         bad.write_text(base64.b64encode(blob).decode())
         with self.assertRaises(receive.ReceiveError):
-            receive.receive(bad, hashlib.md5(blob).hexdigest(), self.tmp / "o")
+            receive.receive(bad, hashlib.sha256(blob).hexdigest(), self.tmp / "o")
 
 
 if __name__ == "__main__":
