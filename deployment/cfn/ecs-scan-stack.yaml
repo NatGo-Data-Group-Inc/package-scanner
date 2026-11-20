@@ -615,6 +615,12 @@ Resources:
                 Resource:
                   - !Ref RLinuxAmd64TaskDefinition
                   - !Ref RWindowsTaskDefinition
+                  # Any revision of the stack's own task families. The orchestrator runs
+                  # the latest revision, and register-r-task-def.sh registers new ones
+                  # outside CloudFormation; without these, every R build is refused
+                  # (ECS.AccessDeniedException on ecs:RunTask). Matches the Python stack.
+                  - !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${EnvironmentName}-r-linux-amd64:*'
+                  - !Sub 'arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/${EnvironmentName}-r-windows-amd64:*'
               - Effect: Allow
                 Action: ecs:RunTask
                 Resource:

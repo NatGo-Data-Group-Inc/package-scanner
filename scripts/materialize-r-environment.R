@@ -389,7 +389,10 @@ ensure_bootstrap_packages <- function(packages, include_in_generated_lock = FALS
     paste(missing, collapse = ", ")
   ))
   remove_stale_install_locks()
-  install.packages(missing, lib = library_dir, dependencies = TRUE, Ncpus = 1)
+  # Required dependencies only (Depends/Imports/LinkingTo). TRUE would also pull
+  # every Suggests tree (e.g. BiocManager -> testthat, rmarkdown, knitr, remotes)
+  # into the delivered library: 36 unrequested packages in a 17-package test.
+  install.packages(missing, lib = library_dir, dependencies = NA, Ncpus = 1)
 
   if (include_in_generated_lock) {
     snapshot_requested_environment()
@@ -672,6 +675,62 @@ if (!is.null(restore_error)) {
 }
 
 force_realized_library_packages(c("BiocManager"))
+
+# The build image installs tooling (renv, ggplot2, their dependencies) into R's
+# own library, and renv treats that library as available. A requested package
+# whose version the image already has is therefore not put into the realized
+# library, and the delivered bundle is missing it: it then fails on any host
+# whose R library lacks it (e.g. cli, lifecycle, R6, vctrs for dplyr). Copy such
+# packages in (same version, same R, same platform), install any other gaps at
+# the locked version, and refuse to deliver an incomplete library.
+realize_requested_into_library <- function(packages) {
+  base_pkgs <- rownames(installed.packages(lib.loc = .Library, priority = "base", noCache = TRUE))
+  in_library <- function() rownames(installed.packages(lib.loc = library_dir, noCache = TRUE))
+  missing <- setdiff(setdiff(packages, base_pkgs), in_library())
+  if (!length(missing)) {
+    return(invisible(character()))
+  }
+  system_pkgs <- installed.packages(lib.loc = system_lib, noCache = TRUE)
+  copied <- character()
+  for (pkg in missing) {
+    wanted <- tryCatch(lock_entries[[pkg]]$Version, error = function(e) NULL)
+    have <- if (pkg %in% rownames(system_pkgs)) unname(system_pkgs[pkg, "Version"]) else NA_character_
+    if (!is.na(have) && (is.null(wanted) || identical(as.character(have), as.character(wanted)))) {
+      if (isTRUE(file.copy(file.path(system_lib, pkg), library_dir, recursive = TRUE, copy.date = TRUE))) {
+        copied <- c(copied, pkg)
+      }
+    }
+  }
+  still <- setdiff(missing, in_library())
+  for (pkg in still) {
+    wanted <- tryCatch(lock_entries[[pkg]]$Version, error = function(e) NULL)
+    spec <- if (is.null(wanted)) pkg else sprintf("%s@%s", pkg, wanted)
+    message(sprintf("Installing %s into the realized library (missing after restore).", spec))
+    tryCatch(
+      renv::install(spec, library = library_dir, prompt = FALSE, dependencies = FALSE),
+      error = function(e) message(sprintf("Could not install %s: %s", spec, conditionMessage(e)))
+    )
+  }
+  writeLines(copied, file.path(output_dir, "realized-from-build-image.txt"))
+  if (length(copied)) {
+    message(sprintf(
+      "Copied %d package(s) from the build image's library into the realized library: %s",
+      length(copied), paste(copied, collapse = ", ")
+    ))
+  }
+  incomplete <- setdiff(setdiff(packages, base_pkgs), in_library())
+  if (length(incomplete)) {
+    write_root_cause(
+      sprintf("Realized library is incomplete: %d requested package(s) missing.", length(incomplete)),
+      c(paste("Missing:", paste(incomplete, collapse = ", ")),
+        "A delivered library must contain every requested package; see restore.log.")
+    )
+    stop(sprintf("realized library is missing requested packages: %s", paste(incomplete, collapse = ", ")))
+  }
+  invisible(copied)
+}
+
+realize_requested_into_library(requested_packages)
 
 project_library <- normalizePath(library_dir, winslash = "/", mustWork = FALSE)
 installed <- as.data.frame(
