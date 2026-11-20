@@ -35,6 +35,9 @@ It runs in the NatGo dev AWS account, not in the MIP itself.
 | Linux worker image | Rocky Linux 8, glibc 2.28, utility Python 3.11 |
 | Task family | `package-scanner-dev-python-linux-amd64` |
 | Task revision (10 Nov 2026) | 41, image tag `rhel8-py313-requested-summaryfix-16130da` |
+| R ECS stack | `cyber-scanner-dev-r-ecs`, lock token `20260407-r-preflight` (differs from Python's) |
+| R Linux task revision (20 Nov 2026) | 36, image tag `20260417T003853Z-lockfix-realize-20261120b` (the 17 Apr image plus one layer with the current `materialize-r-environment.R` and `scan-r-vulnerabilities.py`) |
+| R Linux workers | ASG `package-scanner-dev-r-linux-amd64`, m7i.xlarge (launch template v5); kept at 0/0/0 between builds to avoid idle cost, raised to max 1 to build (`start-r-scan.sh` then sets min/desired 1) |
 
 Always verify the live image digest and task-definition revision before
 trusting these. A rebuilt image is not active until the running ECS task shows
@@ -356,8 +359,31 @@ Verify before relying on any of these; they are as of commit `cd27b79`.
    skipped both `base` and `recommended`. Recommended packages (`Matrix`,
    `MASS`, `survival`, `nlme`, `mgcv` ...) are ordinary CRAN packages updated
    independently of R. **Fixed in code:** only `base` is skipped now (on a
-   real library, 123 packages queried instead of 108). Takes effect in the R
-   container once its image is updated; the as-is path runs it directly.
+   real library, 123 packages queried instead of 108). Live in the R
+   container from R task revision 35.
+11. **The R orchestrator could not launch R tasks.** Its role allowed
+   `ecs:RunTask` only on the task definition revision the stack created
+   (`r-linux-amd64:2`), while the orchestrator runs the latest revision, so
+   every R build was refused (`ECS.AccessDeniedException`) and retried
+   indefinitely. The Python template already allowed `:*`. **Fixed** live
+   (20 Nov 2026) and in `deployment/cfn/ecs-scan-stack.yaml`.
+12. **Delivered R libraries were missing packages.** The R image installs
+   tooling (renv, BiocManager, ggplot2, isoband, rlang, vctrs and their
+   dependencies) into R's own library, and the build treats that library as
+   available, so locked packages at versions the image already had were left
+   out of the delivered library while the run reported success. A 17-package
+   test delivered 13 (no `cli`, `lifecycle`, `R6`, `vctrs`; `dplyr` cannot
+   load). **R bundles built before revision 35 may be incomplete.** **Fixed:**
+   `materialize-r-environment.R` copies such packages in (same version) or
+   installs them, and fails the run if any requested package is still
+   missing (`realized-from-build-image.txt` lists what was copied). Also,
+   bootstrap installs pulled every `Suggests` tree (37 unrequested packages
+   for `BiocManager`); now required dependencies only. Live from R task
+   revision 36.
+
+Still open on the R side: the bootstrap step installs from Posit's
+"latest" rather than the lock's dated snapshot; and despite its source-only
+settings, the build receives Posit's pre-built Linux binaries.
 
 ---
 
