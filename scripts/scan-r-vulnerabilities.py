@@ -13,7 +13,10 @@ DEFAULT_OSV_VULN_BASE_URL = "https://api.osv.dev/v1/vulns"
 DEFAULT_NVD_API_BASE_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 CRAN_ECOSYSTEM = "CRAN"
 BIOCONDUCTOR_ECOSYSTEM = "Bioconductor"
-SKIP_PRIORITIES = {"base", "recommended"}
+# Base packages are part of R itself and versioned with it. "Recommended"
+# packages (Matrix, MASS, survival, nlme, mgcv ...) are ordinary CRAN packages,
+# updated independently of R, so they are scanned like any other.
+SKIP_PRIORITIES = {"base"}
 
 
 def load_json(path: Path):
