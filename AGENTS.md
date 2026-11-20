@@ -179,6 +179,20 @@ with the wrong interpreter or a mistyped path). The first EFS environment had
 `lib/python3.13` and `lib/python3.1` folders beside `lib/python3.11`. They stay
 in the inventory because they are on disk; report them as clean-up items.
 
+**Capturing installed R libraries.** `scripts/capture-r-library.py` does the
+same for R: it reads each package's `DESCRIPTION` (no R or network needed,
+Python 3.6+) across the library paths given, in `.libPaths()` order, and writes
+`renv.lock` (effective library), `r-packages.csv` (every copy, with the R
+version each was built under), `build-skew.csv` (packages built under a
+different R minor version than the one running; compiled ones marked HIGH)
+and `installed-packages.csv` (every distinct version on disk). The receiver
+handles both capture types. As-is scan without installing anything:
+`scripts/scan-r-vulnerabilities.py --installed-packages-file
+<dir>/installed-packages.csv --lock-file <dir>/renv.lock --out-file
+<dir>/osv-report.json`. Matched `installed.packages()` exactly on a real
+library. Scan every distinct version, not only the effective copy: RStudio and
+Positron can see different library sets.
+
 If a capture must be done by hand instead: `$ENV/bin/conda` is a launcher that
 needs `python` on PATH, so run `$ENV/bin/python $ENV/bin/conda ...`, and build
 the Python list with `$ENV/bin/python -I` (`-I` keeps the user's `~/.local`
@@ -332,6 +346,11 @@ Verify before relying on any of these; they are as of commit `cd27b79`.
    `run-python-ecs-task.sh` strips `cuda*`/`cudnn*` entries from
    `environment.yml` when `PYTHON_CPU_ONLY=true` (the default), so packages
    such as `cudatoolkit` are neither solved nor scanned.
+10. **The R scan skips "recommended" packages.** `scan-r-vulnerabilities.py`
+   (`SKIP_PRIORITIES`) skips both `base` and `recommended`. Base packages are
+   part of R, but recommended ones (`Matrix`, `MASS`, `survival`, `nlme`,
+   `mgcv` ...) are ordinary CRAN packages that are updated independently and
+   can carry advisories. Not yet fixed.
 
 ---
 
