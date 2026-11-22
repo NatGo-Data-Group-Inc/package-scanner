@@ -36,7 +36,8 @@ It runs in the NatGo dev AWS account, not in the MIP itself.
 | Task family | `package-scanner-dev-python-linux-amd64` |
 | Task revision (10 Nov 2026) | 41, image tag `rhel8-py313-requested-summaryfix-16130da` |
 | R ECS stack | `cyber-scanner-dev-r-ecs`, lock token `20260407-r-preflight` (differs from Python's) |
-| R Linux task revision (20 Nov 2026) | 36, image tag `20260417T003853Z-lockfix-realize-20261120b` (the 17 Apr image plus one layer with the current `materialize-r-environment.R` and `scan-r-vulnerabilities.py`) |
+| Python Linux workers | ASG `package-scanner-dev-python-linux-amd64`, m7i.2xlarge; set to min/desired 0 on 22 Nov 2026 (it had idled at 1 since 18 Sep). No ECS capacity provider, so nothing scales it automatically: `start-python-scan.sh` raises it to 1 before a build, a direct Step Functions start does not. Nothing sets it back to 0 afterwards; do that by hand |
+| R Linux task revision (22 Nov 2026) | 38, image tag `20260417T003853Z-lockfix-archive-20261122b` (the 17 Apr image plus two layers: 20 Nov, current `materialize-r-environment.R` and `scan-r-vulnerabilities.py`; 22 Nov, CRAN-archive restore and two more evidence uploads) |
 | R Linux workers | ASG `package-scanner-dev-r-linux-amd64`, m7i.xlarge (launch template v5); kept at 0/0/0 between builds to avoid idle cost, raised to max 1 to build (`start-r-scan.sh` then sets min/desired 1) |
 
 Always verify the live image digest and task-definition revision before

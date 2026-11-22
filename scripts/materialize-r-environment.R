@@ -555,6 +555,55 @@ repo_requested_packages <- Filter(
   x = requested_packages
 )
 missing_from_repo <- setdiff(repo_requested_packages, union(installed_now, available_repo_packages))
+
+# A locked version that is no longer in the current index (withdrawn from CRAN,
+# or held back because newer releases need a newer R) can still be restored
+# from the repository's CRAN archive; renv::restore looks there itself. Accept
+# such a package only when that exact version's archive tarball exists, and
+# record it so reviewers can see which packages came from the archive.
+cran_archive_url <- function(pkg, version) {
+  if (is.null(version) || !nzchar(version)) {
+    return(NA_character_)
+  }
+  # renv::lockfile_read returns repositories as a named list of URLs
+  # (list(CRAN = "https://...")); the raw JSON form is a list of
+  # {Name, URL} objects. Accept either.
+  lock_repos <- if (identical(input_mode, "lockfile")) {
+    unlist(lapply(lock$R$Repositories %||% list(), function(repo) {
+      if (is.list(repo)) as.character(repo$URL %||% character()) else as.character(repo)
+    }), use.names = FALSE)
+  } else {
+    character()
+  }
+  repos <- unique(sub("/+$", "", c(lock_repos, unname(getOption("repos")))))
+  for (repo in repos[nzchar(repos)]) {
+    url <- sprintf("%s/src/contrib/Archive/%s/%s_%s.tar.gz", repo, pkg, pkg, version)
+    status <- tryCatch(
+      attr(curlGetHeaders(url, redirect = TRUE), "status"),
+      error = function(e) NA_integer_
+    )
+    if (isTRUE(status == 200L)) {
+      return(url)
+    }
+  }
+  NA_character_
+}
+if (length(missing_from_repo)) {
+  archive_urls <- vapply(
+    missing_from_repo,
+    function(pkg) cran_archive_url(pkg, lock_entries[[pkg]]$Version),
+    character(1)
+  )
+  from_archive <- missing_from_repo[!is.na(archive_urls)]
+  if (length(from_archive)) {
+    writeLines(
+      sprintf("%s %s %s", from_archive, vapply(from_archive, function(pkg) lock_entries[[pkg]]$Version, character(1)), archive_urls[from_archive]),
+      file.path(output_dir, "restored-from-cran-archive.txt")
+    )
+    message(sprintf("Restoring from the CRAN archive: %s", paste(from_archive, collapse = ", ")))
+  }
+  missing_from_repo <- setdiff(missing_from_repo, from_archive)
+}
 if (length(missing_from_repo)) {
   write_root_cause(
     sprintf("Requested packages unavailable before restore: %s", paste(missing_from_repo, collapse = ", ")),

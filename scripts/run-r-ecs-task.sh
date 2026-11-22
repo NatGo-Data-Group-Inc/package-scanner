@@ -221,6 +221,8 @@ upload_if_exists "${RUN_DIR}/renv-status.txt" "s3://${EVIDENCE_BUCKET}/${EVIDENC
 upload_if_exists "${RUN_DIR}/preflight-native-deps.txt" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/preflight-native-deps.txt"
 upload_if_exists "${RUN_DIR}/restore.log" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/restore.log"
 upload_if_exists "${RUN_DIR}/restore-root-cause.txt" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/r/${TARGET_PLATFORM}/${TS}/restore-root-cause.txt"
+upload_if_exists "${RUN_DIR}/realized-from-build-image.txt" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/r/${TARGET_PLATFORM}/${TS}/realized-from-build-image.txt"
+upload_if_exists "${RUN_DIR}/restored-from-cran-archive.txt" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/r/${TARGET_PLATFORM}/${TS}/restored-from-cran-archive.txt"
 upload_if_exists "${RUN_DIR}/materialization-summary.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/r/${TARGET_PLATFORM}/${TS}/materialization-summary.json"
 upload_if_exists "${RUN_DIR}/preflight-native-deps.json" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/traceability/r/${TARGET_PLATFORM}/${TS}/preflight-native-deps.json"
 upload_if_exists "${RUN_DIR}/environment-artifacts.tar.gz" "s3://${EVIDENCE_BUCKET}/${EVIDENCE_PREFIX}/env-artifacts/r/${TARGET_PLATFORM}/${TS}/environment-artifacts.tar.gz"
